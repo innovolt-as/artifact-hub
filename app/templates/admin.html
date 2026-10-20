@@ -9,6 +9,12 @@
     <p>Slipp filer her, eller <label for="file" class="link-like">velg filer</label></p>
     <input id="file" type="file" accept=".html,.htm,.zip" multiple hidden>
   </div>
+  <form id="linkForm" class="link-form">
+    <span class="muted small">…eller legg til en lenke til en ekstern app:</span>
+    <input name="title" placeholder="Navn" required maxlength="120">
+    <input name="url" type="url" placeholder="https://…" required>
+    <button class="small">Legg til lenke</button>
+  </form>
   <label class="check"><input type="checkbox" id="adminOnly"> Kun synlig for meg</label>
   <ul id="log" class="log"></ul>
 </section>
@@ -24,7 +30,7 @@
           <span class="muted small">{{ a.slug }} · {{ {'page':'side','app':'app','link':'ekstern'}[a.kind] }}</span></td>
       <td class="right">
         <button class="small edit" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}"
-                data-kind="{{ a.kind }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}">Rediger</button>
+                data-kind="{{ a.kind }}" data-url="{{ a.url if a.kind == 'link' else '' }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}">Rediger</button>
         <button class="small toggle" data-slug="{{ a.slug }}">{{ '🔒 privat' if a.admin_only else '🌐 delt' }}</button>
         <button class="small danger del" data-slug="{{ a.slug }}">Slett</button>
       </td>
@@ -46,6 +52,7 @@
       <span class="prefixed"><span class="muted">/a/</span><input name="new_slug" id="edSlug" maxlength="80" pattern="[a-z0-9][a-z0-9._\-]*"></span>
       <span class="muted small">Gamle lenker til denne adressen slutter å virke.</span>
     </label>
+    <label id="edUrlRow">URL<input name="url" id="edUrl" type="url" placeholder="https://…"></label>
     <label>Emoji<input name="emoji" id="edEmoji" maxlength="16" placeholder="f.eks. 📈"></label>
     <label>Bilde<input type="file" name="icon" id="edIcon" accept=".png,.jpg,.jpeg,.webp,.gif,.svg"></label>
     <label class="check" id="edRemoveRow"><input type="checkbox" name="remove_icon" id="edRemove" value="true"> Fjern bildet</label>
@@ -83,6 +90,16 @@ async function upload(file) {
 ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', e => [...e.dataTransfer.files].forEach(upload));
 input.addEventListener('change', () => [...input.files].forEach(upload));
+
+document.getElementById('linkForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  fd.append('admin_only', document.getElementById('adminOnly').checked ? 'true' : 'false');
+  const r = await fetch('/api/link', { method: 'POST', body: fd });
+  const j = await r.json().catch(() => ({}));
+  if (r.ok) { note(`✓ Lenke lagt til: ${fd.get('title')}`); setTimeout(() => location.reload(), 600); }
+  else note(`✗ ${j.detail || r.status}`, false);
+});
 
 async function post(url, slug) {
   const fd = new FormData(); fd.append('slug', slug);
@@ -124,7 +141,9 @@ document.querySelectorAll('.edit').forEach(b => b.onclick = () => {
   $('edTitle').value = current.title;
   $('edSlug').value = current.slug;
   $('edEmoji').value = current.emoji;
-  $('edSlugRow').hidden = current.kind === 'link';   // link cards have an external URL
+  $('edSlugRow').hidden = current.kind === 'link';   // link cards have an external URL instead
+  $('edUrlRow').hidden = current.kind !== 'link';
+  $('edUrl').value = current.url;
   $('edRemoveRow').hidden = !current.icon;
   $('edError').textContent = '';
   preview();

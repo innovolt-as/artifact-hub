@@ -60,7 +60,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 table.list { width: 100%; border-collapse: collapse; }
 table.list td { padding: 10px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
 table.list td a { font-weight: 600; }
-table.list td .small { display: block; }
+table.list td span.small { display: block; }
 td.right { text-align: right; white-space: nowrap; }
 button.small { font: inherit; font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); cursor: pointer; margin-left: 6px; }
 button.danger { color: var(--danger); }
@@ -78,3 +78,8 @@ td.icon-cell { width: 48px; }
 .editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .editor-actions .small { margin: 0; padding: 10px 14px; font-size: 14px; }
 .err { color: var(--danger); margin: 8px 0 0; min-height: 1em; }
+.link-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.link-form span { flex-basis: 100%; }
+.link-form input { flex: 1 1 160px; font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+.link-form button.small { margin: 0; padding: 7px 12px; font-size: 14px; }
+.editor [hidden] { display: none !important; }

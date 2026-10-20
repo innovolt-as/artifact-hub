@@ -806,6 +806,38 @@ def api_toggle_private(request: Request, slug: str = Form(...)):
     return JSONResponse({"ok": True, "admin_only": meta["admin_only"]})
 
 
+def _check_url(url: str) -> str:
+    url = url.strip()
+    if not re.match(r"^https?://[^\s/]+\.[^\s]+$", url):
+        raise HTTPException(400, "URL må starte med https:// og være en gyldig adresse")
+    return url
+
+
+@app.post("/api/link")
+def api_link(
+    request: Request,
+    title: str = Form(...),
+    url: str = Form(...),
+    admin_only: bool = Form(False),
+):
+    """Add an external link card (like recall.link.json) to the gallery."""
+    _upload_authorized(request)
+    title, url = title.strip(), _check_url(url)
+    if not title:
+        raise HTTPException(400, "Lenken må ha et navn")
+    slug = _slugify(title)
+    if not SLUG_RE.match(slug):
+        raise HTTPException(400, f"Ugyldig navn: {title}")
+    if _meta_path(slug):
+        raise HTTPException(409, f"Det finnes allerede noe som heter «{slug}»")
+    meta = {"title": title, "url": url}
+    if admin_only:
+        meta["admin_only"] = True
+    (ARTIFACTS_DIR / f"{slug}.link.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    log.info("Added link card %s -> %s", slug, url)
+    return JSONResponse({"ok": True, "slug": slug})
+
+
 @app.post("/api/edit")
 async def api_edit(
     request: Request,
@@ -815,6 +847,7 @@ async def api_edit(
     emoji: str = Form(""),
     icon: UploadFile | None = File(None),
     remove_icon: bool = Form(False),
+    url: str = Form(""),
 ):
     """Rename (title and/or address) and set the icon of an artifact or link card."""
     _upload_authorized(request)
@@ -836,7 +869,13 @@ async def api_edit(
         if len(icon_data) > MAX_ICON_BYTES:
             raise HTTPException(400, "Ikonet kan være maks 2 MB")
 
+    is_link = meta_path.name.endswith(".link.json")
+    if is_link and url.strip():
+        url = _check_url(url)
+
     meta = _read_meta(meta_path)
+    if is_link and url:
+        meta["url"] = url
     for key, value in (("title", title.strip()), ("emoji", emoji.strip()[:16])):
         if value:
             meta[key] = value

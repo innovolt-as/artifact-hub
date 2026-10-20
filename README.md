@@ -7,7 +7,7 @@ Liten FastAPI-app som hoster Claude-artifacts (HTML-sider og små apper) bak inn
 - **Admin** på `/admin` – drag-and-drop-opplasting, slett, gjør privat/delt, endre navn/adresse og ikon (bilde eller emoji)
 - **`scripts/push.sh`** – last opp fra terminalen uten å logge inn
 - **Lagring for artifacts** – artifacts fra claude.ai som bruker `window.claude.use("db")` fungerer uendret (se under)
-- **Lenkekort** (`*.link.json`) for apper som kjører for seg selv, f.eks. Recall – kan merkes `admin_only`
+- **Lenkekort** (`*.link.json`) for apper som kjører for seg selv, f.eks. Recall og Modi – legges til og redigeres i `/admin`, kan merkes `admin_only`
 
 ## Oppsett på serveren
 
