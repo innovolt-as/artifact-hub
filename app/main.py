@@ -34,6 +34,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
+from app import versions
+
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -711,6 +713,7 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
         meta["title"] = title
     if admin_only:
         meta["admin_only"] = True
+    versions.save(ARTIFACTS_DIR, slug)  # keep the previous version before replacing it
     # remove any existing artifact with that slug
     for old in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json"):
         old.unlink(missing_ok=True)
@@ -890,6 +893,7 @@ async def api_edit(
         (ICONS_DIR / f"{slug}{icon_ext}").write_bytes(icon_data)
 
     if new_slug != slug:
+        versions.rename(ARTIFACTS_DIR, slug, new_slug)
         moves = [(ARTIFACTS_DIR / f"{slug}{suffix}", ARTIFACTS_DIR / f"{new_slug}{suffix}")
                  for suffix in (".html", ".meta.json", ".link.json", "")]
         if old_icon := _icon_file(slug):
