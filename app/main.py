@@ -7,6 +7,8 @@ Layout of the data dir (ARTIFACTS_DIR, default /data/artifacts):
     my-chart.meta.json             -> optional: {"title": "...", "description": "...", "admin_only": true}
     my-app/meta.json               -> same, for folder artifacts
     recall.link.json               -> external link card: {"title": "...", "url": "...", "admin_only": true}
+
+Artifacts can keep per-user data through /api/me and /api/data/{app}/... (see "per-user app data" below).
 """
 from __future__ import annotations
 
@@ -66,6 +68,12 @@ MAX_LINKS_PER_EMAIL = 3           # unexpired links per address (i.e. per MAGIC_
 MAX_LINKS_PER_IP = 10             # per hour
 _ip_sends: dict[str, list[float]] = {}
 
+ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin page
+ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+              ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
+MAX_ICON_BYTES = 2 * 1024 * 1024
+META_KEYS = ("title", "description", "emoji", "admin_only")  # what survives a re-upload
+
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -94,6 +102,15 @@ with db() as con:
     con.execute(
         """CREATE TABLE IF NOT EXISTS logins(
              email TEXT NOT NULL, at INTEGER NOT NULL)"""
+    )
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS app_data(
+             email   TEXT NOT NULL,
+             app     TEXT NOT NULL,
+             key     TEXT NOT NULL,
+             value   TEXT NOT NULL,
+             updated INTEGER NOT NULL,
+             PRIMARY KEY (email, app, key))"""
     )
 
 
@@ -199,6 +216,39 @@ def _title_from_html(path: Path, fallback: str) -> str:
     return fallback
 
 
+def _meta_path(slug: str) -> Path | None:
+    """Where an artifact's metadata lives (link cards keep it in the .link.json itself)."""
+    if not SLUG_RE.match(slug):
+        return None
+    if (ARTIFACTS_DIR / f"{slug}.html").is_file():
+        return ARTIFACTS_DIR / f"{slug}.meta.json"
+    if (ARTIFACTS_DIR / slug / "index.html").is_file():
+        return ARTIFACTS_DIR / slug / "meta.json"
+    if (ARTIFACTS_DIR / f"{slug}.link.json").is_file():
+        return ARTIFACTS_DIR / f"{slug}.link.json"
+    return None
+
+
+def _icon_file(slug: str) -> Path | None:
+    for ext in ICON_TYPES:
+        p = ICONS_DIR / f"{slug}{ext}"
+        if p.is_file():
+            return p
+    return None
+
+
+def _remove_icon(slug: str) -> None:
+    for ext in ICON_TYPES:
+        (ICONS_DIR / f"{slug}{ext}").unlink(missing_ok=True)
+
+
+_NO_ORDER = str.maketrans({"æ": "z{", "ø": "z|", "å": "z}"})  # æ ø å after z, in that order
+
+
+def _sort_key(title: str) -> str:
+    return title.casefold().translate(_NO_ORDER)
+
+
 def list_artifacts(user: str) -> list[dict]:
     items: list[dict] = []
     admin = is_admin(user)
@@ -225,6 +275,7 @@ def list_artifacts(user: str) -> list[dict]:
             continue
         if meta.get("admin_only") and not admin:
             continue
+        icon = _icon_file(slug)
         items.append(
             {
                 "slug": slug,
@@ -234,9 +285,12 @@ def list_artifacts(user: str) -> list[dict]:
                 "description": meta.get("description", ""),
                 "admin_only": bool(meta.get("admin_only")),
                 "updated": mtime,
+                "emoji": meta.get("emoji", ""),
+                "icon_url": f"/icon/{slug}?v={int(icon.stat().st_mtime)}" if icon else None,
+                "hue": int(hashlib.md5(slug.encode()).hexdigest()[:4], 16) % 360,  # letter-fallback colour
             }
         )
-    items.sort(key=lambda a: a["updated"], reverse=True)
+    items.sort(key=lambda a: _sort_key(a["title"]))
     return items
 
 
@@ -362,6 +416,140 @@ def serve_artifact(slug: str, path: str, user: str = Depends(require_user)):
     return FileResponse(target)
 
 
+# ---------------------------------------------------------------- routes: per-user app data
+# Small key/value store so artifacts can keep data for the logged-in user.
+# Every row belongs to one e-mail and one app name; a user can never read or write someone else's rows.
+# Artifacts call it with same-origin fetch, so the session cookie is sent automatically.
+#   GET    /api/me                          -> {"email", "admin"}
+#   GET    /api/data/{app}?prefix=logs/     -> {"items": [{"key", "value", "updated"}]}
+#   GET    /api/data/{app}/{key}            -> {"key", "value", "updated"}   (404 if missing)
+#   PUT    /api/data/{app}/{key}   {"value": <json>}
+#   DELETE /api/data/{app}/{key}
+#   POST   /api/data/{app}/_batch  {"set": {key: value, ...}, "delete": [key, ...]}   (import, all or nothing)
+DATA_KEY_RE = re.compile(r"^[A-Za-z0-9._:@+-]{1,100}(/[A-Za-z0-9._:@+-]{1,100}){0,4}$")
+MAX_VALUE_BYTES = 512 * 1024          # per key
+MAX_KEYS_PER_APP = 5000               # per user and app
+MAX_BYTES_PER_APP = 25 * 1024 * 1024  # per user and app
+MAX_BATCH = 2000
+
+
+def api_user(request: Request) -> str:
+    """Like require_user, but answers 401 JSON instead of redirecting to the login page."""
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Ikke innlogget")
+    return user
+
+
+def _check_app_key(app_name: str, key: str | None = None) -> None:
+    if not SLUG_RE.match(app_name):
+        raise HTTPException(400, "Ugyldig app-navn")
+    if key is not None and not DATA_KEY_RE.match(key):
+        raise HTTPException(400, "Ugyldig nøkkel")
+
+
+def _require_json(request: Request) -> None:
+    # A JSON content type cannot be sent cross-site without a CORS preflight, which this app never allows.
+    if not request.headers.get("content-type", "").lower().startswith("application/json"):
+        raise HTTPException(415, "Bruk Content-Type: application/json")
+
+
+def _encode_value(value) -> str:
+    raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if len(raw.encode("utf-8")) > MAX_VALUE_BYTES:
+        raise HTTPException(413, "Verdien er for stor")
+    return raw
+
+
+def _check_quota(con: sqlite3.Connection, email: str, app_name: str, new_rows: dict[str, str], deleted: set[str] = frozenset()) -> None:
+    rows = con.execute("SELECT key, LENGTH(value) AS n FROM app_data WHERE email=? AND app=?", (email, app_name)).fetchall()
+    sizes = {r["key"]: r["n"] for r in rows if r["key"] not in deleted}
+    for k, v in new_rows.items():
+        sizes[k] = len(v.encode("utf-8"))
+    if len(sizes) > MAX_KEYS_PER_APP:
+        raise HTTPException(413, "For mange nøkler for denne appen")
+    if sum(sizes.values()) > MAX_BYTES_PER_APP:
+        raise HTTPException(413, "Lagringsplassen for denne appen er full")
+
+
+@app.get("/api/me")
+def api_me(user: str = Depends(api_user)):
+    return {"email": user, "admin": is_admin(user)}
+
+
+@app.get("/api/data/{app_name}")
+def data_list(app_name: str, prefix: str = "", user: str = Depends(api_user)):
+    _check_app_key(app_name)
+    like = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    with db() as con:
+        rows = con.execute(
+            "SELECT key, value, updated FROM app_data WHERE email=? AND app=? AND key LIKE ? ESCAPE '\\' ORDER BY key",
+            (user, app_name, like),
+        ).fetchall()
+    return {"items": [{"key": r["key"], "value": json.loads(r["value"]), "updated": r["updated"]} for r in rows]}
+
+
+@app.post("/api/data/{app_name}/_batch")
+async def data_batch(app_name: str, request: Request, user: str = Depends(api_user)):
+    _check_app_key(app_name)
+    _require_json(request)
+    body = await request.json()
+    to_set = body.get("set") or {}
+    to_del = body.get("delete") or []
+    if not isinstance(to_set, dict) or not isinstance(to_del, list) or len(to_set) + len(to_del) > MAX_BATCH:
+        raise HTTPException(400, "Ugyldig batch")
+    for k in list(to_set) + to_del:
+        _check_app_key(app_name, k)
+    encoded = {k: _encode_value(v) for k, v in to_set.items()}
+    now = int(time.time())
+    with db() as con:  # one transaction: all or nothing
+        _check_quota(con, user, app_name, encoded, set(to_del))
+        con.executemany("DELETE FROM app_data WHERE email=? AND app=? AND key=?", [(user, app_name, k) for k in to_del])
+        con.executemany(
+            "INSERT INTO app_data(email, app, key, value, updated) VALUES(?,?,?,?,?) "
+            "ON CONFLICT(email, app, key) DO UPDATE SET value=excluded.value, updated=excluded.updated",
+            [(user, app_name, k, v, now) for k, v in encoded.items()],
+        )
+    return {"ok": True, "set": len(encoded), "deleted": len(to_del), "updated": now}
+
+
+@app.get("/api/data/{app_name}/{key:path}")
+def data_get(app_name: str, key: str, user: str = Depends(api_user)):
+    _check_app_key(app_name, key)
+    with db() as con:
+        r = con.execute("SELECT value, updated FROM app_data WHERE email=? AND app=? AND key=?", (user, app_name, key)).fetchone()
+    if not r:
+        raise HTTPException(404, "Finnes ikke")
+    return {"key": key, "value": json.loads(r["value"]), "updated": r["updated"]}
+
+
+@app.put("/api/data/{app_name}/{key:path}")
+async def data_put(app_name: str, key: str, request: Request, user: str = Depends(api_user)):
+    _check_app_key(app_name, key)
+    _require_json(request)
+    body = await request.json()
+    if not isinstance(body, dict) or "value" not in body:
+        raise HTTPException(400, 'Send {"value": ...}')
+    raw = _encode_value(body["value"])
+    now = int(time.time())
+    with db() as con:
+        _check_quota(con, user, app_name, {key: raw})
+        con.execute(
+            "INSERT INTO app_data(email, app, key, value, updated) VALUES(?,?,?,?,?) "
+            "ON CONFLICT(email, app, key) DO UPDATE SET value=excluded.value, updated=excluded.updated",
+            (user, app_name, key, raw, now),
+        )
+    return {"ok": True, "updated": now}
+
+
+@app.delete("/api/data/{app_name}/{key:path}")
+def data_delete(app_name: str, key: str, request: Request, user: str = Depends(api_user)):
+    _check_app_key(app_name, key)
+    with db() as con:
+        con.execute("DELETE FROM app_data WHERE email=? AND app=? AND key=?", (user, app_name, key))
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- routes: admin / upload
 def _upload_authorized(request: Request) -> str:
     """Either an admin session cookie, or a bearer token (for push.sh)."""
@@ -382,13 +570,19 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
     slug = _slugify(slug or stem)
     if not SLUG_RE.match(slug):
         raise HTTPException(400, f"Ugyldig navn: {slug}")
+    # a new version keeps the old name, emoji and private flag unless overridden
+    old = _meta_path(slug)
+    old_meta = _read_meta(old) if old else {}
+    meta = {k: old_meta[k] for k in META_KEYS if old_meta.get(k)}
+    if title:
+        meta["title"] = title
+    if admin_only:
+        meta["admin_only"] = True
     # remove any existing artifact with that slug
     for old in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json"):
         old.unlink(missing_ok=True)
     if (ARTIFACTS_DIR / slug).is_dir():
         shutil.rmtree(ARTIFACTS_DIR / slug)
-
-    meta = {k: v for k, v in {"title": title, "admin_only": admin_only or None}.items() if v}
 
     if ext.lower() == ".zip":
         dest = ARTIFACTS_DIR / slug
@@ -463,25 +657,87 @@ def api_delete(request: Request, slug: str = Form(...)):
         removed = True
     if not removed:
         raise HTTPException(404)
+    _remove_icon(slug)
     return JSONResponse({"ok": True})
 
 
 @app.post("/api/toggle-private")
 def api_toggle_private(request: Request, slug: str = Form(...)):
     _upload_authorized(request)
-    found = artifact_root(slug)
-    link = ARTIFACTS_DIR / f"{slug}.link.json"
-    if found:
-        root, _ = found
-        meta_path = (ARTIFACTS_DIR / f"{slug}.meta.json") if root.is_file() else (root / "meta.json")
-    elif link.exists():
-        meta_path = link
-    else:
+    meta_path = _meta_path(slug)
+    if not meta_path:
         raise HTTPException(404)
     meta = _read_meta(meta_path)
     meta["admin_only"] = not meta.get("admin_only", False)
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
     return JSONResponse({"ok": True, "admin_only": meta["admin_only"]})
+
+
+@app.post("/api/edit")
+async def api_edit(
+    request: Request,
+    slug: str = Form(...),
+    new_slug: str = Form(""),
+    title: str = Form(""),
+    emoji: str = Form(""),
+    icon: UploadFile | None = File(None),
+    remove_icon: bool = Form(False),
+):
+    """Rename (title and/or address) and set the icon of an artifact or link card."""
+    _upload_authorized(request)
+    meta_path = _meta_path(slug)
+    if not meta_path:
+        raise HTTPException(404)
+    new_slug = _slugify(new_slug) if new_slug.strip() else slug
+    if not SLUG_RE.match(new_slug):
+        raise HTTPException(400, f"Ugyldig adresse: {new_slug}")
+    if new_slug != slug and _meta_path(new_slug):
+        raise HTTPException(409, f"Adressen /a/{new_slug}/ er allerede i bruk")
+
+    icon_data, icon_ext = None, ""
+    if icon and icon.filename:
+        icon_ext = os.path.splitext(icon.filename)[1].lower()
+        if icon_ext not in ICON_TYPES:
+            raise HTTPException(400, "Ikonet må være PNG, JPG, WebP, GIF eller SVG")
+        icon_data = await icon.read(MAX_ICON_BYTES + 1)
+        if len(icon_data) > MAX_ICON_BYTES:
+            raise HTTPException(400, "Ikonet kan være maks 2 MB")
+
+    meta = _read_meta(meta_path)
+    for key, value in (("title", title.strip()), ("emoji", emoji.strip()[:16])):
+        if value:
+            meta[key] = value
+        else:
+            meta.pop(key, None)  # empty title -> falls back to <title> in the HTML
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+    if remove_icon or icon_data:
+        _remove_icon(slug)
+    if icon_data:
+        ICONS_DIR.mkdir(exist_ok=True)
+        (ICONS_DIR / f"{slug}{icon_ext}").write_bytes(icon_data)
+
+    if new_slug != slug:
+        moves = [(ARTIFACTS_DIR / f"{slug}{suffix}", ARTIFACTS_DIR / f"{new_slug}{suffix}")
+                 for suffix in (".html", ".meta.json", ".link.json", "")]
+        if old_icon := _icon_file(slug):
+            moves.append((old_icon, ICONS_DIR / f"{new_slug}{old_icon.suffix}"))
+        for src, dst in moves:
+            if src.exists():
+                src.rename(dst)
+        log.info("Renamed artifact %s -> %s", slug, new_slug)
+    return JSONResponse({"ok": True, "slug": new_slug})
+
+
+@app.get("/icon/{slug}")
+def serve_icon(slug: str, user: str = Depends(require_user)):
+    meta_path = _meta_path(slug)
+    icon = _icon_file(slug) if meta_path else None
+    if not icon or (_read_meta(meta_path).get("admin_only") and not is_admin(user)):
+        raise HTTPException(404)
+    # an SVG opened directly must not be able to run scripts on this origin
+    return FileResponse(icon, media_type=ICON_TYPES[icon.suffix],
+                        headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
 
 
 @app.get("/healthz")

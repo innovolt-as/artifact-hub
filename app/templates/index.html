@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icon.html" import icon %}
 {% block body %}
 {% if not artifacts %}
   <p class="empty">Ingen artifacts ennå.</p>
@@ -6,12 +7,11 @@
 <ul class="grid">
   {% for a in artifacts %}
   <li class="tile">
-    <a href="{{ a.url }}" {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>
-      <span class="kind kind-{{ a.kind }}">{{ {'page':'Side','app':'App','link':'Ekstern'}[a.kind] }}</span>
+    <a href="{{ a.url }}" {% if a.description %}title="{{ a.description }}"{% endif %} {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>
+      {% if a.kind == 'link' %}<span class="ext" title="Ekstern app">↗</span>{% endif %}
       {% if a.admin_only %}<span class="lock" title="Kun admin">🔒</span>{% endif %}
+      {{ icon(a) }}
       <h2>{{ a.title }}</h2>
-      {% if a.description %}<p>{{ a.description }}</p>{% endif %}
-      <time>{{ a.updated | int | strftime }}</time>
     </a>
   </li>
   {% endfor %}

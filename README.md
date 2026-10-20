@@ -4,7 +4,7 @@ Liten FastAPI-app som hoster Claude-artifacts (HTML-sider og små apper) bak inn
 
 - **Galleri** på `/` – alle artifacts brukeren har tilgang til
 - **Artifacts** serveres på `/a/<slug>/` (bare for innloggede)
-- **Admin** på `/admin` – drag-and-drop-opplasting, slett, gjør privat/delt
+- **Admin** på `/admin` – drag-and-drop-opplasting, slett, gjør privat/delt, endre navn/adresse og ikon (bilde eller emoji)
 - **`scripts/push.sh`** – last opp fra terminalen uten å logge inn
 - **Lenkekort** (`*.link.json`) for apper som kjører for seg selv, f.eks. Recall – kan merkes `admin_only`
 
@@ -55,7 +55,9 @@ EOF
 ./scripts/push.sh --slug budsjett --title "Budsjett 2026" fil.html
 ```
 
-Samme filnavn/slug erstatter det som lå der fra før.
+Samme filnavn/slug erstatter det som lå der fra før. Navn, ikon og privat-innstilling beholdes.
+
+Galleriet sorteres alfabetisk på navn (æ, ø, å til slutt).
 
 ## Filer i `data/artifacts/`
 
@@ -63,10 +65,29 @@ Samme filnavn/slug erstatter det som lå der fra før.
 |---|---|
 | `navn.html` | én-fils artifact → `/a/navn/` |
 | `navn/index.html` (+ assets) | app med flere filer → `/a/navn/` |
-| `navn.meta.json` / `navn/meta.json` | valgfritt: `{"title": "...", "description": "...", "admin_only": true}` |
+| `navn.meta.json` / `navn/meta.json` | valgfritt: `{"title": "...", "description": "...", "emoji": "📈", "admin_only": true}` |
 | `navn.link.json` | eksternt kort: `{"title": "...", "url": "https://...", "admin_only": true}` |
+| `.icons/navn.png` (eller .jpg/.webp/.gif/.svg) | ikon lastet opp i admin; `"emoji": "📈"` i meta brukes ellers |
 
 Du kan også bare `scp`/`rsync` filer rett inn i `data/artifacts/` – appen leser mappen ved hver visning.
+
+## Data per bruker for apper
+
+Artifacts kan lagre data for den innloggede brukeren gjennom et lite nøkkel/verdi-API. Hver rad hører til én
+e-post og ett app-navn, så brukere ser aldri hverandres data. Kallene gjøres med vanlig `fetch` fra artifacten
+(samme domene), så innloggings-cookien følger med automatisk. Dataene ligger i `hub.db` i `./data`.
+
+| Kall | Gjør |
+|---|---|
+| `GET /api/me` | `{"email", "admin"}`, eller 401 hvis ikke innlogget |
+| `GET /api/data/<app>?prefix=logs/` | alle nøkler for appen (valgfritt filtrert på prefiks) |
+| `GET /api/data/<app>/<nøkkel>` | én verdi, 404 hvis den ikke finnes |
+| `PUT /api/data/<app>/<nøkkel>` | lagre, body `{"value": <json>}` |
+| `DELETE /api/data/<app>/<nøkkel>` | slett |
+| `POST /api/data/<app>/_batch` | `{"set": {nøkkel: verdi}, "delete": [nøkler]}` i én transaksjon (import) |
+
+Skrivekall må ha `Content-Type: application/json`. Grenser: 512 KB per verdi, 5000 nøkler og 25 MB per bruker per app.
+App-navnet bør være artifactens slug, f.eks. `trening`.
 
 ## Tilgang
 

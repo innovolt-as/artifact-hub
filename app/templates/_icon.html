@@ -1,0 +1,8 @@
+{# Icon: uploaded image, else emoji, else the first letter on a colour derived from the slug. #}
+{% macro icon(a, cls="icon") -%}
+<span class="{{ cls }}" style="--hue: {{ a.hue }}">
+  {%- if a.icon_url %}<img src="{{ a.icon_url }}" alt="">
+  {%- elif a.emoji %}<span class="emoji">{{ a.emoji }}</span>
+  {%- else %}<span class="letter">{{ a.title[:1] | upper }}</span>{% endif -%}
+</span>
+{%- endmacro %}

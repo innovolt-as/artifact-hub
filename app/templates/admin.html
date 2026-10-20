@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icon.html" import icon %}
 {% block title %}Admin · {{ site }}{% endblock %}
 {% block body %}
 <section class="card">
@@ -18,9 +19,12 @@
     <tbody>
     {% for a in artifacts %}
     <tr data-slug="{{ a.slug }}">
+      <td class="icon-cell">{{ icon(a, "icon icon-sm") }}</td>
       <td><a href="{{ a.url }}" {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>{{ a.title }}</a>
           <span class="muted small">{{ a.slug }} · {{ {'page':'side','app':'app','link':'ekstern'}[a.kind] }}</span></td>
       <td class="right">
+        <button class="small edit" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}"
+                data-kind="{{ a.kind }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}">Rediger</button>
         <button class="small toggle" data-slug="{{ a.slug }}">{{ '🔒 privat' if a.admin_only else '🌐 delt' }}</button>
         <button class="small danger del" data-slug="{{ a.slug }}">Slett</button>
       </td>
@@ -29,6 +33,29 @@
     </tbody>
   </table>
 </section>
+
+<dialog id="editor" class="editor">
+  <form id="editForm" method="dialog">
+    <h1>Rediger</h1>
+    <div class="editor-preview">
+      <span id="pvIcon" class="icon"></span>
+      <span class="muted small">Bilde brukes hvis det finnes, ellers emoji, ellers forbokstaven.</span>
+    </div>
+    <label>Navn<input name="title" id="edTitle" maxlength="120"></label>
+    <label id="edSlugRow">Adresse
+      <span class="prefixed"><span class="muted">/a/</span><input name="new_slug" id="edSlug" maxlength="80" pattern="[a-z0-9][a-z0-9._\-]*"></span>
+      <span class="muted small">Gamle lenker til denne adressen slutter å virke.</span>
+    </label>
+    <label>Emoji<input name="emoji" id="edEmoji" maxlength="16" placeholder="f.eks. 📈"></label>
+    <label>Bilde<input type="file" name="icon" id="edIcon" accept=".png,.jpg,.jpeg,.webp,.gif,.svg"></label>
+    <label class="check" id="edRemoveRow"><input type="checkbox" name="remove_icon" id="edRemove" value="true"> Fjern bildet</label>
+    <p id="edError" class="err small"></p>
+    <div class="editor-actions">
+      <button type="button" class="small" id="edCancel">Avbryt</button>
+      <button type="submit" class="primary">Lagre</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
 const drop = document.getElementById('drop');
@@ -69,6 +96,52 @@ document.querySelectorAll('.del').forEach(b => b.onclick = async () => {
 });
 document.querySelectorAll('.toggle').forEach(b => b.onclick = async () => {
   if (await post('/api/toggle-private', b.dataset.slug)) location.reload();
+});
+
+// --- edit dialog: name, address, emoji, image
+const ed = document.getElementById('editor');
+const f = document.getElementById('editForm');
+const $ = id => document.getElementById(id);
+let current = null, objectUrl = null;
+
+function preview() {
+  const pv = $('pvIcon');
+  pv.style.setProperty('--hue', current.hue);
+  pv.replaceChildren();
+  const file = $('edIcon').files[0];
+  if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+  const src = file ? (objectUrl = URL.createObjectURL(file)) : ($('edRemove').checked ? '' : current.icon);
+  const el = document.createElement(src ? 'img' : 'span');
+  if (src) { el.src = src; el.alt = ''; }
+  else if ($('edEmoji').value.trim()) { el.className = 'emoji'; el.textContent = $('edEmoji').value.trim(); }
+  else { el.className = 'letter'; el.textContent = ($('edTitle').value.trim()[0] || '?').toUpperCase(); }
+  pv.append(el);
+}
+
+document.querySelectorAll('.edit').forEach(b => b.onclick = () => {
+  current = b.dataset;
+  f.reset();
+  $('edTitle').value = current.title;
+  $('edSlug').value = current.slug;
+  $('edEmoji').value = current.emoji;
+  $('edSlugRow').hidden = current.kind === 'link';   // link cards have an external URL
+  $('edRemoveRow').hidden = !current.icon;
+  $('edError').textContent = '';
+  preview();
+  ed.showModal();
+});
+['edTitle', 'edEmoji', 'edIcon', 'edRemove'].forEach(id => $(id).addEventListener('input', preview));
+$('edCancel').onclick = () => ed.close();
+
+f.addEventListener('submit', async e => {
+  e.preventDefault();
+  const fd = new FormData(f);
+  fd.append('slug', current.slug);
+  if (!$('edIcon').files.length) fd.delete('icon');
+  const r = await fetch('/api/edit', { method: 'POST', body: fd });
+  if (r.ok) return location.reload();
+  const j = await r.json().catch(() => ({}));
+  $('edError').textContent = j.detail || `Feil (${r.status})`;
 });
 </script>
 {% endblock %}
