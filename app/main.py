@@ -126,6 +126,33 @@ with db() as con:
              updated INTEGER NOT NULL,
              PRIMARY KEY (email, app, key))"""
     )
+    # OAuth for the Claude connector (app/oauth.py); codes and tokens are stored as SHA-256 hashes
+    con.execute("CREATE TABLE IF NOT EXISTS oauth_clients(client_id TEXT PRIMARY KEY, info TEXT NOT NULL)")
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS oauth_requests(
+             id         TEXT PRIMARY KEY,
+             client_id  TEXT NOT NULL,
+             params     TEXT NOT NULL,
+             expires_at INTEGER NOT NULL)"""
+    )
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS oauth_codes(
+             code_hash  TEXT PRIMARY KEY,
+             client_id  TEXT NOT NULL,
+             email      TEXT NOT NULL,
+             params     TEXT NOT NULL,
+             expires_at REAL NOT NULL)"""
+    )
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS oauth_tokens(
+             token_hash TEXT PRIMARY KEY,
+             kind       TEXT NOT NULL,          -- 'access' | 'refresh'
+             client_id  TEXT NOT NULL,
+             email      TEXT NOT NULL,
+             scopes     TEXT NOT NULL,
+             resource   TEXT,
+             expires_at INTEGER NOT NULL)"""
+    )
 
 
 # ---------------------------------------------------------------- auth helpers
@@ -1034,3 +1061,9 @@ def favicon():
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- Claude connector (OAuth)
+from app import oauth  # noqa: E402  (imports this module, so it must come last)
+
+app.include_router(oauth.router)

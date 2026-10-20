@@ -1,8 +1,12 @@
 """Shared fixtures. app.main reads its config at import time, so set the env first."""
+import asyncio
+import base64
+import hashlib
 import os
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -33,7 +37,8 @@ def _clean():
         else:
             p.unlink()
     with main.db() as con:
-        for table in ("magic_tokens", "logins", "docs", "app_data"):
+        for table in ("magic_tokens", "logins", "docs", "app_data",
+                      "oauth_clients", "oauth_requests", "oauth_codes", "oauth_tokens"):
             con.execute(f"DELETE FROM {table}")
     main._ip_sends.clear()
     yield
@@ -75,3 +80,57 @@ def upload():
         assert r.status_code == 200, r.text
         return r
     return _upload
+
+
+# ---------------------------------------------------------------- oauth (Claude connector)
+CLAUDE_CALLBACK = "https://claude.ai/api/mcp/auth_callback"
+PKCE_VERIFIER = "v" * 64
+PKCE_CHALLENGE = base64.urlsafe_b64encode(hashlib.sha256(PKCE_VERIFIER.encode()).digest()).decode().rstrip("=")
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture
+def provider():
+    from app import oauth
+    return oauth.HubOAuthProvider()
+
+
+@pytest.fixture
+def oauth_client(provider):
+    """A dynamically registered Claude client."""
+    from mcp.shared.auth import OAuthClientInformationFull
+    info = OAuthClientInformationFull(client_id="claude-test", client_name="Claude",
+                                      redirect_uris=[CLAUDE_CALLBACK], token_endpoint_auth_method="none")
+    asyncio.run(provider.register_client(info))
+    return info
+
+
+@pytest.fixture
+def pending_req(provider, oauth_client):
+    """id of an authorization request waiting for consent (state=xyz)."""
+    from mcp.server.auth.provider import AuthorizationParams
+    params = AuthorizationParams(state="xyz", scopes=None, code_challenge=PKCE_CHALLENGE,
+                                 redirect_uri=CLAUDE_CALLBACK, redirect_uri_provided_explicitly=True,
+                                 resource="https://hub.test/mcp")
+    url = asyncio.run(provider.authorize(oauth_client, params))
+    assert url.startswith("https://hub.test/oauth/consent?req=")
+    return parse_qs(urlparse(url).query)["req"][0]
+
+
+@pytest.fixture
+def approved_code(admin_client, pending_req):
+    """An authorization code that admin@test.no approved on the consent page."""
+    r = admin_client.post("/oauth/consent", data={"req": pending_req, "decision": "allow"})
+    assert r.status_code in (302, 303), r.text
+    return parse_qs(urlparse(r.headers["location"]).query)["code"][0]
+
+
+@pytest.fixture
+def issued_token(provider, oauth_client, approved_code):
+    """A valid access token string for admin@test.no."""
+    code = asyncio.run(provider.load_authorization_code(oauth_client, approved_code))
+    return asyncio.run(provider.exchange_authorization_code(oauth_client, code)).access_token
