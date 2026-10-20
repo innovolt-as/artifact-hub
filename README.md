@@ -11,16 +11,16 @@ Liten FastAPI-app som hoster Claude-artifacts (HTML-sider og små apper) bak inn
 ## Oppsett på serveren
 
 ```bash
-git clone <repo> artifact-hub && cd artifact-hub
+git clone https://github.com/innovolt-as/artifact-hub.git && cd artifact-hub
 cp .env.example .env            # fyll inn SECRET_KEY, e-poster, UPLOAD_TOKEN, SMTP
-# sett image: i docker-compose.yml til ditt ghcr-image (eller bytt til build: .)
+mkdir -p data/artifacts         # + kopier inn recall.link.json (data/ er ikke i git)
 docker compose up -d
 ```
 
-Alt som skal overleve (artifacts + SQLite) ligger i `./data`.
+Caddy står foran appen og henter HTTPS-sertifikat for `apps.innovolt.no` automatisk
+(krever A-record mot serveren og åpne porter 80/443). Domenet endres i `Caddyfile`.
 
-Rediger `data/artifacts/recall.link.json` med riktig URL til Recall. Et eksempel-Caddyfile for å legge
-både hub og Recall bak HTTPS ligger i `Caddyfile.example`.
+Alt som skal overleve (artifacts + SQLite) ligger i `./data`. Sertifikatene ligger i volumet `caddy_data`.
 
 ## E-post
 

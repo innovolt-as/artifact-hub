@@ -1,0 +1,5 @@
+# Caddy fetches and renews the HTTPS certificate automatically (needs DNS A record + ports 80/443 open).
+apps.innovolt.no {
+    encode zstd gzip
+    reverse_proxy hub:8000
+}

@@ -1,10 +1,28 @@
 services:
   hub:
-    image: ghcr.io/martintonne/artifact-hub:latest   # or build: .
+    image: ghcr.io/innovolt-as/artifact-hub:latest   # or build: .
     container_name: artifact-hub
     restart: unless-stopped
     env_file: .env
     volumes:
       - ./data:/data          # artifacts + sqlite live here, survive image updates
+    # no ports: only reachable through caddy on the internal network
+    # (for local testing without caddy: ports: ["127.0.0.1:8000:8000"])
+
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    restart: unless-stopped
+    depends_on: [hub]
     ports:
-      - "8000:8000"           # drop this if you put Caddy/Nginx in front on the same docker network
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"         # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificates — keep this volume
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

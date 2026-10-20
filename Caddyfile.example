@@ -1,7 +1,0 @@
-# Example reverse proxy. Both hub and recall can sit behind the same Caddy.
-apps.innovolt.no {
-    reverse_proxy artifact-hub:8000
-}
-recall.innovolt.no {
-    reverse_proxy recall:8000
-}

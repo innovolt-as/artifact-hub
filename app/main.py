@@ -23,6 +23,7 @@ import time
 import zipfile
 from email.message import EmailMessage
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -112,10 +113,19 @@ def current_user(request: Request) -> str | None:
         return None
 
 
+def safe_next(url: str | None) -> str:
+    """Only allow local paths as post-login targets (no open redirects)."""
+    if not url or not url.startswith("/") or url.startswith("//") or "\\" in url:
+        return "/"
+    return url
+
+
 def require_user(request: Request) -> str:
     user = current_user(request)
     if not user:
-        raise HTTPException(status_code=302, headers={"Location": "/login"})
+        target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        loc = "/login" if target == "/" else f"/login?next={quote(target, safe='')}"
+        raise HTTPException(status_code=302, headers={"Location": loc})
     return user
 
 
@@ -226,15 +236,17 @@ def artifact_root(slug: str) -> tuple[Path, bool] | None:
 
 # ---------------------------------------------------------------- routes: auth
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request):
+def login_page(request: Request, next: str = "/"):
+    next = safe_next(next)
     if current_user(request):
-        return RedirectResponse("/", status_code=302)
-    return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": False})
+        return RedirectResponse(next, status_code=302)
+    return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": False, "next": next})
 
 
 @app.post("/login", response_class=HTMLResponse)
-def login_submit(request: Request, email: str = Form(...)):
+def login_submit(request: Request, email: str = Form(...), next: str = Form("/")):
     email = email.strip().lower()
+    next = safe_next(next)
     # Always show "sent" so we don't leak who is on the allowlist.
     if email_allowed(email):
         token = secrets.token_urlsafe(32)
@@ -244,7 +256,10 @@ def login_submit(request: Request, email: str = Form(...)):
                 (hashlib.sha256(token.encode()).hexdigest(), email, int(time.time()) + MAGIC_TTL),
             )
         try:
-            send_magic_link(email, f"{BASE_URL}/auth?token={token}")
+            link = f"{BASE_URL}/auth?token={token}"
+            if next != "/":
+                link += f"&next={quote(next, safe='')}"
+            send_magic_link(email, link)
         except Exception as e:  # noqa: BLE001
             log.exception("Could not send magic link: %s", e)
     else:
@@ -253,7 +268,7 @@ def login_submit(request: Request, email: str = Form(...)):
 
 
 @app.get("/auth")
-def auth(token: str):
+def auth(token: str, next: str = "/"):
     h = hashlib.sha256(token.encode()).hexdigest()
     now = int(time.time())
     with db() as con:
@@ -263,7 +278,7 @@ def auth(token: str):
         con.execute("UPDATE magic_tokens SET used=1 WHERE token_hash=?", (h,))
         con.execute("DELETE FROM magic_tokens WHERE expires_at < ?", (now,))
         con.execute("INSERT INTO logins(email, at) VALUES(?,?)", (row["email"], now))
-    resp = RedirectResponse("/", status_code=302)
+    resp = RedirectResponse(safe_next(next), status_code=302)
     resp.set_cookie(
         COOKIE,
         signer.dumps({"email": row["email"]}),
