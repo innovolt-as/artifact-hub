@@ -24,6 +24,7 @@ import sqlite3
 import time
 import zipfile
 from email.message import EmailMessage
+from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
@@ -102,6 +103,17 @@ with db() as con:
     con.execute(
         """CREATE TABLE IF NOT EXISTS logins(
              email TEXT NOT NULL, at INTEGER NOT NULL)"""
+    )
+    # Document store behind window.claude.use("db") (static/hub.js): private per artifact and per user
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS docs(
+             slug       TEXT NOT NULL,
+             owner      TEXT NOT NULL,
+             collection TEXT NOT NULL,
+             doc_id     TEXT NOT NULL,
+             data       TEXT NOT NULL,
+             updated_at INTEGER NOT NULL,
+             PRIMARY KEY (slug, owner, collection, doc_id))"""
     )
     con.execute(
         """CREATE TABLE IF NOT EXISTS app_data(
@@ -405,7 +417,7 @@ def serve_artifact(slug: str, path: str, user: str = Depends(require_user)):
     if root.is_file():
         if path not in ("", "index.html"):
             raise HTTPException(404)
-        return FileResponse(root, media_type="text/html")
+        return _html_with_shim(root, slug, user)
     target = (root / (path or "index.html")).resolve()
     if root.resolve() not in target.parents and target != root.resolve():
         raise HTTPException(404)
@@ -413,7 +425,128 @@ def serve_artifact(slug: str, path: str, user: str = Depends(require_user)):
         target = target / "index.html"
     if not target.is_file() or target.name == "meta.json":
         raise HTTPException(404)
+    if target.suffix.lower() in (".html", ".htm"):
+        return _html_with_shim(target, slug, user)
     return FileResponse(target)
+
+
+def _html_with_shim(path: Path, slug: str, user: str) -> HTMLResponse:
+    """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists."""
+    html = path.read_text("utf-8", errors="replace")
+    tag = '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
+        escape(slug), escape(user), "1" if is_admin(user) else "0"
+    )
+    m = re.search(r"<head[^>]*>", html, re.I)
+    html = html[: m.end()] + tag + html[m.end():] if m else tag + html
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------- routes: document store (hub.js)
+SEG_RE = re.compile(r"^[^/]{1,200}$")
+MAX_DOC_BYTES = 256 * 1024
+
+
+def _store_owner(slug: str, user: str) -> str:
+    """The store is private per user; you need access to the artifact to use it."""
+    found = artifact_root(slug)
+    if not found or (found[1] and not is_admin(user)):
+        raise HTTPException(404)
+    return user.lower()
+
+
+def _split_path(path: str, want_doc: bool) -> tuple[str, str]:
+    """'a/b/c' -> collection 'a/b/c' (odd segments); 'a/b/c/d' -> ('a/b/c', 'd') (even segments)."""
+    segs = [s for s in path.split("/") if s]
+    if not segs or not all(SEG_RE.match(s) for s in segs) or (len(segs) % 2 == 0) != want_doc:
+        raise HTTPException(400, f"Ugyldig sti: {path}")
+    return ("/".join(segs[:-1]), segs[-1]) if want_doc else ("/".join(segs), "")
+
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    out = dict(base)
+    for k, v in patch.items():
+        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+@app.get("/api/store/{slug}/c")
+def store_list(slug: str, path: str, user: str = Depends(require_user)):
+    owner = _store_owner(slug, user)
+    collection, _ = _split_path(path, want_doc=False)
+    with db() as con:
+        rows = con.execute(
+            "SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
+            (slug, owner, collection),
+        ).fetchall()
+    return {"docs": [{"id": r["doc_id"], "data": json.loads(r["data"])} for r in rows]}
+
+
+@app.get("/api/store/{slug}/d")
+def store_get(slug: str, path: str, user: str = Depends(require_user)):
+    owner = _store_owner(slug, user)
+    collection, doc_id = _split_path(path, want_doc=True)
+    with db() as con:
+        row = con.execute(
+            "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
+            (slug, owner, collection, doc_id),
+        ).fetchone()
+    return {"data": json.loads(row["data"]) if row else None}
+
+
+@app.put("/api/store/{slug}/d")
+async def store_set(slug: str, path: str, request: Request, merge: bool = False, user: str = Depends(require_user)):
+    owner = _store_owner(slug, user)
+    collection, doc_id = _split_path(path, want_doc=True)
+    body = await request.body()
+    if len(body) > MAX_DOC_BYTES:
+        raise HTTPException(413, "Dokumentet er større enn 256 KB")
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Ugyldig JSON")
+    if not isinstance(data, dict):
+        raise HTTPException(400, "Et dokument må være et JSON-objekt")
+    with db() as con:
+        row = con.execute(
+            "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
+            (slug, owner, collection, doc_id),
+        ).fetchone()
+        if merge:  # update() requires the document to exist
+            if not row:
+                raise HTTPException(404, "Dokumentet finnes ikke")
+            data = _deep_merge(json.loads(row["data"]), data)
+        con.execute(
+            """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
+               ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
+            (slug, owner, collection, doc_id, json.dumps(data, ensure_ascii=False), int(time.time())),
+        )
+    return {"ok": True}
+
+
+@app.delete("/api/store/{slug}/d")
+def store_delete(slug: str, path: str, user: str = Depends(require_user)):
+    owner = _store_owner(slug, user)
+    collection, doc_id = _split_path(path, want_doc=True)
+    with db() as con:
+        con.execute(
+            "DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?", (slug, owner, collection, doc_id)
+        )
+    return {"ok": True}
+
+
+@app.get("/api/store/{slug}")
+def store_dump(slug: str, user: str = Depends(require_user)):
+    """Everything you have stored for one artifact, as {collection: {doc_id: data}} — a backup."""
+    owner = _store_owner(slug, user)
+    with db() as con:
+        rows = con.execute(
+            "SELECT collection, doc_id, data FROM docs WHERE slug=? AND owner=? ORDER BY collection, doc_id",
+            (slug, owner),
+        ).fetchall()
+    out: dict[str, dict] = {}
+    for r in rows:
+        out.setdefault(r["collection"], {})[r["doc_id"]] = json.loads(r["data"])
+    return out
 
 
 # ---------------------------------------------------------------- routes: per-user app data
@@ -725,6 +858,8 @@ async def api_edit(
         for src, dst in moves:
             if src.exists():
                 src.rename(dst)
+        with db() as con:  # users' stored data follows the artifact
+            con.execute("UPDATE OR REPLACE docs SET slug=? WHERE slug=?", (new_slug, slug))
         log.info("Renamed artifact %s -> %s", slug, new_slug)
     return JSONResponse({"ok": True, "slug": new_slug})
 

@@ -6,6 +6,7 @@ Liten FastAPI-app som hoster Claude-artifacts (HTML-sider og små apper) bak inn
 - **Artifacts** serveres på `/a/<slug>/` (bare for innloggede)
 - **Admin** på `/admin` – drag-and-drop-opplasting, slett, gjør privat/delt, endre navn/adresse og ikon (bilde eller emoji)
 - **`scripts/push.sh`** – last opp fra terminalen uten å logge inn
+- **Lagring for artifacts** – artifacts fra claude.ai som bruker `window.claude.use("db")` fungerer uendret (se under)
 - **Lenkekort** (`*.link.json`) for apper som kjører for seg selv, f.eks. Recall – kan merkes `admin_only`
 
 ## Oppsett på serveren
@@ -88,6 +89,22 @@ e-post og ett app-navn, så brukere ser aldri hverandres data. Kallene gjøres m
 
 Skrivekall må ha `Content-Type: application/json`. Grenser: 512 KB per verdi, 5000 nøkler og 25 MB per bruker per app.
 App-navnet bør være artifactens slug, f.eks. `trening`.
+
+## Lagring for artifacts (`hub.js`)
+
+Artifacts laget på claude.ai lagrer data via `window.claude.use("db")`, som bare finnes på claude.ai.
+Huben legger derfor automatisk `<script src="/static/hub.js">` først i `<head>` på alle HTML-sider under
+`/a/`, og den gir en kompatibel `window.claude.use(...)`:
+
+| Capability | I huben |
+|---|---|
+| `db` | Lagres i SQLite på serveren, **privat per app og per innlogget bruker**. `collection/doc`, `get/set/update/delete`, `add`, `where/orderBy/limit`, `onSnapshot` (oppdateres hvert 5. sek fra andre faner/enheter) |
+| `downloads` | `save({filename, data})` blir en vanlig nedlasting |
+| `user` | Den innloggede e-posten. `isOwner()`/`canEdit()` er sant for admin |
+| alt annet (`sample`, `room`, `mcp`, …) | `null` – krever claude.ai |
+
+- Dataene følger med når en app får ny adresse, og blir liggende hvis appen slettes (kommer tilbake ved ny opplasting).
+- `GET /api/store/<slug>` gir alt du har lagret i én app som JSON – greit som sikkerhetskopi.
 
 ## Tilgang
 
