@@ -6,6 +6,7 @@ Liten FastAPI-app som hoster Claude-artifacts (HTML-sider og små apper) bak inn
 - **Artifacts** serveres på `/a/<slug>/` (bare for innloggede)
 - **Admin** på `/admin` – drag-and-drop-opplasting, slett, gjør privat/delt, endre navn/adresse og ikon (bilde eller emoji)
 - **`scripts/push.sh`** – last opp fra terminalen uten å logge inn
+- **Claude-connector** på `/mcp` – publiser og oppdater apper rett fra en samtale i claude.ai (også i mobilappen)
 - **Lagring for artifacts** – artifacts fra claude.ai som bruker `window.claude.use("db")` fungerer uendret (se under)
 - **Lenkekort** (`*.link.json`) for apper som kjører for seg selv, f.eks. Recall og Modi – legges til og redigeres i `/admin`, kan merkes `admin_only`
 
@@ -59,6 +60,50 @@ EOF
 Samme filnavn/slug erstatter det som lå der fra før. Navn, ikon og privat-innstilling beholdes.
 
 Galleriet sorteres alfabetisk på navn (æ, ø, å til slutt).
+
+## Publisere fra Claude
+
+Huben er en custom connector (ekstern MCP-server med OAuth) for claude.ai på `https://apps.innovolt.no/mcp`.
+
+**Legg til én gang** (claude.ai i nettleser på en PC): Innstillinger → Connectors → Add custom connector → lim inn URL-en.
+Etter det finnes connectoren i alle samtaler, også i iPhone/Android-appen.
+
+**Innlogging:** claude.ai åpner huben. Logg inn med e-post (den magiske lenken åpnes i en ny fane – fortsett der),
+og trykk «Gi tilgang» på godkjenningssiden. Bare e-poster i `ADMIN_EMAILS` kan koble til; andre blir avvist.
+
+| Verktøy | Gjør |
+|---|---|
+| `list_apps` | list alle apper og lenkekort (slug, tittel, privat, redigerbar) |
+| `get_app` | hent HTML-en til en enkeltfils-app |
+| `create_app` | publiser en ny enkeltfils-app (`slug`, `html`, `title`, valgfritt `description`, `emoji`, `private`) |
+| `update_app` | erstatt hele HTML-en til en eksisterende app |
+| `edit_app` | små endringer: liste av `{old, new}`-utdrag, alt eller ingenting |
+| `update_app_info` | endre tittel, beskrivelse, emoji eller `private` uten å røre HTML-en |
+
+Connectoren kan ikke slette apper, og `update_app`/`edit_app` virker bare på enkeltfils-apper (ikke mappe-apper eller lenkekort).
+
+Eksempler: «legg den i huben», «oppdater timelisten i huben», «gjør Timeliste synlig for alle».
+
+**Nye apper fra Claude er private** (bare admin ser dem) til du deler dem: «🌐 delt»-knappen i `/admin`,
+eller be Claude sette `private: false`.
+
+### Versjoner
+
+Ved hver erstatning (admin, `push.sh` og connector) lagres den gamle versjonen i
+`data/artifacts/.versions/<slug>/` – de 10 siste per app. Enkeltfiler lagres som `.html`, mappe-apper som `.zip`.
+Versjonene beholdes ved endring av adresse og når appen slettes.
+
+Legge tilbake en gammel versjon: kopier fila til `data/artifacts/<slug>.html`
+(for `.zip`: pakk ut i `data/artifacts/<slug>/`).
+
+### Trekke tilbake tilgang
+
+Fjern e-posten fra `ADMIN_EMAILS` (sjekkes ved hvert kall, så tilgangen stopper med en gang), eller slett radene
+i SQLite-tabellene `oauth_tokens`, `oauth_codes`, `oauth_requests` og `oauth_clients` i `data/hub.db`.
+
+### Tester
+
+`./scripts/test.sh` kjører testene i en `python:3.12-slim`-container (podman eller docker).
 
 ## Filer i `data/artifacts/`
 
