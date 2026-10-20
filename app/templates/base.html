@@ -5,10 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{{ site }}{% endblock %}</title>
 <link rel="stylesheet" href="/static/hub.css">
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="/">{{ site }}</a>
+  <a class="brand" href="/"><img src="/static/logo.svg" alt="" width="26" height="26">{{ site }}</a>
   {% if user %}
   <nav>
     {% if admin %}<a href="/admin" class="{% if request.url.path == '/admin' %}active{% endif %}">Admin</a>{% endif %}

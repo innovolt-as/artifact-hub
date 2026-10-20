@@ -740,6 +740,12 @@ def serve_icon(slug: str, user: str = Depends(require_user)):
                         headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    # browsers ask for /favicon.ico on pages without <link rel=icon> (e.g. artifacts)
+    return FileResponse(BASE_DIR / "static" / "favicon-32.png", media_type="image/png")
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
