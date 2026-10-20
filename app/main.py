@@ -758,6 +758,117 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
     return slug
 
 
+# ---------------------------------------------------------------- shared write helpers
+MAX_PAGE_BYTES = 1024 * 1024
+_HTML_HINT = re.compile(r"<html|<!doctype html|<body", re.I)
+
+
+class HubError(Exception):
+    """A problem with a write; the message is Norwegian text shown to the user."""
+
+
+def _write_meta(path: Path, meta: dict) -> None:
+    path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+
+def _apply_info(meta: dict, title: str | None, description: str | None, emoji: str | None) -> None:
+    """None leaves a field alone; an empty value removes it."""
+    for key, value in (("title", title), ("description", description), ("emoji", emoji)):
+        if value is None:
+            continue
+        value = value.strip()[:16] if key == "emoji" else value.strip()
+        if value:
+            meta[key] = value
+        else:
+            meta.pop(key, None)
+
+
+def _check_html(html: str) -> None:
+    if len(html.encode("utf-8")) > MAX_PAGE_BYTES:
+        raise HubError(f"Siden er for stor (maks {MAX_PAGE_BYTES // 1024} KB)")
+    if not _HTML_HINT.search(html):
+        raise HubError("Dette ser ikke ut som HTML. Send en komplett HTML-side (med <html>, <!doctype html> eller <body>), "
+                       "ikke React/JSX eller en kodesnutt.")
+
+
+def _single_page(slug: str) -> Path:
+    """The .html file of an existing single-file page, or HubError."""
+    meta_path = _meta_path(slug)
+    if not meta_path:
+        raise HubError(f"Fant ingen side som heter «{slug}».")
+    if meta_path.name.endswith(".link.json") or meta_path.name == "meta.json":
+        raise HubError(f"«{slug}» er ikke en enkeltfil-side (lenkekort eller mappe-app) og kan ikke endres på denne måten.")
+    return ARTIFACTS_DIR / f"{slug}.html"
+
+
+def save_page(slug: str, html: str, *, create: bool, title: str | None = None, description: str | None = None,
+              emoji: str | None = None, private: bool | None = None) -> str:
+    """Create (private unless said otherwise) or replace a single-file page; returns the slug."""
+    if not SLUG_RE.match(slug):
+        raise HubError(f"Ugyldig navn: «{slug}». Bruk små bokstaver, tall, punktum, bindestrek og understrek.")
+    _check_html(html)
+    if create:
+        if _meta_path(slug):
+            raise HubError(f"Det finnes allerede noe som heter «{slug}». Bruk update_app for å endre det.")
+        meta: dict = {}
+        if private is None:
+            private = True
+    else:
+        _single_page(slug)
+        meta = _read_meta(_meta_path(slug))
+        versions.save(ARTIFACTS_DIR, slug)  # keep the previous version before replacing it
+    dest = ARTIFACTS_DIR / f"{slug}.html"
+    _apply_info(meta, title, description, emoji)
+    if private is not None:
+        if private:
+            meta["admin_only"] = True
+        else:
+            meta.pop("admin_only", None)
+    dest.write_text(html, "utf-8")
+    _write_meta(ARTIFACTS_DIR / f"{slug}.meta.json", meta)
+    log.info("%s page %s", "Created" if create else "Updated", slug)
+    return slug
+
+
+def edit_page(slug: str, edits: list[tuple[str, str]]) -> None:
+    """Replace exact snippets in a page. Each must match exactly once; all or nothing."""
+    dest = _single_page(slug)
+    text = dest.read_text("utf-8")
+    for n, (old, new) in enumerate(edits, 1):
+        count = text.count(old) if old else 0
+        if count == 0:
+            raise HubError(f"Endring {n}: fant ikke teksten som skulle erstattes. Ingenting er endret.")
+        if count > 1:
+            raise HubError(f"Endring {n}: teksten finnes {count} ganger. Ta med mer omkringliggende tekst slik at den er unik. "
+                           "Ingenting er endret.")
+        text = text.replace(old, new, 1)
+    _check_html(text)
+    versions.save(ARTIFACTS_DIR, slug)
+    dest.write_text(text, "utf-8")
+    log.info("Edited page %s (%d edits)", slug, len(edits))
+
+
+def set_info(slug: str, *, title: str | None = None, description: str | None = None, emoji: str | None = None,
+             private: bool | None = None) -> None:
+    """Change gallery info for a page or link card. None = unchanged, "" = remove the field."""
+    meta_path = _meta_path(slug)
+    if not meta_path:
+        raise HubError(f"Fant ingen side som heter «{slug}».")
+    meta = _read_meta(meta_path)
+    _apply_info(meta, title, description, emoji)
+    if private is not None:
+        if private:
+            meta["admin_only"] = True
+        else:
+            meta.pop("admin_only", None)
+    _write_meta(meta_path, meta)
+
+
+def page_source(slug: str) -> str:
+    """The page as stored, without the hub.js shim."""
+    return _single_page(slug).read_text("utf-8")
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, user: str = Depends(require_admin)):
     return templates.TemplateResponse(
@@ -879,12 +990,8 @@ async def api_edit(
     meta = _read_meta(meta_path)
     if is_link and url:
         meta["url"] = url
-    for key, value in (("title", title.strip()), ("emoji", emoji.strip()[:16])):
-        if value:
-            meta[key] = value
-        else:
-            meta.pop(key, None)  # empty title -> falls back to <title> in the HTML
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    _apply_info(meta, title, None, emoji)  # empty title -> falls back to <title> in the HTML
+    _write_meta(meta_path, meta)
 
     if remove_icon or icon_data:
         _remove_icon(slug)
