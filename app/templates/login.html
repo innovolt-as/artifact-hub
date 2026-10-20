@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Logg inn · {{ site }}{% endblock %}
+{% block body %}
+<section class="card login">
+  {% if sent %}
+    <h1>Sjekk e-posten din</h1>
+    <p>Hvis <strong>{{ email }}</strong> har tilgang, har vi sendt en innloggingslenke dit. Den er gyldig i 15 minutter.</p>
+    <p class="muted"><a href="/login">Prøv en annen adresse</a></p>
+  {% else %}
+    <h1>Logg inn</h1>
+    <p class="muted">Skriv inn e-posten din, så sender vi deg en magisk lenke.</p>
+    <form method="post" action="/login">
+      <input type="email" name="email" placeholder="deg@eksempel.no" required autofocus autocomplete="email">
+      <button class="primary">Send lenke</button>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Admin · {{ site }}{% endblock %}
+{% block body %}
+<section class="card">
+  <h1>Last opp</h1>
+  <p class="muted">Dra inn <code>.html</code>-filer eller en <code>.zip</code> med <code>index.html</code>. Samme filnavn erstatter eksisterende.</p>
+  <div id="drop" class="drop">
+    <p>Slipp filer her, eller <label for="file" class="link-like">velg filer</label></p>
+    <input id="file" type="file" accept=".html,.htm,.zip" multiple hidden>
+  </div>
+  <label class="check"><input type="checkbox" id="adminOnly"> Kun synlig for meg</label>
+  <ul id="log" class="log"></ul>
+</section>
+
+<section class="card">
+  <h1>Artifacts</h1>
+  <table class="list">
+    <tbody>
+    {% for a in artifacts %}
+    <tr data-slug="{{ a.slug }}">
+      <td><a href="{{ a.url }}" {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>{{ a.title }}</a>
+          <span class="muted small">{{ a.slug }} · {{ {'page':'side','app':'app','link':'ekstern'}[a.kind] }}</span></td>
+      <td class="right">
+        <button class="small toggle" data-slug="{{ a.slug }}">{{ '🔒 privat' if a.admin_only else '🌐 delt' }}</button>
+        <button class="small danger del" data-slug="{{ a.slug }}">Slett</button>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<script>
+const drop = document.getElementById('drop');
+const input = document.getElementById('file');
+const log = document.getElementById('log');
+
+function note(msg, ok = true) {
+  const li = document.createElement('li');
+  li.textContent = msg; li.className = ok ? 'ok' : 'err';
+  log.prepend(li);
+}
+
+async function upload(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('admin_only', document.getElementById('adminOnly').checked ? 'true' : 'false');
+  note(`Laster opp ${file.name}…`);
+  const r = await fetch('/api/upload', { method: 'POST', body: fd });
+  const j = await r.json().catch(() => ({}));
+  if (r.ok) { note(`✓ ${file.name} → ${j.url}`); setTimeout(() => location.reload(), 800); }
+  else note(`✗ ${file.name}: ${j.detail || r.status}`, false);
+}
+
+['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => [...e.dataTransfer.files].forEach(upload));
+input.addEventListener('change', () => [...input.files].forEach(upload));
+
+async function post(url, slug) {
+  const fd = new FormData(); fd.append('slug', slug);
+  const r = await fetch(url, { method: 'POST', body: fd });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); note(`✗ ${j.detail || r.status}`, false); return false; }
+  return true;
+}
+document.querySelectorAll('.del').forEach(b => b.onclick = async () => {
+  if (!confirm(`Slette "${b.dataset.slug}"?`)) return;
+  if (await post('/api/delete', b.dataset.slug)) b.closest('tr').remove();
+});
+document.querySelectorAll('.toggle').forEach(b => b.onclick = async () => {
+  if (await post('/api/toggle-private', b.dataset.slug)) location.reload();
+});
+</script>
+{% endblock %}

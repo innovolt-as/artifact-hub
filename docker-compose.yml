@@ -1,0 +1,10 @@
+services:
+  hub:
+    image: ghcr.io/martintonne/artifact-hub:latest   # or build: .
+    container_name: artifact-hub
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data          # artifacts + sqlite live here, survive image updates
+    ports:
+      - "8000:8000"           # drop this if you put Caddy/Nginx in front on the same docker network

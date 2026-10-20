@@ -1,0 +1,56 @@
+:root {
+  --bg: #f6f5f1; --fg: #1d1c1a; --muted: #6e6a62; --card: #ffffff; --line: #e4e1da;
+  --accent: #2f5fd1; --accent-fg: #fff; --danger: #b4321f; --ok: #227a4c;
+  --radius: 12px; --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--font); }
+a { color: inherit; text-decoration: none; }
+main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--card); }
+.brand { font-weight: 700; letter-spacing: -0.01em; }
+.top nav { display: flex; align-items: center; gap: 16px; font-size: 14px; }
+.top nav a.active { color: var(--accent); font-weight: 600; }
+.who { color: var(--muted); }
+button.link { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 14px; padding: 0; }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; }
+.card h1 { font-size: 20px; margin: 0 0 8px; }
+.login { max-width: 420px; margin: 64px auto; }
+.login form { display: flex; gap: 8px; margin-top: 16px; }
+input[type=email] { flex: 1; font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.empty { text-align: center; color: var(--muted); margin-top: 80px; }
+
+.grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.tile a { display: block; position: relative; height: 100%; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 18px 16px; transition: transform .12s, border-color .12s; }
+.tile a:hover { transform: translateY(-2px); border-color: var(--accent); }
+.tile h2 { font-size: 17px; margin: 10px 0 4px; line-height: 1.3; }
+.tile p { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
+.tile time { font-size: 12px; color: var(--muted); }
+.kind { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); }
+.kind-app { color: var(--accent); }
+.lock { position: absolute; top: 14px; right: 14px; font-size: 14px; }
+
+.drop { margin-top: 12px; padding: 36px 16px; text-align: center; border: 2px dashed var(--line); border-radius: var(--radius); color: var(--muted); transition: border-color .12s, background .12s; }
+.drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.drop p { margin: 0; }
+.link-like { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.check { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 14px; }
+.log { list-style: none; padding: 0; margin: 12px 0 0; font-size: 14px; }
+.log .ok { color: var(--ok); } .log .err { color: var(--danger); }
+
+table.list { width: 100%; border-collapse: collapse; }
+table.list td { padding: 10px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
+table.list td a { font-weight: 600; }
+table.list td .small { display: block; }
+td.right { text-align: right; white-space: nowrap; }
+button.small { font: inherit; font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); cursor: pointer; margin-left: 6px; }
+button.danger { color: var(--danger); }
+code { font-size: 13px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
