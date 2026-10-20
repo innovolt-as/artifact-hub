@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from mcp.server.auth.middleware.auth_context import get_access_token
@@ -87,6 +88,7 @@ def build_mcp() -> MCPServer:
                 "url": a["url"] if a["kind"] == "link" else _url(a["slug"]),
                 "private": a["admin_only"],
                 "editable": a["kind"] == "page",
+                "updated": datetime.fromtimestamp(a["updated"], timezone.utc).isoformat(timespec="seconds"),
             }
             for a in hub.list_artifacts(user)
         ]
@@ -95,17 +97,20 @@ def build_mcp() -> MCPServer:
     @mcp.tool(
         name="get_app",
         title="Get app source",
-        description="Return the current HTML source of a single-file app. Call this before update_app or edit_app "
+        description="Return the current HTML source of a single-file app, with its title, description and emoji. Call this before update_app or edit_app "
         "unless the app's current source is already in the conversation. Use list_apps to find the slug.",
         annotations=ToolAnnotations(readOnlyHint=True),
         structured_output=False,
     )
     def get_app(slug: str) -> str:
         try:
-            _user()
-            return hub.page_source(slug)
+            user = _user()
+            html = hub.page_source(slug)
+            info = next((a for a in hub.list_artifacts(user) if a["slug"] == slug), {})
         except hub.HubError as e:
             return _error(str(e))
+        return json.dumps({"slug": slug, "title": info.get("title", ""), "description": info.get("description", ""),
+                           "emoji": info.get("emoji", ""), "html": html}, ensure_ascii=False)
 
     @mcp.tool(
         name="create_app",

@@ -226,3 +226,20 @@ async def test_revoke_removes_access_and_refresh(provider, oauth_client, issued_
     with hub.db() as con:
         assert con.execute("SELECT COUNT(*) FROM oauth_tokens").fetchone()[0] == 0
 
+
+
+@pytest.mark.anyio
+async def test_issuing_tokens_purges_expired_rows(provider, oauth_client, issued_token, hub):
+    with hub.db() as con:
+        con.execute("UPDATE oauth_tokens SET expires_at=?", (int(time.time()) - 1,))
+    with hub.db() as con:
+        oauth._issue(con, oauth_client.client_id, "admin@test.no", [], None)
+    with hub.db() as con:
+        assert con.execute("SELECT COUNT(*) FROM oauth_tokens WHERE expires_at < ?",
+                           (int(time.time()),)).fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM oauth_tokens").fetchone()[0] == 2
+
+
+def test_consent_page_warns(admin_client, pending_req):
+    r = admin_client.get(f"/oauth/consent?req={pending_req}")
+    assert "Godkjenn bare hvis du nettopp startet tilkoblingen selv fra Claude." in r.text

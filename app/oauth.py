@@ -65,6 +65,7 @@ def _purge(con) -> None:
 def _issue(con, client_id: str, email: str, scopes: list[str], resource: str | None,
            refresh_scopes: list[str] | None = None) -> OAuthToken:
     """New access + refresh token pair; only the hashes are stored."""
+    _purge(con)
     now = int(time.time())
     access, refresh = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     rows = [(_hash(access), "access", " ".join(scopes), now + ACCESS_TTL),

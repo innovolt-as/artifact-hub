@@ -37,14 +37,21 @@ def save(artifacts_dir: Path, slug: str) -> Path | None:
 
 
 def rename(artifacts_dir: Path, old: str, new: str) -> None:
-    """Move the history along when an artifact gets a new slug."""
+    """Move the history along when an artifact gets a new slug; merges with any history already there."""
     src, dst = _dir(artifacts_dir, old), _dir(artifacts_dir, new)
     if not src.is_dir():
         return
-    if dst.exists():  # stale history under the new name is replaced
-        shutil.rmtree(dst)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    src.rename(dst)
+    dst.mkdir(parents=True, exist_ok=True)
+    for f in sorted(src.iterdir()):  # history left under the new name (e.g. from a deleted app) is kept too
+        target = dst / f.name
+        n = 1
+        while target.exists():  # same timestamp twice: keep both
+            target = dst / f"{f.stem}-{n}{f.suffix}"
+            n += 1
+        f.rename(target)
+    src.rmdir()
+    for old in list_versions(artifacts_dir, new)[:-KEEP]:
+        old.unlink(missing_ok=True)
 
 
 def list_versions(artifacts_dir: Path, slug: str) -> list[Path]:

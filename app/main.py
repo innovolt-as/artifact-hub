@@ -823,8 +823,10 @@ def _single_page(slug: str) -> Path:
     meta_path = _meta_path(slug)
     if not meta_path:
         raise HubError(f"Fant ingen side som heter «{slug}».")
-    if meta_path.name.endswith(".link.json") or meta_path.name == "meta.json":
-        raise HubError(f"«{slug}» er ikke en enkeltfil-side (lenkekort eller mappe-app) og kan ikke endres på denne måten.")
+    if meta_path.name.endswith(".link.json"):
+        raise HubError(f"«{slug}» er et lenkekort uten HTML. Bruk update_app_info for å endre tittel, beskrivelse eller lenke-info.")
+    if meta_path.name == "meta.json":
+        raise HubError(f"«{slug}» er en app med flere filer – last opp ny versjon som zip i /admin.")
     return ARTIFACTS_DIR / f"{slug}.html"
 
 

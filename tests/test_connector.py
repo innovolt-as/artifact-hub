@@ -1,5 +1,6 @@
 """The MCP connector: JSON-RPC straight at /mcp, with a token from the OAuth provider."""
 import json
+from datetime import datetime
 
 import pytest
 
@@ -75,9 +76,11 @@ def test_create_then_list_then_get(mcp, token, hub):
     apps = json.loads(text(call(mcp, token, "list_apps")))
     hei = next(a for a in apps if a["slug"] == "hei")
     assert hei["title"] == "Hei" and hei["private"] is True and hei["editable"] is True
+    assert datetime.fromisoformat(hei["updated"]).tzinfo is not None
 
-    html = text(call(mcp, token, "get_app", slug="hei"))
-    assert html == PAGE and "hub.js" not in html
+    got = json.loads(text(call(mcp, token, "get_app", slug="hei")))
+    assert got["html"] == PAGE and "hub.js" not in got["html"]
+    assert (got["title"], got["emoji"], got["description"]) == ("Hei", "👋", "")
 
 
 def test_create_existing_returns_error_text(mcp, token):
@@ -95,7 +98,10 @@ def test_update_missing_and_folder_app_refused(mcp, token, hub):
     (d / "index.html").write_text(PAGE)
     (d / "meta.json").write_text("{}")
     res = call(mcp, token, "update_app", slug="mappe", html=PAGE)
-    assert res["isError"] is True and "mappe-app" in text(res)
+    assert res["isError"] is True and "flere filer" in text(res) and "/admin" in text(res)
+    (hub.ARTIFACTS_DIR / "kort.link.json").write_text('{"url": "https://x.no", "title": "K"}')
+    res = call(mcp, token, "update_app", slug="kort", html=PAGE)
+    assert res["isError"] is True and "update_app_info" in text(res)
 
 
 def test_update_app_replaces_and_keeps_private(mcp, token, hub):

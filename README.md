@@ -98,8 +98,9 @@ Legge tilbake en gammel versjon: kopier fila til `data/artifacts/<slug>.html`
 
 ### Trekke tilbake tilgang
 
-Fjern e-posten fra `ADMIN_EMAILS` (sjekkes ved hvert kall, så tilgangen stopper med en gang), eller slett radene
-i SQLite-tabellene `oauth_tokens`, `oauth_codes`, `oauth_requests` og `oauth_clients` i `data/hub.db`.
+Fjern e-posten fra `ADMIN_EMAILS` og kjør `docker compose up -d` (sjekkes ved hvert kall etter omstart). Å slette
+radene i SQLite-tabellen `oauth_tokens` i `data/hub.db` (evt. også `oauth_codes`, `oauth_requests` og
+`oauth_clients`) virker med en gang.
 
 ### Tester
 

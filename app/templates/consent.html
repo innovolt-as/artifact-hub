@@ -9,6 +9,7 @@
   {% else %}
     <h1>Gi Claude tilgang til å publisere apper i {{ site }}?</h1>
     <p class="muted"><strong>{{ client_name }}</strong> ber om tilgang på vegne av {{ user }}. Den kan da opprette og oppdatere apper i huben.</p>
+    <p class="muted">Godkjenn bare hvis du nettopp startet tilkoblingen selv fra Claude.</p>
     <form method="post" action="/oauth/consent">
       <input type="hidden" name="req" value="{{ req }}">
       <button class="primary" name="decision" value="allow">Gi tilgang</button>
