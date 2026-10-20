@@ -58,6 +58,13 @@ MAGIC_TTL = 15 * 60               # seconds a magic link is valid
 SESSION_TTL = 30 * 24 * 3600      # seconds a session cookie lives
 COOKIE = "hub_session"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+OPEN_SIGNUP = "*" in ALLOWED_DOMAINS  # ALLOWED_DOMAINS=* lets anyone with an e-mail log in
+
+# Rate limits for sending magic links (protects the SMTP sender from being used for spam)
+MAX_LINKS_PER_EMAIL = 3           # unexpired links per address (i.e. per MAGIC_TTL)
+MAX_LINKS_PER_IP = 10             # per hour
+_ip_sends: dict[str, list[float]] = {}
 
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -95,6 +102,8 @@ def email_allowed(email: str) -> bool:
     email = email.lower()
     if email in ADMIN_EMAILS or email in ALLOWED_EMAILS:
         return True
+    if OPEN_SIGNUP:
+        return bool(EMAIL_RE.match(email))
     domain = email.rsplit("@", 1)[-1] if "@" in email else ""
     return domain in ALLOWED_DOMAINS
 
@@ -111,6 +120,16 @@ def current_user(request: Request) -> str | None:
         return signer.loads(raw, max_age=SESSION_TTL)["email"]
     except (BadSignature, KeyError):
         return None
+
+
+def ip_rate_limited(ip: str) -> bool:
+    now = time.time()
+    recent = [t for t in _ip_sends.get(ip, []) if now - t < 3600]
+    if len(recent) >= MAX_LINKS_PER_IP:
+        _ip_sends[ip] = recent
+        return True
+    _ip_sends[ip] = recent + [now]
+    return False
 
 
 def safe_next(url: str | None) -> str:
@@ -248,7 +267,16 @@ def login_submit(request: Request, email: str = Form(...), next: str = Form("/")
     email = email.strip().lower()
     next = safe_next(next)
     # Always show "sent" so we don't leak who is on the allowlist.
+    ip = request.client.host if request.client else "?"
     if email_allowed(email):
+        with db() as con:
+            pending = con.execute(
+                "SELECT COUNT(*) FROM magic_tokens WHERE email=? AND used=0 AND expires_at>?",
+                (email, int(time.time())),
+            ).fetchone()[0]
+        if pending >= MAX_LINKS_PER_EMAIL or ip_rate_limited(ip):
+            log.warning("Rate limited magic link for %s from %s", email, ip)
+            return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email})
         token = secrets.token_urlsafe(32)
         with db() as con:
             con.execute(

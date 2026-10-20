@@ -72,6 +72,8 @@ Du kan også bare `scp`/`rsync` filer rett inn i `data/artifacts/` – appen les
 
 - `ADMIN_EMAILS` – ser admin-siden og alt som er `admin_only`
 - `ALLOWED_EMAILS` / `ALLOWED_DOMAINS` – kan logge inn og se delte artifacts
+- `ALLOWED_DOMAINS=*` – alle med en e-postadresse kan logge inn (åpen side bak innlogging)
+- Maks 3 aktive lenker per e-post og 10 utsendelser per IP per time, så skjemaet ikke kan brukes til spam
 - Alle andre får «sjekk e-posten din», men ingen e-post sendes (lekker ikke hvem som er på listen)
 
 Magisk lenke er gyldig i 15 minutter og kan brukes én gang. Innlogging varer 30 dager.
