@@ -1067,3 +1067,10 @@ def healthz():
 from app import oauth  # noqa: E402  (imports this module, so it must come last)
 
 app.include_router(oauth.router)
+
+# ---------------------------------------------------------------- Claude connector (MCP)
+from app import connector  # noqa: E402
+
+connector_app = connector.Connector()
+app.router.lifespan_context = connector_app.lifespan  # runs the MCP session manager
+app.mount("/", connector_app)  # last, so every FastAPI route above wins
