@@ -34,7 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from app import versions
+from app import home, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -153,6 +153,8 @@ with db() as con:
              resource   TEXT,
              expires_at INTEGER NOT NULL)"""
     )
+    # Front page per user: app opens, pins and view mode (app/home.py)
+    home.create_tables(con)
 
 
 # ---------------------------------------------------------------- auth helpers
