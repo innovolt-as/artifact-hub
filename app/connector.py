@@ -25,7 +25,12 @@ Publish and maintain HTML apps on {hub.SITE_NAME} ({hub.BASE_URL}): single pages
 Use list_apps to find an app's slug. Use create_app only for a brand-new app; new apps are private
 (only admins see them) until the user asks to share them. Before update_app or edit_app, call get_app
 unless the app's current source is already in the conversation. Prefer edit_app for small changes.
-Only publish or change apps when the user explicitly asks you to."""
+Only publish or change apps when the user explicitly asks you to.
+
+Apps also keep data for each logged-in user (what they read and write through window.claude.use("db")).
+list_app_data, get_app_data, set_app_data and delete_app_data reach that data for the user behind this
+connection only. Before writing, read the app's source (get_app) and existing documents so the format matches
+what the app expects. Write data when the user asks you to log, add or change something in an app."""
 
 
 class Edit(BaseModel):
@@ -196,6 +201,71 @@ def build_mcp() -> MCPServer:
         except hub.HubError as e:
             return _error(str(e))
         return f"Oppdatert info for «{slug}»."
+
+    @mcp.tool(
+        name="list_app_data",
+        title="List app data",
+        description="Show what the user has stored in an app (the documents the app reads and writes through "
+        "window.claude.use('db')). Without collection: an overview {collection: [document ids]}. With a collection "
+        "path (odd number of segments, e.g. 'days'): {document id: data} for that collection (at most 500).",
+        annotations=ToolAnnotations(readOnlyHint=True),
+        structured_output=False,
+    )
+    def list_app_data(slug: str, collection: str | None = None) -> str:
+        try:
+            user = _user()
+            out = hub.doc_list(slug, user, collection) if collection else hub.doc_overview(slug, user)
+        except hub.HubError as e:
+            return _error(str(e))
+        return json.dumps(out, ensure_ascii=False)
+
+    @mcp.tool(
+        name="get_app_data",
+        title="Read app data",
+        description="Read one document from the user's data in an app. path has an even number of segments, "
+        "e.g. 'days/2026-10-22' or 'settings/main'. Returns {\"path\", \"exists\", \"data\"}.",
+        annotations=ToolAnnotations(readOnlyHint=True),
+        structured_output=False,
+    )
+    def get_app_data(slug: str, path: str) -> str:
+        try:
+            data = hub.doc_get(slug, _user(), path)
+        except hub.HubError as e:
+            return _error(str(e))
+        return json.dumps({"path": path, "exists": data is not None, "data": data}, ensure_ascii=False)
+
+    @mcp.tool(
+        name="set_app_data",
+        title="Write app data",
+        description="Write one document in the user's data for an app; the app sees it the next time it loads or "
+        "polls. path has an even number of segments, e.g. 'days/2026-10-22'. data is a JSON object. "
+        "merge=false replaces the document; merge=true deep-merges objects into an existing one (lists are "
+        "replaced, so to add to a list: get_app_data, append, and write the whole list). Match the format the app "
+        "uses: read its source with get_app and existing documents first. Only write when the user asks.",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True),
+        structured_output=False,
+    )
+    def set_app_data(slug: str, path: str, data: dict, merge: bool = False) -> str:
+        try:
+            stored = hub.doc_set(slug, _user(), path, data, merge=merge)
+        except hub.HubError as e:
+            return _error(str(e))
+        return json.dumps({"ok": True, "path": path, "data": stored}, ensure_ascii=False)
+
+    @mcp.tool(
+        name="delete_app_data",
+        title="Delete app data",
+        description="Delete one document from the user's data in an app (path like 'days/2026-10-22'). "
+        "Only when the user explicitly asks to delete it.",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True),
+        structured_output=False,
+    )
+    def delete_app_data(slug: str, path: str) -> str:
+        try:
+            gone = hub.doc_delete(slug, _user(), path)
+        except hub.HubError as e:
+            return _error(str(e))
+        return f"Slettet {path}." if gone else f"Fant ikke {path}; ingenting slettet."
 
     return mcp
 

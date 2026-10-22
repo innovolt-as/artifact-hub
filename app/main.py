@@ -578,6 +578,89 @@ def store_dump(slug: str, user: str = Depends(require_user)):
     return out
 
 
+# ---------------------------------------------------------------- shared data helpers (connector)
+# The same documents an app reads and writes through window.claude.use("db") (hub.js), for one user.
+MAX_DATA_DOCS_LISTED = 500
+
+
+def _data_owner(slug: str, user: str) -> str:
+    found = artifact_root(slug)
+    if not found or (found[1] and not is_admin(user)):
+        raise HubError(f"Fant ingen app som heter «{slug}». Lenkekort har ikke data.")
+    return user.lower()
+
+
+def _data_path(path: str, want_doc: bool) -> tuple[str, str]:
+    segs = [s for s in str(path).split("/") if s]
+    if not segs or not all(SEG_RE.match(s) for s in segs) or (len(segs) % 2 == 0) != want_doc:
+        kind = "et dokument (partall ledd, f.eks. days/2026-10-22)" if want_doc else "en samling (oddetall ledd, f.eks. days)"
+        raise HubError(f"Ugyldig sti «{path}»: må være {kind}.")
+    return ("/".join(segs[:-1]), segs[-1]) if want_doc else ("/".join(segs), "")
+
+
+def doc_overview(slug: str, user: str) -> dict[str, list[str]]:
+    """{collection: [doc ids]} for everything the user has stored in one app."""
+    owner = _data_owner(slug, user)
+    with db() as con:
+        rows = con.execute("SELECT collection, doc_id FROM docs WHERE slug=? AND owner=? ORDER BY collection, doc_id",
+                           (slug, owner)).fetchall()
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        out.setdefault(r["collection"], []).append(r["doc_id"])
+    return out
+
+
+def doc_list(slug: str, user: str, collection: str) -> dict[str, dict]:
+    """{doc_id: data} for one collection (at most MAX_DATA_DOCS_LISTED, newest ids last)."""
+    owner = _data_owner(slug, user)
+    col, _ = _data_path(collection, want_doc=False)
+    with db() as con:
+        rows = con.execute("SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
+                           (slug, owner, col)).fetchall()
+    return {r["doc_id"]: json.loads(r["data"]) for r in rows[-MAX_DATA_DOCS_LISTED:]}
+
+
+def doc_get(slug: str, user: str, path: str) -> dict | None:
+    owner = _data_owner(slug, user)
+    col, doc_id = _data_path(path, want_doc=True)
+    with db() as con:
+        row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
+                          (slug, owner, col, doc_id)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False) -> dict:
+    """Write one document (merge=True deep-merges into an existing one); returns what is stored now."""
+    owner = _data_owner(slug, user)
+    col, doc_id = _data_path(path, want_doc=True)
+    if not isinstance(data, dict):
+        raise HubError("Et dokument må være et JSON-objekt.")
+    with db() as con:
+        row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
+                          (slug, owner, col, doc_id)).fetchone()
+        if merge and row:
+            data = _deep_merge(json.loads(row["data"]), data)
+        raw = json.dumps(data, ensure_ascii=False)
+        if len(raw.encode("utf-8")) > MAX_DOC_BYTES:
+            raise HubError("Dokumentet blir større enn 256 KB.")
+        con.execute(
+            """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
+               ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
+            (slug, owner, col, doc_id, raw, int(time.time())),
+        )
+    log.info("Data %s %s/%s for %s", "merged" if merge else "set", slug, path, owner)
+    return data
+
+
+def doc_delete(slug: str, user: str, path: str) -> bool:
+    owner = _data_owner(slug, user)
+    col, doc_id = _data_path(path, want_doc=True)
+    with db() as con:
+        n = con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
+                        (slug, owner, col, doc_id)).rowcount
+    return n > 0
+
+
 # ---------------------------------------------------------------- routes: per-user app data
 # Small key/value store so artifacts can keep data for the logged-in user.
 # Every row belongs to one e-mail and one app name; a user can never read or write someone else's rows.

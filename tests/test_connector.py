@@ -1,4 +1,5 @@
 """The MCP connector: JSON-RPC straight at /mcp, with a token from the OAuth provider."""
+import hashlib
 import json
 from datetime import datetime
 
@@ -54,11 +55,15 @@ def test_metadata_endpoints(client):
     assert r.status_code == 200 and r.json()["resource"] == "https://hub.test/mcp"
 
 
-def test_lists_six_tools(mcp, token):
+def test_lists_all_tools(mcp, token):
     r = rpc(mcp, token, "tools/list")
     assert r.status_code == 200, r.text
     tools = {t["name"]: t for t in r.json()["result"]["tools"]}
-    assert set(tools) == {"list_apps", "get_app", "create_app", "update_app", "edit_app", "update_app_info"}
+    assert set(tools) == {"list_apps", "get_app", "create_app", "update_app", "edit_app", "update_app_info",
+                          "list_app_data", "get_app_data", "set_app_data", "delete_app_data"}
+    assert tools["list_app_data"]["annotations"]["readOnlyHint"] is True
+    assert tools["get_app_data"]["annotations"]["readOnlyHint"] is True
+    assert tools["set_app_data"]["annotations"]["destructiveHint"] is True
     assert tools["list_apps"]["annotations"]["readOnlyHint"] is True
     assert tools["get_app"]["annotations"]["readOnlyHint"] is True
     assert tools["update_app"]["annotations"]["destructiveHint"] is True
@@ -151,3 +156,66 @@ def test_folder_app_get_update_edit(mcp, token, hub):
     assert not res.get("isError"), res
     assert "Hade" in (d / "index.html").read_text()
     assert not (hub.ARTIFACTS_DIR / "mappe.html").exists()
+
+
+def _page(hub, slug="mat"):
+    (hub.ARTIFACTS_DIR / f"{slug}.html").write_text(PAGE)
+    (hub.ARTIFACTS_DIR / f"{slug}.meta.json").write_text("{}")
+
+
+def test_app_data_roundtrip_reaches_the_app_store(mcp, token, hub):
+    _page(hub)
+    day = {"date": "2026-10-22", "items": [{"name": "Banan", "p": 1.4, "k": 108}]}
+    res = call(mcp, token, "set_app_data", slug="mat", path="days/2026-10-22", data=day)
+    assert not res.get("isError"), res
+    got = json.loads(text(call(mcp, token, "get_app_data", slug="mat", path="days/2026-10-22")))
+    assert got["exists"] is True and got["data"] == day
+    assert json.loads(text(call(mcp, token, "list_app_data", slug="mat"))) == {"days": ["2026-10-22"]}
+    assert json.loads(text(call(mcp, token, "list_app_data", slug="mat", collection="days"))) == {"2026-10-22": day}
+    # the app itself (hub.js -> /api/store) sees the same document for the same user
+    with make_client(_token_email(hub, token)) as app_client:
+        r = app_client.get("/api/store/mat/d", params={"path": "days/2026-10-22"})
+        assert r.status_code == 200 and r.json()["data"] == day
+
+
+def _token_email(hub, token):
+    """The e-mail the connector token belongs to."""
+    with hub.db() as con:
+        row = con.execute("SELECT email FROM oauth_tokens WHERE token_hash=?",
+                          (hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
+    return row["email"] if row else "admin@test.no"
+
+
+def test_app_data_is_private_per_user(mcp, token, hub, user_client):
+    _page(hub)
+    call(mcp, token, "set_app_data", slug="mat", path="days/2026-10-22", data={"items": [1]})
+    r = user_client.get("/api/store/mat/d", params={"path": "days/2026-10-22"})
+    assert r.status_code == 200 and r.json()["data"] is None
+    user_client.put("/api/store/mat/d", params={"path": "days/2026-10-22"}, json={"items": ["annen"]})
+    got = json.loads(text(call(mcp, token, "get_app_data", slug="mat", path="days/2026-10-22")))
+    assert got["data"] == {"items": [1]}
+
+
+def test_app_data_merge_and_delete(mcp, token, hub):
+    _page(hub)
+    call(mcp, token, "set_app_data", slug="mat", path="settings/main", data={"weight": 90, "favs": {"a": 1}})
+    res = call(mcp, token, "set_app_data", slug="mat", path="settings/main", data={"favs": {"b": 2}}, merge=True)
+    assert json.loads(text(res))["data"] == {"weight": 90, "favs": {"a": 1, "b": 2}}
+    assert "Slettet" in text(call(mcp, token, "delete_app_data", slug="mat", path="settings/main"))
+    assert json.loads(text(call(mcp, token, "get_app_data", slug="mat", path="settings/main")))["exists"] is False
+    assert "Fant ikke" in text(call(mcp, token, "delete_app_data", slug="mat", path="settings/main"))
+
+
+def test_app_data_refuses_bad_input(mcp, token, hub):
+    _page(hub)
+    (hub.ARTIFACTS_DIR / "kort.link.json").write_text('{"url": "https://x.no", "title": "K"}')
+    res = call(mcp, token, "set_app_data", slug="kort", path="days/x", data={})
+    assert res["isError"] is True and "Lenkekort" in text(res)
+    res = call(mcp, token, "set_app_data", slug="finnes-ikke", path="days/x", data={})
+    assert res["isError"] is True
+    res = call(mcp, token, "set_app_data", slug="mat", path="days", data={})
+    assert res["isError"] is True and "partall" in text(res)
+    res = call(mcp, token, "list_app_data", slug="mat", collection="days/x")
+    assert res["isError"] is True and "oddetall" in text(res)
+    res = call(mcp, token, "set_app_data", slug="mat", path="days/x", data={"s": "x" * 300_000})
+    assert res["isError"] is True and "256 KB" in text(res)

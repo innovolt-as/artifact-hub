@@ -84,6 +84,8 @@ Connectoren kan ikke slette apper. `update_app`/`edit_app` virker på enkeltfils
 
 Eksempler: «legg den i huben», «oppdater timelisten i huben», «gjør Timeliste synlig for alle».
 
+**Data i appene:** `list_app_data`, `get_app_data`, `set_app_data` og `delete_app_data` leser og skriver de samme dokumentene som appen bruker via `window.claude.use("db")`, for brukeren bak koblingen (bare din egen data). Slik kan du for eksempel si «i dag spiste jeg …» i en samtale, og Claude fører det inn i Matboka.
+
 **Nye apper fra Claude er private** (bare admin ser dem) til du deler dem: «🌐 delt»-knappen i `/admin`,
 eller be Claude sette `private: false`.
 
