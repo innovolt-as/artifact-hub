@@ -68,18 +68,20 @@ def test_rejects_too_large(hub):
     assert hub._meta_path("x") is None
 
 
-def test_update_refuses_folder_app_and_link(hub, admin_client, upload):
+def test_update_uploaded_folder_app_but_refuse_link(hub, admin_client, upload):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("index.html", HTML)
+        z.writestr("sw.js", "// sw")
     upload(admin_client, "mappe.zip", buf.getvalue())
-    (hub.ARTIFACTS_DIR / "kort.link.json").write_text(json.dumps({"title": "K", "url": "https://x.no/y"}))
-    for slug in ("mappe", "kort"):
-        with pytest.raises(hub.HubError):
-            hub.save_page(slug, HTML2, create=False)
-    assert (hub.ARTIFACTS_DIR / "mappe" / "index.html").read_text() == HTML
-    assert (hub.ARTIFACTS_DIR / "kort.link.json").is_file()
+    hub.save_page("mappe", HTML2, create=False)
+    assert (hub.ARTIFACTS_DIR / "mappe" / "index.html").read_text() == HTML2
+    assert (hub.ARTIFACTS_DIR / "mappe" / "sw.js").read_text() == "// sw"
     assert not (hub.ARTIFACTS_DIR / "mappe.html").exists()
+    (hub.ARTIFACTS_DIR / "kort.link.json").write_text(json.dumps({"title": "K", "url": "https://x.no/y"}))
+    with pytest.raises(hub.HubError):
+        hub.save_page("kort", HTML2, create=False)
+    assert (hub.ARTIFACTS_DIR / "kort.link.json").is_file()
 
 
 def test_edit_page_all_or_nothing(hub):
@@ -137,3 +139,51 @@ def test_set_info_missing(hub):
 def test_page_source_has_no_shim(hub, admin_client):
     hub.save_page("a", HTML, create=True)
     assert "hub.js" in admin_client.get("/a/a/").text and "hub.js" not in hub.page_source("a")
+
+
+def _folder_app(hub, slug="mappe"):
+    d = hub.ARTIFACTS_DIR / slug
+    d.mkdir()
+    (d / "index.html").write_text(HTML, "utf-8")
+    (d / "sw.js").write_text("// service worker", "utf-8")
+    (d / "meta.json").write_text(json.dumps({"title": "Mappe", "emoji": "📁"}), "utf-8")
+    return d
+
+
+def test_folder_app_source_is_its_index(hub):
+    _folder_app(hub)
+    assert hub.page_source("mappe") == HTML
+
+
+def test_update_folder_app_replaces_index_only(hub):
+    d = _folder_app(hub)
+    hub.save_page("mappe", HTML2, create=False)
+    assert "v2" in (d / "index.html").read_text()
+    assert (d / "sw.js").read_text() == "// service worker"
+    assert not (hub.ARTIFACTS_DIR / "mappe.html").exists() and not (hub.ARTIFACTS_DIR / "mappe.meta.json").exists()
+    meta = hub._read_meta(hub._meta_path("mappe"))
+    assert meta["title"] == "Mappe" and meta["emoji"] == "📁" and not meta.get("admin_only")
+    saved = versions.list_versions(hub.ARTIFACTS_DIR, "mappe")
+    assert len(saved) == 1 and saved[0].suffix == ".zip"
+    with zipfile.ZipFile(saved[0]) as z:
+        assert z.read("index.html").decode() == HTML and "sw.js" in z.namelist()
+
+
+def test_edit_folder_app(hub):
+    d = _folder_app(hub)
+    hub.edit_page("mappe", [("<p>v1</p>", "<p>v3</p>")])
+    assert "v3" in (d / "index.html").read_text() and (d / "sw.js").exists()
+    assert len(versions.list_versions(hub.ARTIFACTS_DIR, "mappe")) == 1
+
+
+def test_update_folder_app_can_change_info(hub):
+    _folder_app(hub)
+    hub.save_page("mappe", HTML2, create=False, title="Ny tittel", private=True)
+    meta = hub._read_meta(hub._meta_path("mappe"))
+    assert meta["title"] == "Ny tittel" and meta["admin_only"] is True
+
+
+def test_create_fails_if_folder_app_exists(hub):
+    _folder_app(hub)
+    with pytest.raises(hub.HubError, match="update_app"):
+        hub.save_page("mappe", HTML, create=True)

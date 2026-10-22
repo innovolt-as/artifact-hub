@@ -90,15 +90,9 @@ def test_create_existing_returns_error_text(mcp, token):
     assert "update_app" in text(res) and "finnes allerede" in text(res)
 
 
-def test_update_missing_and_folder_app_refused(mcp, token, hub):
+def test_update_missing_and_link_card_refused(mcp, token, hub):
     res = call(mcp, token, "update_app", slug="finnes-ikke", html=PAGE)
     assert res["isError"] is True and "Fant ingen" in text(res)
-    d = hub.ARTIFACTS_DIR / "mappe"
-    d.mkdir()
-    (d / "index.html").write_text(PAGE)
-    (d / "meta.json").write_text("{}")
-    res = call(mcp, token, "update_app", slug="mappe", html=PAGE)
-    assert res["isError"] is True and "flere filer" in text(res) and "/admin" in text(res)
     (hub.ARTIFACTS_DIR / "kort.link.json").write_text('{"url": "https://x.no", "title": "K"}')
     res = call(mcp, token, "update_app", slug="kort", html=PAGE)
     assert res["isError"] is True and "update_app_info" in text(res)
@@ -138,3 +132,22 @@ def test_non_admin_token_refused(mcp, token, monkeypatch, hub):
 def test_existing_routes_still_work(admin_client):  # mounting on "/" must not shadow FastAPI
     assert admin_client.get("/admin").status_code == 200 and admin_client.get("/healthz").json() == {"ok": True}
     assert admin_client.get("/").status_code == 200
+
+
+def test_folder_app_get_update_edit(mcp, token, hub):
+    d = hub.ARTIFACTS_DIR / "mappe"
+    d.mkdir()
+    (d / "index.html").write_text(PAGE)
+    (d / "sw.js").write_text("// sw")
+    (d / "meta.json").write_text('{"title": "Mappe"}')
+    listed = {a["slug"]: a for a in json.loads(text(call(mcp, token, "list_apps")))}
+    assert listed["mappe"]["editable"] is True and listed["mappe"]["kind"] == "app"
+    got = json.loads(text(call(mcp, token, "get_app", slug="mappe")))
+    assert got["html"] == PAGE and got["kind"] == "app"
+    res = call(mcp, token, "update_app", slug="mappe", html=PAGE.replace("Hei", "Hallo"))
+    assert not res.get("isError"), res
+    assert "Hallo" in (d / "index.html").read_text() and (d / "sw.js").read_text() == "// sw"
+    res = call(mcp, token, "edit_app", slug="mappe", edits=[{"old": "Hallo", "new": "Hade"}])
+    assert not res.get("isError"), res
+    assert "Hade" in (d / "index.html").read_text()
+    assert not (hub.ARTIFACTS_DIR / "mappe.html").exists()

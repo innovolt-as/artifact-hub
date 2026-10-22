@@ -80,7 +80,7 @@ og trykk «Gi tilgang» på godkjenningssiden. Bare e-poster i `ADMIN_EMAILS` ka
 | `edit_app` | små endringer: liste av `{old, new}`-utdrag, alt eller ingenting |
 | `update_app_info` | endre tittel, beskrivelse, emoji eller `private` uten å røre HTML-en |
 
-Connectoren kan ikke slette apper, og `update_app`/`edit_app` virker bare på enkeltfils-apper (ikke mappe-apper eller lenkekort).
+Connectoren kan ikke slette apper. `update_app`/`edit_app` virker på enkeltfils-apper og på `index.html` i mappe-apper (de andre filene i mappen, som service worker og bilder, blir liggende). Lenkekort endres bare med `update_app_info`.
 
 Eksempler: «legg den i huben», «oppdater timelisten i huben», «gjør Timeliste synlig for alle».
 

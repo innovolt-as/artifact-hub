@@ -21,7 +21,7 @@ from app import main as hub
 from app.oauth import HubOAuthProvider
 
 INSTRUCTIONS = f"""\
-Publish and maintain single-file HTML apps on {hub.SITE_NAME} ({hub.BASE_URL}).
+Publish and maintain HTML apps on {hub.SITE_NAME} ({hub.BASE_URL}): single pages, and the index.html of folder apps.
 Use list_apps to find an app's slug. Use create_app only for a brand-new app; new apps are private
 (only admins see them) until the user asks to share them. Before update_app or edit_app, call get_app
 unless the app's current source is already in the conversation. Prefer edit_app for small changes.
@@ -68,7 +68,7 @@ def build_mcp() -> MCPServer:
         name="list_apps",
         title="List apps",
         description="List every app and link card on the hub, with slug, title, description, URL, whether it is "
-        "private, and whether it is editable (only single-file pages are). Use this to find the slug of an "
+        "private, and whether it is editable (pages and folder apps are; link cards are not). Use this to find the slug of an "
         "existing app before get_app, update_app, edit_app or update_app_info.",
         annotations=ToolAnnotations(readOnlyHint=True),
         structured_output=False,
@@ -87,7 +87,7 @@ def build_mcp() -> MCPServer:
                 "kind": a["kind"],
                 "url": a["url"] if a["kind"] == "link" else _url(a["slug"]),
                 "private": a["admin_only"],
-                "editable": a["kind"] == "page",
+                "editable": a["kind"] in ("page", "app"),
                 "updated": datetime.fromtimestamp(a["updated"], timezone.utc).isoformat(timespec="seconds"),
             }
             for a in hub.list_artifacts(user)
@@ -97,7 +97,8 @@ def build_mcp() -> MCPServer:
     @mcp.tool(
         name="get_app",
         title="Get app source",
-        description="Return the current HTML source of a single-file app, with its title, description and emoji. Call this before update_app or edit_app "
+        description="Return the current HTML source of an app (for a folder app: its index.html), with its title, description, emoji and kind. "
+        "Call this before update_app or edit_app "
         "unless the app's current source is already in the conversation. Use list_apps to find the slug.",
         annotations=ToolAnnotations(readOnlyHint=True),
         structured_output=False,
@@ -110,7 +111,7 @@ def build_mcp() -> MCPServer:
         except hub.HubError as e:
             return _error(str(e))
         return json.dumps({"slug": slug, "title": info.get("title", ""), "description": info.get("description", ""),
-                           "emoji": info.get("emoji", ""), "html": html}, ensure_ascii=False)
+                           "emoji": info.get("emoji", ""), "kind": info.get("kind", ""), "html": html}, ensure_ascii=False)
 
     @mcp.tool(
         name="create_app",
@@ -137,8 +138,9 @@ def build_mcp() -> MCPServer:
     @mcp.tool(
         name="update_app",
         title="Replace app",
-        description="Replace the whole HTML of an EXISTING single-file app (max 1 MB); the previous version is "
-        "kept. Fails if the slug does not exist; does not work on folder apps or link cards. Use list_apps to "
+        description="Replace the whole HTML of an EXISTING app (max 1 MB); the previous version is kept. For a folder "
+        "app this replaces its index.html and leaves its other files (scripts, images, service worker) as they are. "
+        "Fails if the slug does not exist or is a link card. Use list_apps to "
         "find the slug and call get_app first unless the current source is already in the conversation. "
         "For small changes prefer edit_app. Fields left out (title, description, emoji, private) stay as "
         "they are. Only call this when the user explicitly asks to publish the change.",
@@ -158,11 +160,11 @@ def build_mcp() -> MCPServer:
     @mcp.tool(
         name="edit_app",
         title="Edit app",
-        description="Make small changes to an EXISTING single-file app by replacing exact snippets of its HTML. "
+        description="Make small changes to an EXISTING app by replacing exact snippets of its HTML (for a folder app: its index.html). "
         "Each 'old' must match the current source exactly once; either all edits apply or none do. "
         "Prefer this over update_app for small changes. Call get_app first unless the current source is "
-        "already in the conversation; use list_apps to find the slug. Does not work on folder apps or link "
-        "cards. Only call this when the user explicitly asks to publish the change.",
+        "already in the conversation; use list_apps to find the slug. Does not work on link cards. "
+        "Only call this when the user explicitly asks to publish the change.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False),
         structured_output=False,
     )

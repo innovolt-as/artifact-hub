@@ -819,20 +819,21 @@ def _check_html(html: str) -> None:
 
 
 def _single_page(slug: str) -> Path:
-    """The .html file of an existing single-file page, or HubError."""
+    """The editable HTML of an existing app: the page itself, or index.html of a folder app. HubError otherwise."""
     meta_path = _meta_path(slug)
     if not meta_path:
         raise HubError(f"Fant ingen side som heter «{slug}».")
     if meta_path.name.endswith(".link.json"):
         raise HubError(f"«{slug}» er et lenkekort uten HTML. Bruk update_app_info for å endre tittel, beskrivelse eller lenke-info.")
     if meta_path.name == "meta.json":
-        raise HubError(f"«{slug}» er en app med flere filer – last opp ny versjon som zip i /admin.")
+        return ARTIFACTS_DIR / slug / "index.html"  # folder app: only index.html is edited, its other files stay
     return ARTIFACTS_DIR / f"{slug}.html"
 
 
 def save_page(slug: str, html: str, *, create: bool, title: str | None = None, description: str | None = None,
               emoji: str | None = None, private: bool | None = None) -> str:
-    """Create (private unless said otherwise) or replace a single-file page; returns the slug."""
+    """Create a single-file page (private unless said otherwise), or replace the HTML of an existing page or
+    folder app (its index.html); returns the slug."""
     if not SLUG_RE.match(slug):
         raise HubError(f"Ugyldig navn: «{slug}». Bruk små bokstaver, tall, punktum, bindestrek og understrek.")
     _check_html(html)
@@ -842,11 +843,11 @@ def save_page(slug: str, html: str, *, create: bool, title: str | None = None, d
         meta: dict = {}
         if private is None:
             private = True
+        dest, meta_path = ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json"
     else:
-        _single_page(slug)
-        meta = _read_meta(_meta_path(slug))
+        dest, meta_path = _single_page(slug), _meta_path(slug)  # a folder app gets a new index.html
+        meta = _read_meta(meta_path)
         versions.save(ARTIFACTS_DIR, slug)  # keep the previous version before replacing it
-    dest = ARTIFACTS_DIR / f"{slug}.html"
     _apply_info(meta, title, description, emoji)
     if private is not None:
         if private:
@@ -854,7 +855,7 @@ def save_page(slug: str, html: str, *, create: bool, title: str | None = None, d
         else:
             meta.pop("admin_only", None)
     dest.write_text(html, "utf-8")
-    _write_meta(ARTIFACTS_DIR / f"{slug}.meta.json", meta)
+    _write_meta(meta_path, meta)
     log.info("%s page %s", "Created" if create else "Updated", slug)
     return slug
 
