@@ -12,9 +12,10 @@ def _apps(*slugs, updated=0):
 
 
 def _visit(hub, email, slug, times=1, at=NOW):
+    """`times` separate opens, 11 minutes apart and ending at `at` (reloads within 10 minutes count once)."""
     with hub.db() as con:
-        for _ in range(times):
-            hub.home.record_visit(con, email, slug, now=at)
+        for i in reversed(range(times)):
+            hub.home.record_visit(con, email, slug, now=at - i * 660)
 
 
 def _sections(hub, email, apps, now=NOW):
@@ -272,3 +273,17 @@ def test_manifest_served(hub, client):
 def test_base_links_manifest(user_client):
     html = user_client.get("/").text
     assert 'rel="manifest"' in html and 'name="theme-color"' in html
+
+
+def test_reload_within_ten_minutes_is_one_visit(hub):
+    _visit(hub, "x@t.no", "a", at=NOW)
+    _visit(hub, "x@t.no", "a", at=NOW + 300)
+    _visit(hub, "x@t.no", "b", at=NOW + 300)
+    _visit(hub, "x@t.no", "a", at=NOW + 900)
+    with hub.db() as con:
+        stats = hub.home.visit_stats(con, "x@t.no", now=NOW + 900)
+    assert stats["a"] == {"count": 2, "last": NOW + 900} and stats["b"]["count"] == 1
+
+
+def test_no_translucent_status_bar(user_client):
+    assert "black-translucent" not in user_client.get("/").text

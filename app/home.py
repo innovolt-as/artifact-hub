@@ -13,6 +13,7 @@ import time
 DAY = 86400
 MOST_USED_DAYS = 30    # what counts towards "Mest brukt"
 KEEP_DAYS = 90         # visits older than this are deleted
+REVISIT_GAP = 600      # opening the same app again within 10 minutes (reloads) is not a new visit
 MOST_USED_MAX = 4
 SUMMARY_MAX = 140
 VIEWS = ("icons", "cards")
@@ -36,6 +37,10 @@ def create_tables(con: sqlite3.Connection) -> None:
 def record_visit(con: sqlite3.Connection, email: str, slug: str, now: int | None = None) -> None:
     now = int(now if now is not None else time.time())
     email = email.lower()
+    if con.execute(
+        "SELECT 1 FROM visits WHERE email=? AND slug=? AND at>?", (email, slug, now - REVISIT_GAP)
+    ).fetchone():
+        return
     con.execute("INSERT INTO visits(email, slug, at) VALUES(?,?,?)", (email, slug, now))
     con.execute("DELETE FROM visits WHERE email=? AND at<?", (email, now - KEEP_DAYS * DAY))
 

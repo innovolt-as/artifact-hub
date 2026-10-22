@@ -56,6 +56,7 @@
     li.addEventListener("contextmenu", (e) => { e.preventDefault(); openMenu(li, e.clientX, e.clientY); });
     li.addEventListener("touchstart", (e) => {
       const t = e.touches[0];
+      swallowClick = false; // a long press sends no click, so clear it before the next tap
       clearTimeout(timer);
       timer = setTimeout(() => { swallowClick = true; openMenu(li, t.clientX, t.clientY); }, 500);
     }, { passive: true });
