@@ -446,6 +446,27 @@ def index(request: Request, user: str = Depends(require_user)):
     )
 
 
+@app.get("/manifest.webmanifest")
+def manifest():
+    """Lets the hub be added to a phone's home screen and open without the browser bar."""
+    return JSONResponse(
+        {
+            "name": SITE_NAME,
+            "short_name": SITE_NAME,
+            "start_url": "/",
+            "scope": "/",
+            "display": "standalone",
+            "background_color": "#0b1a33",
+            "theme_color": "#0b1a33",
+            "icons": [
+                {"src": "/static/apple-touch-icon.png", "sizes": "180x180", "type": "image/png"},
+                {"src": "/static/logo.svg", "sizes": "any", "type": "image/svg+xml"},
+            ],
+        },
+        media_type="application/manifest+json",
+    )
+
+
 @app.get("/a/{slug}")
 def artifact_redirect(slug: str):
     return RedirectResponse(f"/a/{slug}/", status_code=301)

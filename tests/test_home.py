@@ -260,3 +260,15 @@ def test_new_dot_ignores_same_second(hub):
     _visit(hub, "x@t.no", "a", at=200)
     top, _ = _sections(hub, "x@t.no", [{"slug": "a", "title": "a", "updated": 200.7}], now=300)
     assert top[0]["new"] is False
+
+
+def test_manifest_served(hub, client):
+    r = client.get("/manifest.webmanifest")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/manifest+json")
+    m = json.loads(r.text)
+    assert m["display"] == "standalone" and m["start_url"] == "/" and m["name"] == hub.SITE_NAME
+
+
+def test_base_links_manifest(user_client):
+    html = user_client.get("/").text
+    assert 'rel="manifest"' in html and 'name="theme-color"' in html

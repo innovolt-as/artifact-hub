@@ -154,6 +154,27 @@ Huben legger derfor automatisk `<script src="/static/hub.js">` først i `<head>`
 - Dataene følger med når en app får ny adresse, og blir liggende hvis appen slettes (kommer tilbake ved ny opplasting).
 - `GET /api/store/<slug>` gir alt du har lagret i én app som JSON – greit som sikkerhetskopi.
 
+## Forsiden
+
+- **Mest brukt** øverst: hver innlogget bruker ser sine 4 mest åpnede apper siste 30 dager (huben logger
+  åpninger av `/a/<slug>/`, og eksterne lenkekort via `/go/<slug>`). Festede apper (★, eller hold inne /
+  høyreklikk på ikonet) ligger alltid først. Besøk eldre enn 90 dager slettes.
+- **Ikoner eller kort**: bryteren øverst til høyre. Valget lagres på kontoen.
+- **Blå prikk**: appen er endret siden du sist åpnet den.
+- Kan legges på hjemskjermen («Legg til på Hjem-skjerm») og åpnes da uten adresselinje.
+
+### Sammendrag på kortene
+
+En app kan vise én linje på kortet sitt (kortvisning). Appen skriver dokumentet `hub/summary`:
+
+```js
+const db = await window.claude.use("db");
+await db.doc("hub/summary").set({ text: "4-roms oslo 93 ▼1" });
+```
+
+Apper som bruker `/api/data/<slug>` skriver nøkkelen `hub/summary` med `{"value": {"text": "..."}}`.
+Teksten er per bruker, kuttes til 140 tegn og vises som ren tekst. Uten sammendrag står kortet uten linje.
+
 ## Tilgang
 
 - `ADMIN_EMAILS` – ser admin-siden og alt som er `admin_only`

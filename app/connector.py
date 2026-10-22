@@ -30,7 +30,12 @@ Only publish or change apps when the user explicitly asks you to.
 Apps also keep data for each logged-in user (what they read and write through window.claude.use("db")).
 list_app_data, get_app_data, set_app_data and delete_app_data reach that data for the user behind this
 connection only. Before writing, read the app's source (get_app) and existing documents so the format matches
-what the app expects. Write data when the user asks you to log, add or change something in an app."""
+what the app expects. Write data when the user asks you to log, add or change something in an app.
+
+The hub's front page can show one line from each app on its card. An app sets it by writing the document
+hub/summary = {{"text": "<one short line, e.g. 93 treff ▼1>"}} (db.doc("hub/summary").set(...)) whenever the
+numbers it shows change. When you build or change an app, add or keep that line if the app has a natural
+headline number."""
 
 
 class Edit(BaseModel):
