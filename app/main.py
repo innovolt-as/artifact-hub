@@ -324,6 +324,7 @@ def list_artifacts(user: str) -> list[dict]:
                 "slug": slug,
                 "kind": kind,
                 "url": url,
+                "open_url": f"/go/{slug}" if kind == "link" else url,  # /go logs the open, then redirects
                 "title": meta.get("title") or fallback,
                 "description": meta.get("description", ""),
                 "admin_only": bool(meta.get("admin_only")),
@@ -445,6 +446,8 @@ def serve_artifact(slug: str, path: str, user: str = Depends(require_user)):
     root, admin_only = found
     if admin_only and not is_admin(user):
         raise HTTPException(404)
+    if path in ("", "index.html"):
+        _log_visit(user, slug)
     if root.is_file():
         if path not in ("", "index.html"):
             raise HTTPException(404)
@@ -468,6 +471,25 @@ NO_SIDEWAYS_CSS = (
     "<style>html,body{overflow-x: clip !important}"
     "@media (pointer:coarse){input,select,textarea{font-size: max(16px, 1em) !important}}</style>"
 )
+
+
+def _log_visit(user: str, slug: str) -> None:
+    """Count an app open for the front page; never let it stop the app from opening."""
+    try:
+        with db() as con:
+            home.record_visit(con, user, slug)
+    except sqlite3.Error:
+        log.warning("Could not log visit to %s", slug, exc_info=True)
+
+
+@app.get("/go/{slug}")
+def open_link(slug: str, user: str = Depends(require_user)):
+    """Open an external link card, counting it like any other app."""
+    link = next((a for a in list_artifacts(user) if a["slug"] == slug and a["kind"] == "link"), None)
+    if not link:
+        raise HTTPException(404)
+    _log_visit(user, slug)
+    return RedirectResponse(link["url"], status_code=302)
 
 
 def _html_with_shim(path: Path, slug: str, user: str) -> HTMLResponse:

@@ -168,3 +168,36 @@ def test_prefs_api_rejects(hub, user_client, client):
     assert user_client.post("/api/prefs/pin", json={"slug": "hemmelig", "pinned": True}).status_code == 404
     assert user_client.post("/api/prefs/pin", json={"slug": "a", "pinned": "ja"}).status_code == 400
     assert client.post("/api/prefs/view", json={"view": "cards"}).status_code == 401
+
+
+def _visits(hub, email):
+    with hub.db() as con:
+        return [r["slug"] for r in con.execute("SELECT slug FROM visits WHERE email=?", (email,))]
+
+
+def test_visit_logged_on_open_not_assets(hub, user_client):
+    d = hub.ARTIFACTS_DIR / "m"
+    d.mkdir()
+    (d / "index.html").write_text(PAGE, "utf-8")
+    (d / "sw.js").write_text("// sw", "utf-8")
+    assert user_client.get("/a/m/").status_code == 200
+    assert user_client.get("/a/m/sw.js").status_code == 200
+    assert _visits(hub, "user@test.no") == ["m"]
+
+
+def test_go_redirects_and_logs(hub, user_client):
+    (hub.ARTIFACTS_DIR / "kort.link.json").write_text(json.dumps({"title": "Kort", "url": "https://x.no/y"}))
+    r = user_client.get("/go/kort")
+    assert r.status_code == 302 and r.headers["location"] == "https://x.no/y"
+    assert _visits(hub, "user@test.no") == ["kort"]
+    link = next(a for a in hub.list_artifacts("user@test.no") if a["slug"] == "kort")
+    assert link["open_url"] == "/go/kort" and link["url"] == "https://x.no/y"
+
+
+def test_go_404(hub, user_client):
+    hub.save_page("side", PAGE, create=True, private=False)
+    (hub.ARTIFACTS_DIR / "skjult.link.json").write_text(
+        json.dumps({"title": "S", "url": "https://x.no/", "admin_only": True}))
+    for slug in ("finnes-ikke", "side", "skjult"):
+        assert user_client.get(f"/go/{slug}").status_code == 404
+    assert _visits(hub, "user@test.no") == []
