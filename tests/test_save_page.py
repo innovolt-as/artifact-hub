@@ -141,6 +141,14 @@ def test_page_source_has_no_shim(hub, admin_client):
     assert "hub.js" in admin_client.get("/a/a/").text and "hub.js" not in hub.page_source("a")
 
 
+def test_served_page_blocks_sideways_scroll(hub, admin_client):
+    # iOS zooms in on inputs under 16px and stays zoomed, which leaves the page scrolling sideways
+    hub.save_page("a", HTML, create=True)
+    served = admin_client.get("/a/a/").text
+    assert "overflow-x: clip" in served and "font-size: max(16px, 1em)" in served
+    assert "overflow-x" not in hub.page_source("a")
+
+
 def _folder_app(hub, slug="mappe"):
     d = hub.ARTIFACTS_DIR / slug
     d.mkdir()

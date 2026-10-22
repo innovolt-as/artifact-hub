@@ -459,10 +459,19 @@ def serve_artifact(slug: str, path: str, user: str = Depends(require_user)):
     return FileResponse(target)
 
 
+# Apps are used on phones and must never scroll sideways. iOS zooms in on inputs under 16px and
+# stays zoomed (which reads as sideways scroll), and a stray wide element widens the whole page.
+# overflow-x: clip (unlike hidden) keeps position: sticky working.
+NO_SIDEWAYS_CSS = (
+    "<style>html,body{overflow-x: clip !important}"
+    "@media (pointer:coarse){input,select,textarea{font-size: max(16px, 1em) !important}}</style>"
+)
+
+
 def _html_with_shim(path: Path, slug: str, user: str) -> HTMLResponse:
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists."""
     html = path.read_text("utf-8", errors="replace")
-    tag = '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
+    tag = NO_SIDEWAYS_CSS + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0"
     )
     m = re.search(r"<head[^>]*>", html, re.I)
