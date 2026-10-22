@@ -201,3 +201,62 @@ def test_go_404(hub, user_client):
     for slug in ("finnes-ikke", "side", "skjult"):
         assert user_client.get(f"/go/{slug}").status_code == 404
     assert _visits(hub, "user@test.no") == []
+
+
+def _section(html, sid):
+    start = html.find(f'<section id="{sid}"')
+    return "" if start < 0 else html[start:html.find("</section>", start)]
+
+
+def _two_public_pages(hub):
+    hub.save_page("a", PAGE, create=True, private=False, title="Alfa")
+    hub.save_page("b", PAGE, create=True, private=False, title="Beta")
+
+
+def test_index_sections(hub, user_client):
+    _two_public_pages(hub)
+    html = user_client.get("/").text
+    assert 'id="top"' not in html and 'data-slug="a"' in _section(html, "rest")
+    _visit(hub, "user@test.no", "a")
+    html = user_client.get("/").text
+    assert 'data-slug="a"' in _section(html, "top") and 'data-slug="a"' not in _section(html, "rest")
+    assert 'data-slug="b"' in _section(html, "rest")
+
+
+def test_index_cards_shows_escaped_summary(hub, user_client):
+    _two_public_pages(hub)
+    with hub.db() as con:
+        hub.home.set_view(con, "user@test.no", "cards")
+        _doc_summary(con, "a", "user@test.no", {"text": "<b>x</b> 93 ▼1"}, 100)
+    html = user_client.get("/").text
+    assert 'data-view="cards"' in html
+    assert "&lt;b&gt;x&lt;/b&gt; 93 ▼1" in html and "<b>x</b>" not in html
+    assert 'class="pin"' in html
+
+
+def test_index_icons_hides_summary(hub, user_client):
+    _two_public_pages(hub)
+    with hub.db() as con:
+        _doc_summary(con, "a", "user@test.no", {"text": "hemmelig linje"}, 100)
+    html = user_client.get("/").text
+    assert 'data-view="icons"' in html and "hemmelig linje" not in html
+
+
+def test_index_new_dot(hub, user_client):
+    _two_public_pages(hub)
+    _visit(hub, "user@test.no", "a", at=1)
+    html = user_client.get("/").text
+    item = html[html.find('data-slug="a"'):]
+    assert 'class="dot"' in item[: item.find("</li>")]
+    assert html.count('class="dot"') == 1
+
+
+def test_admin_page_header_unchanged(admin_client):
+    html = admin_client.get("/admin").text
+    assert 'class="top"' in html and 'class="hero"' not in html
+
+
+def test_new_dot_ignores_same_second(hub):
+    _visit(hub, "x@t.no", "a", at=200)
+    top, _ = _sections(hub, "x@t.no", [{"slug": "a", "title": "a", "updated": 200.7}], now=300)
+    assert top[0]["new"] is False

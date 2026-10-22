@@ -126,7 +126,7 @@ def build_sections(apps: list[dict], stats: dict, pins: list[str]) -> tuple[list
     for a in apps:
         seen = stats.get(a["slug"])
         a["pinned"] = a["slug"] in pins
-        a["new"] = bool(seen) and seen["last"] < a["updated"]
+        a["new"] = bool(seen) and seen["last"] < int(a["updated"])  # visits are whole seconds, mtimes are not
     top = [by_slug[p] for p in pins if p in by_slug]
     used = sorted(
         (a for a in apps if not a["pinned"] and stats.get(a["slug"], {}).get("count")),

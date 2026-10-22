@@ -1,20 +1,75 @@
 {% extends "base.html" %}
 {% from "_icon.html" import icon %}
-{% block body %}
-{% if not artifacts %}
-  <p class="empty">Ingen artifacts ennå.</p>
-{% else %}
-<ul class="grid">
-  {% for a in artifacts %}
-  <li class="tile">
-    <a href="{{ a.url }}" {% if a.description %}title="{{ a.description }}"{% endif %} {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>
-      {% if a.kind == 'link' %}<span class="ext" title="Ekstern app">↗</span>{% endif %}
-      {% if a.admin_only %}<span class="lock" title="Kun admin">🔒</span>{% endif %}
-      {{ icon(a) }}
+
+{% macro app_item(a, view, summary) -%}
+<li class="app{% if a.pinned %} pinned{% endif %}" data-slug="{{ a.slug }}" data-pinned="{{ 'true' if a.pinned else 'false' }}">
+  <a href="{{ a.open_url }}" {% if a.description %}title="{{ a.description }}"{% endif %} {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>
+    {% if a.new %}<span class="dot" title="Endret siden du sist åpnet den"></span>{% endif %}
+    {% if a.admin_only %}<span class="lock" title="Kun admin">🔒</span>{% endif %}
+    {% if a.kind == 'link' %}<span class="ext" title="Ekstern app">↗</span>{% endif %}
+    {% if a.pinned and view == 'icons' %}<span class="star" title="Festet">★</span>{% endif %}
+    {{ icon(a) }}
+    <span class="txt">
       <h2>{{ a.title }}</h2>
-    </a>
-  </li>
-  {% endfor %}
-</ul>
+      {% if view == 'cards' and summary %}<p class="summary">{{ summary }}</p>{% endif %}
+    </span>
+  </a>
+  {% if view == 'cards' %}
+  <button class="pin" type="button" aria-pressed="{{ 'true' if a.pinned else 'false' }}"
+          aria-label="{{ 'Fjern feste' if a.pinned else 'Fest øverst' }}: {{ a.title }}">{{ '★' if a.pinned else '☆' }}</button>
+  {% endif %}
+</li>
+{%- endmacro %}
+
+{% block header %}
+<header class="hero">
+  <div class="hero-in">
+    <div class="hero-row">
+      <a class="brand" href="/"><img src="/static/logo.svg" alt="" width="26" height="26">{{ site }}</a>
+      <nav>
+        {% if admin %}<a href="/admin">Admin</a>{% endif %}
+        <span class="who">{{ user }}</span>
+        <form method="post" action="/logout"><button class="link">Logg ut</button></form>
+      </nav>
+    </div>
+    <div class="hero-row hero-main">
+      <div>
+        <h1 id="hello">Hei</h1>
+        <p class="today" id="today">{{ today }}</p>
+      </div>
+      <div class="viewtog" role="group" aria-label="Visning">
+        <button type="button" data-set-view="icons" aria-pressed="{{ 'true' if view == 'icons' else 'false' }}" title="Ikoner">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+        </button>
+        <button type="button" data-set-view="cards" aria-pressed="{{ 'true' if view == 'cards' else 'false' }}" title="Kort">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><rect x="3" y="4" width="18" height="6.5" rx="2"/><rect x="3" y="13.5" width="18" height="6.5" rx="2"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+{% endblock %}
+
+{% block body %}
+{% if not top and not rest %}
+  <p class="empty">Ingen apper ennå.</p>
+{% else %}
+<div class="apps" data-view="{{ view }}">
+  {% if top %}
+  <section id="top">
+    <h3 class="sec">Mest brukt <span>for deg</span></h3>
+    <ul class="{{ 'grid top4' if view == 'icons' else 'cards' }}">
+      {% for a in top %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <section id="rest">
+    {% if top %}<h3 class="sec">Alle apper</h3>{% endif %}
+    <ul class="{{ 'grid' if view == 'icons' else 'cards' }}">
+      {% for a in rest %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
+    </ul>
+  </section>
+</div>
 {% endif %}
+<script src="/static/home.js" defer></script>
 {% endblock %}

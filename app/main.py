@@ -424,12 +424,25 @@ def logout():
 
 
 # ---------------------------------------------------------------- routes: gallery + serving
+NO_DAYS = ("mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag")
+NO_MONTHS = ("januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober",
+             "november", "desember")
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, user: str = Depends(require_user)):
+    apps = list_artifacts(user)
+    with db() as con:
+        prefs = home.get_prefs(con, user)
+        stats = home.visit_stats(con, user)
+        summaries = home.summaries(con, user, [a["slug"] for a in apps]) if prefs["view"] == "cards" else {}
+    top, rest = home.build_sections(apps, stats, prefs["pins"])
+    now = time.localtime()  # fallback only; the page rewrites the date and greeting with the viewer's clock
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "artifacts": list_artifacts(user)},
+        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "view": prefs["view"], "top": top, "rest": rest,
+         "summaries": summaries, "today": f"{NO_DAYS[now.tm_wday]} {now.tm_mday}. {NO_MONTHS[now.tm_mon - 1]}"},
     )
 
 
