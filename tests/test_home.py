@@ -139,3 +139,32 @@ def test_summaries_both_sources_newest_wins_and_cut(hub):
     assert got["a"] == "B"
     assert len(got["b"]) == 140
     assert set(got) == {"a", "b"}
+
+
+PAGE = "<!doctype html><html><head><title>A</title></head><body>a</body></html>"
+
+
+def test_prefs_api_view(hub, user_client, admin_client):
+    r = user_client.post("/api/prefs/view", json={"view": "cards"})
+    assert r.status_code == 200 and r.json() == {"ok": True, "view": "cards"}
+    with hub.db() as con:
+        assert hub.home.get_prefs(con, "user@test.no")["view"] == "cards"
+        assert hub.home.get_prefs(con, "admin@test.no")["view"] == "icons"
+
+
+def test_prefs_api_pin(hub, user_client):
+    hub.save_page("a", PAGE, create=True, private=False)
+    r = user_client.post("/api/prefs/pin", json={"slug": "a", "pinned": True})
+    assert r.status_code == 200 and r.json() == {"ok": True, "pins": ["a"]}
+    r = user_client.post("/api/prefs/pin", json={"slug": "a", "pinned": False})
+    assert r.json() == {"ok": True, "pins": []}
+
+
+def test_prefs_api_rejects(hub, user_client, client):
+    hub.save_page("a", PAGE, create=True, private=False)
+    hub.save_page("hemmelig", PAGE, create=True, private=True)
+    assert user_client.post("/api/prefs/view", json={"view": "x"}).status_code == 400
+    assert user_client.post("/api/prefs/pin", json={"slug": "finnes-ikke", "pinned": True}).status_code == 404
+    assert user_client.post("/api/prefs/pin", json={"slug": "hemmelig", "pinned": True}).status_code == 404
+    assert user_client.post("/api/prefs/pin", json={"slug": "a", "pinned": "ja"}).status_code == 400
+    assert client.post("/api/prefs/view", json={"view": "cards"}).status_code == 401

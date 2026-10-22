@@ -733,6 +733,34 @@ def api_me(user: str = Depends(api_user)):
     return {"email": user, "admin": is_admin(user)}
 
 
+# ---------------------------------------------------------------- routes: front page prefs (app/home.py)
+@app.post("/api/prefs/view")
+async def prefs_view(request: Request, user: str = Depends(api_user)):
+    _require_json(request)
+    body = await request.json()
+    view = body.get("view") if isinstance(body, dict) else None
+    with db() as con:
+        try:
+            home.set_view(con, user, view)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    return {"ok": True, "view": view}
+
+
+@app.post("/api/prefs/pin")
+async def prefs_pin(request: Request, user: str = Depends(api_user)):
+    _require_json(request)
+    body = await request.json()
+    slug, pinned = (body.get("slug"), body.get("pinned")) if isinstance(body, dict) else (None, None)
+    if not isinstance(slug, str) or not isinstance(pinned, bool):
+        raise HTTPException(400, 'Send {"slug": "...", "pinned": true|false}')
+    if slug not in {a["slug"] for a in list_artifacts(user)}:
+        raise HTTPException(404)
+    with db() as con:
+        pins = home.set_pin(con, user, slug, pinned)
+    return {"ok": True, "pins": pins}
+
+
 @app.get("/api/data/{app_name}")
 def data_list(app_name: str, prefix: str = "", user: str = Depends(api_user)):
     _check_app_key(app_name)
