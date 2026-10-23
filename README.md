@@ -175,6 +175,18 @@ await db.doc("hub/summary").set({ text: "4-roms oslo 93 ▼1" });
 Apper som bruker `/api/data/<slug>` skriver nøkkelen `hub/summary` med `{"value": {"text": "..."}}`.
 Teksten er per bruker, kuttes til 140 tegn og vises som ren tekst. Uten sammendrag står kortet uten linje.
 
+## Banneret i appene
+
+Øverst i hver app setter huben inn en mørkeblå stripe: «‹ [logo] | 🥗 Appnavn». Hele stripa lenker til
+forsiden, og den ruller bort med siden. Den settes inn når siden serveres (`app/banner.py`), så appene
+trenger ikke å gjøre noe. Den ligger i et eget shadow DOM, slik at appens CSS ikke påvirker den og den ikke
+påvirker appen.
+Den kommer bare på sider nettleseren åpner, ikke på HTML som en app henter med `fetch()` eller viser i en
+iframe. Den vises heller ikke ved utskrift.
+
+Knappen «▭ banner» i `/admin` slår stripa av for én app. Det lagres som `"banner": false` i appens meta
+og beholdes ved ny opplasting.
+
 ## Tilgang
 
 - `ADMIN_EMAILS` – ser admin-siden og alt som er `admin_only`
