@@ -510,6 +510,10 @@ NO_SIDEWAYS_CSS = (
 )
 
 
+# Pull to refresh when the hub runs as a home-screen app (static/pull.js); also loaded by base.html.
+PULL_JS = '<script src="/static/pull.js" defer></script>'
+
+
 def _log_visit(user: str, slug: str) -> None:
     """Count an app open for the front page; never let it stop the app from opening."""
     try:
@@ -535,7 +539,7 @@ def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool) -> H
     html = path.read_text("utf-8", errors="replace")
     tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0"
-    )
+    ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
     html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})

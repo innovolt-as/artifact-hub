@@ -163,6 +163,11 @@ Huben legger derfor automatisk `<script src="/static/hub.js">` først i `<head>`
 - **Ikoner eller kort**: bryteren øverst til høyre. Valget lagres på kontoen.
 - **Blå prikk**: appen er endret siden du sist åpnet den.
 - Kan legges på hjemskjermen («Legg til på Hjem-skjerm») og åpnes da uten adresselinje.
+- **Dra ned for å oppdatere** (`static/pull.js`): som hjemskjermapp mangler iOS dette, så huben legger det inn
+  på egne sider og i alle apper. Det virker bare når siden står øverst. Det virker ikke mens du skriver i et
+  felt, ikke på noe som ligger fast (ark, menyer, tab-barer) og ikke i et område som ruller for seg selv og
+  ikke står øverst. I en vanlig nettleserfane gjør det ingenting, siden nettleseren har sitt eget.
+- Forsiden laster seg selv på nytt når du kommer tilbake til den etter mer enn 5 minutter.
 
 ### Sammendrag på kortene
 

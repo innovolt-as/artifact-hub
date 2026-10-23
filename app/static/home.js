@@ -1,6 +1,14 @@
 // Front page: greeting and date from the viewer's clock, view toggle, pinning (star in the card view,
-// long-press / right-click menu in the icon view). Prefs live on the account (/api/prefs/*).
+// long-press / right-click menu in the icon view), and a fresh page when coming back after a while.
+// Prefs live on the account (/api/prefs/*).
 (function () {
+  const STALE_MS = 5 * 60 * 1000; // back after longer than this (e.g. the home-screen app resumed) -> reload
+  let hiddenAt = null;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) hiddenAt = Date.now();
+    else if (hiddenAt !== null && Date.now() - hiddenAt > STALE_MS) location.reload();
+  });
+
   const post = (url, body) =>
     fetch(url, {
       method: "POST",
