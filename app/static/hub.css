@@ -53,14 +53,12 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 
 .sec { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin: 0 0 10px; }
 .sec span { text-transform: none; letter-spacing: 0; font-weight: 400; }
-#top { margin-bottom: 26px; }
+#fav, #top { margin-bottom: 26px; }
 .app { position: relative; min-width: 0; }
 .app a { -webkit-touch-callout: none; }
 .dot { position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--card); }
-.lock, .ext, .star { position: absolute; top: 8px; font-size: 12px; color: var(--muted); }
-.ext, .star { left: 10px; } .lock { right: 22px; }
-.star { color: #e0a100; }
-.ext + .star { left: 26px; }
+.lock, .ext { position: absolute; top: 8px; font-size: 12px; color: var(--muted); }
+.ext { left: 10px; } .lock { right: 22px; }
 
 /* icons */
 .grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }

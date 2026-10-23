@@ -121,22 +121,21 @@ def summaries(con: sqlite3.Connection, email: str, slugs: list[str]) -> dict[str
 
 
 # ---------------------------------------------------------------- sections
-def build_sections(apps: list[dict], stats: dict, pins: list[str]) -> tuple[list[dict], list[dict]]:
-    """Split the visible apps into "Mest brukt" and the rest; marks each with pinned/new.
+def build_sections(apps: list[dict], stats: dict, pins: list[str]) -> tuple[list[dict], list[dict], list[dict]]:
+    """Split the visible apps into "Favoritter", "Mest brukt" and the rest; marks each with pinned/new.
 
-    Pinned apps come first in pin order, then the most opened in the last 30 days (ties: latest open)
-    up to four in all. More than four pins: all of them. Each app appears once.
+    Favoritter: every pinned app, in pin order. Mest brukt: the four most opened in the last 30 days
+    (ties: latest open) that are not favourites. Each app appears once.
     """
     by_slug = {a["slug"]: a for a in apps}
     for a in apps:
         seen = stats.get(a["slug"])
         a["pinned"] = a["slug"] in pins
         a["new"] = bool(seen) and seen["last"] < int(a["updated"])  # visits are whole seconds, mtimes are not
-    top = [by_slug[p] for p in pins if p in by_slug]
-    used = sorted(
+    favs = [by_slug[p] for p in pins if p in by_slug]
+    top = sorted(
         (a for a in apps if not a["pinned"] and stats.get(a["slug"], {}).get("count")),
         key=lambda a: (-stats[a["slug"]]["count"], -stats[a["slug"]]["last"]),
-    )
-    top += used[: max(0, MOST_USED_MAX - len(top))]
-    in_top = {a["slug"] for a in top}
-    return top, [a for a in apps if a["slug"] not in in_top]
+    )[:MOST_USED_MAX]
+    shown = {a["slug"] for a in favs + top}
+    return favs, top, [a for a in apps if a["slug"] not in shown]

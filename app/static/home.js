@@ -44,7 +44,7 @@
     menu.className = "pinmenu";
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = li.dataset.pinned === "true" ? "Fjern feste" : "Fest øverst";
+    b.textContent = li.dataset.pinned === "true" ? "Fjern fra favoritter" : "Legg til i favoritter";
     b.onclick = () => { closeMenu(); togglePin(li); };
     menu.append(b);
     document.body.append(menu);

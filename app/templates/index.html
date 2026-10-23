@@ -7,7 +7,6 @@
     {% if a.new %}<span class="dot" title="Endret siden du sist åpnet den"></span>{% endif %}
     {% if a.admin_only %}<span class="lock" title="Kun admin">🔒</span>{% endif %}
     {% if a.kind == 'link' %}<span class="ext" title="Ekstern app">↗</span>{% endif %}
-    {% if a.pinned and view == 'icons' %}<span class="star" title="Festet">★</span>{% endif %}
     {{ icon(a) }}
     <span class="txt">
       <h2>{{ a.title }}</h2>
@@ -16,7 +15,7 @@
   </a>
   {% if view == 'cards' %}
   <button class="pin" type="button" aria-pressed="{{ 'true' if a.pinned else 'false' }}"
-          aria-label="{{ 'Fjern feste' if a.pinned else 'Fest øverst' }}: {{ a.title }}">{{ '★' if a.pinned else '☆' }}</button>
+          aria-label="{{ 'Fjern fra favoritter' if a.pinned else 'Legg til i favoritter' }}: {{ a.title }}">{{ '★' if a.pinned else '☆' }}</button>
   {% endif %}
 </li>
 {%- endmacro %}
@@ -51,10 +50,18 @@
 {% endblock %}
 
 {% block body %}
-{% if not top and not rest %}
+{% if not favs and not top and not rest %}
   <p class="empty">Ingen apper ennå.</p>
 {% else %}
 <div class="apps" data-view="{{ view }}">
+  {% if favs %}
+  <section id="fav">
+    <h3 class="sec">Favoritter</h3>
+    <ul class="{{ 'grid top4' if view == 'icons' else 'cards' }}">
+      {% for a in favs %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
   {% if top %}
   <section id="top">
     <h3 class="sec">Mest brukt <span>for deg</span></h3>
@@ -64,7 +71,7 @@
   </section>
   {% endif %}
   <section id="rest">
-    {% if top %}<h3 class="sec">Alle apper</h3>{% endif %}
+    {% if favs or top %}<h3 class="sec">Alle apper</h3>{% endif %}
     <ul class="{{ 'grid' if view == 'icons' else 'cards' }}">
       {% for a in rest %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>

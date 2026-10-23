@@ -437,12 +437,12 @@ def index(request: Request, user: str = Depends(require_user)):
         prefs = home.get_prefs(con, user)
         stats = home.visit_stats(con, user)
         summaries = home.summaries(con, user, [a["slug"] for a in apps]) if prefs["view"] == "cards" else {}
-    top, rest = home.build_sections(apps, stats, prefs["pins"])
+    favs, top, rest = home.build_sections(apps, stats, prefs["pins"])
     now = time.localtime()  # fallback only; the page rewrites the date and greeting with the viewer's clock
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "view": prefs["view"], "top": top, "rest": rest,
+        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "view": prefs["view"], "favs": favs, "top": top, "rest": rest,
          "summaries": summaries, "today": f"{NO_DAYS[now.tm_wday]} {now.tm_mday}. {NO_MONTHS[now.tm_mon - 1]}"},
     )
 

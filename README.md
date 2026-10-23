@@ -156,9 +156,10 @@ Huben legger derfor automatisk `<script src="/static/hub.js">` først i `<head>`
 
 ## Forsiden
 
-- **Mest brukt** øverst: hver innlogget bruker ser sine 4 mest åpnede apper siste 30 dager (huben logger
-  åpninger av `/a/<slug>/`, og eksterne lenkekort via `/go/<slug>`). Festede apper (★, eller hold inne /
-  høyreklikk på ikonet) ligger alltid først. Besøk eldre enn 90 dager slettes.
+- **Favoritter** øverst: alle appene brukeren har lagt til i favoritter (★ i kortvisning, eller hold inne /
+  høyreklikk på ikonet), uansett antall, i den rekkefølgen de ble lagt til.
+- **Mest brukt** under: brukerens 4 mest åpnede apper siste 30 dager som ikke er favoritter (huben logger
+  åpninger av `/a/<slug>/`, og eksterne lenkekort via `/go/<slug>`). Besøk eldre enn 90 dager slettes.
 - **Ikoner eller kort**: bryteren øverst til høyre. Valget lagres på kontoen.
 - **Blå prikk**: appen er endret siden du sist åpnet den.
 - Kan legges på hjemskjermen («Legg til på Hjem-skjerm») og åpnes da uten adresselinje.
