@@ -102,3 +102,39 @@ def test_banner_name_for_admin_only_app(admin_client, upload):
 def test_banner_for_regular_user(admin_client, user_client, upload):
     upload(admin_client, "a.html", "<body>x</body>", title="Delt")
     assert "Delt" in user_client.get("/a/a/").text.split("<hub-banner>")[1]
+
+
+# ---------------------------------------------------------------- admin switch
+def test_toggle_banner(hub, admin_client, upload):
+    upload(admin_client, "a.html", "<body>x</body>")
+    r = admin_client.post("/api/toggle-banner", data={"slug": "a"})
+    assert r.json() == {"ok": True, "banner": False}
+    assert "<hub-banner>" not in admin_client.get("/a/a/").text
+    assert admin_client.post("/api/toggle-banner", data={"slug": "a"}).json()["banner"] is True
+    assert "banner" not in hub._read_meta(hub._meta_path("a"))
+    assert "<hub-banner>" in admin_client.get("/a/a/").text
+
+
+def test_toggle_banner_rules(admin_client, user_client, upload):
+    upload(admin_client, "a.html", "<body>x</body>")
+    assert user_client.post("/api/toggle-banner", data={"slug": "a"}).status_code in (401, 403)
+    assert admin_client.post("/api/toggle-banner", data={"slug": "nope"}).status_code == 404
+    admin_client.post("/api/link", data={"title": "L", "url": "https://example.com"})
+    assert admin_client.post("/api/toggle-banner", data={"slug": "l"}).status_code == 404
+
+
+def test_banner_off_survives_reupload(hub, admin_client, upload):
+    upload(admin_client, "a.html", "<body>x</body>")
+    admin_client.post("/api/toggle-banner", data={"slug": "a"})
+    upload(admin_client, "a.html", "<body>y</body>")
+    assert hub._read_meta(hub._meta_path("a"))["banner"] is False
+    hub.save_page("a", "<!doctype html><body>z</body>", create=False)
+    hub.set_info("a", title="Ny")
+    assert hub._read_meta(hub._meta_path("a"))["banner"] is False
+
+
+def test_admin_shows_banner_button_not_on_links(admin_client, upload):
+    upload(admin_client, "a.html", "<body>x</body>")
+    admin_client.post("/api/link", data={"title": "L", "url": "https://example.com"})
+    page = admin_client.get("/admin").text
+    assert page.count('class="small banner"') == 1

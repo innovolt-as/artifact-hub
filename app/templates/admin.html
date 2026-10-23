@@ -31,6 +31,7 @@
       <td class="right">
         <button class="small edit" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}"
                 data-kind="{{ a.kind }}" data-url="{{ a.url if a.kind == 'link' else '' }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}">Rediger</button>
+        {% if a.kind != 'link' %}<button class="small banner" data-slug="{{ a.slug }}" title="Hub-stripa øverst i appen">{{ '▭ banner' if a.banner else '▭ uten banner' }}</button>{% endif %}
         <button class="small toggle" data-slug="{{ a.slug }}">{{ '🔒 privat' if a.admin_only else '🌐 delt' }}</button>
         <button class="small danger del" data-slug="{{ a.slug }}">Slett</button>
       </td>
@@ -113,6 +114,9 @@ document.querySelectorAll('.del').forEach(b => b.onclick = async () => {
 });
 document.querySelectorAll('.toggle').forEach(b => b.onclick = async () => {
   if (await post('/api/toggle-private', b.dataset.slug)) location.reload();
+});
+document.querySelectorAll('.banner').forEach(b => b.onclick = async () => {
+  if (await post('/api/toggle-banner', b.dataset.slug)) location.reload();
 });
 
 // --- edit dialog: name, address, emoji, image

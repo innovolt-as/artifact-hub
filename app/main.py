@@ -75,7 +75,7 @@ ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin pag
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
 MAX_ICON_BYTES = 2 * 1024 * 1024
-META_KEYS = ("title", "description", "emoji", "admin_only")  # what survives a re-upload
+META_KEYS = ("title", "description", "emoji", "admin_only", "banner")  # what survives a re-upload
 
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -924,10 +924,10 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
     slug = _slugify(slug or stem)
     if not SLUG_RE.match(slug):
         raise HTTPException(400, f"Ugyldig navn: {slug}")
-    # a new version keeps the old name, emoji and private flag unless overridden
+    # a new version keeps the old name, emoji, private flag and banner switch (stored as false) unless overridden
     old = _meta_path(slug)
     old_meta = _read_meta(old) if old else {}
-    meta = {k: old_meta[k] for k in META_KEYS if old_meta.get(k)}
+    meta = {k: old_meta[k] for k in META_KEYS if old_meta.get(k) or old_meta.get(k) is False}
     if title:
         meta["title"] = title
     if admin_only:
@@ -1140,6 +1140,22 @@ def api_toggle_private(request: Request, slug: str = Form(...)):
     meta["admin_only"] = not meta.get("admin_only", False)
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
     return JSONResponse({"ok": True, "admin_only": meta["admin_only"]})
+
+
+@app.post("/api/toggle-banner")
+def api_toggle_banner(request: Request, slug: str = Form(...)):
+    """Turn the hub banner off or on for one app; off is stored as "banner": false, on removes the key."""
+    _upload_authorized(request)
+    meta_path = _meta_path(slug)
+    if not meta_path or meta_path.name.endswith(".link.json"):
+        raise HTTPException(404)
+    meta = _read_meta(meta_path)
+    if meta.get("banner") is False:
+        meta.pop("banner")
+    else:
+        meta["banner"] = False
+    _write_meta(meta_path, meta)
+    return JSONResponse({"ok": True, "banner": meta.get("banner") is not False})
 
 
 def _check_url(url: str) -> str:
