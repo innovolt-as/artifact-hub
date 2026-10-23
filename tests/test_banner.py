@@ -36,8 +36,32 @@ def test_title_and_site_escaped():
 def test_one_line_and_print_hidden():
     out = banner.render(APP, "S")
     assert "white-space:nowrap" in out.replace(" ", "") and "ellipsis" in out
-    assert "safe-area-inset-top" in out
+    assert "safe-area-inset-top" in banner.CSS_HOST
     assert "@media print" in banner.CSS_HOST
+
+
+def _rule(css: str, selector: str) -> str:
+    """The declarations of the first `selector{...}` rule in css, spaces removed."""
+    css = css.replace(" ", "").replace("\n", "")
+    start = css.index(selector + "{") + len(selector) + 1
+    return css[start:css.index("}", start)]
+
+
+def test_host_look_is_important_so_the_reset_cannot_wipe_it():
+    # all:initial !important on the host beats normal :host rules, so the look must be set there too
+    host = _rule(banner.CSS_HOST, "hub-banner")
+    for decl in ("background:", "color:#f3f6fb", "font:", "padding-top:env(safe-area-inset-top)"):
+        assert decl in host, decl
+    assert host.count("!important") >= 8
+
+
+def test_banner_spans_full_width_inside_padded_body():
+    assert "calc(50%-50vw)" in _rule(banner.CSS_HOST, "hub-banner")
+
+
+def test_icon_box_grows_for_two_emoji():
+    ico = _rule(banner.render(APP, "S"), ".ico")
+    assert "min-width:18px" in ico and "width:18px" not in ico.replace("min-width:18px", "")
 
 
 # ---------------------------------------------------------------- served pages

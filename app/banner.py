@@ -1,8 +1,9 @@
 """The strip at the top of every app page: "‹ [hub logo] | [app icon] App name", one link back to the front page.
 
 It is a declarative shadow root (<template shadowrootmode>), so the app's CSS cannot reach inside it and its CSS
-cannot leak into the app, and it works without JS. CSS_HOST goes in <head> and guards the host element itself,
-which the app's CSS can still match (e.g. `* { ... }`); !important from outside beats the app's normal rules.
+cannot leak into the app, and it works without JS. CSS_HOST goes in <head> and styles the host element itself,
+which the app's CSS can still match (e.g. `* { ... }`). It resets the host with all:initial !important, and an
+!important rule from the page also beats :host rules inside the shadow root, so the host's whole look lives here.
 """
 from __future__ import annotations
 
@@ -10,23 +11,27 @@ from html import escape
 
 CSS_HOST = (
     "<style>hub-banner{all:initial !important;display:block !important;position:relative !important;"
-    "z-index:20 !important}@media print{hub-banner{display:none !important}}</style>"
+    "z-index:20 !important;"
+    # full width even when the app pads <body> (e.g. Lommeomregner)
+    "margin:0 calc(50% - 50vw) !important;"
+    "padding-top:env(safe-area-inset-top) !important;color:#f3f6fb !important;"
+    "font:600 14px/1.2 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif !important;"
+    "-webkit-text-size-adjust:100% !important;"
+    "background:radial-gradient(500px 120px at 90% -60%,rgb(255 138 92 / .22),transparent 60%),"
+    "linear-gradient(160deg,#0b1a33,#123566) !important}"
+    "@media print{hub-banner{display:none !important}}</style>"
 )
 
 _STYLE = """<style>
-:host{display:block;color:#f3f6fb;font:600 14px/1.2 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-  padding-top:env(safe-area-inset-top);-webkit-text-size-adjust:100%;
-  background:radial-gradient(500px 120px at 90% -60%,rgb(255 138 92 / .22),transparent 60%),
-             linear-gradient(160deg,#0b1a33,#123566)}
 a{display:flex;align-items:center;gap:8px;min-width:0;min-height:22px;padding:10px 16px;color:inherit;
   text-decoration:none;white-space:nowrap;-webkit-tap-highlight-color:transparent}
 a:focus-visible{outline:2px solid #cfe0ff;outline-offset:-4px;border-radius:8px}
 .back{flex:none;font-size:20px;line-height:1;color:#cfe0ff;margin-top:-2px}
-.hub,.ico{flex:none;display:block;width:18px;height:18px}
+.hub{flex:none;display:block;width:18px;height:18px}
 .sep{flex:none;width:1px;height:14px;background:rgb(255 255 255 / .25)}
-.ico{display:grid;place-items:center;font-size:16px;line-height:1}
+.ico{flex:none;display:grid;place-items:center;min-width:18px;height:18px;font-size:16px;line-height:1}
 .ico img{width:18px;height:18px;border-radius:5px;object-fit:cover}
-.ico.letter{border-radius:5px;font-size:11px;font-weight:700;color:#fff}
+.ico.letter{width:18px;border-radius:5px;font-size:11px;font-weight:700;color:#fff}
 .name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>"""
 
