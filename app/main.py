@@ -529,10 +529,6 @@ def open_link(slug: str, user: str = Depends(require_user)):
     return RedirectResponse(link["url"], status_code=302)
 
 
-# The first real <body> tag; comments and scripts are matched too so a "<body>" inside them is skipped.
-_BODY_TAG = re.compile(r"<!--.*?-->|<script\b.*?</script\s*>|<body\b[^>]*>", re.I | re.S)
-
-
 def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool) -> HTMLResponse:
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
     and the hub banner right after <body> unless the app has it turned off."""
@@ -540,14 +536,8 @@ def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool) -> H
     tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0"
     )
-    m = re.search(r"<head[^>]*>", html, re.I)
-    at = m.end() if m else 0
-    html = html[:at] + tag + html[at:]
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
-    if app and app["banner"]:
-        body = next((b for b in _BODY_TAG.finditer(html, at + len(tag)) if b.group().lower().startswith("<body")), None)
-        at = body.end() if body else at + len(tag)
-        html = html[:at] + banner.render(app, SITE_NAME) + html[at:]
+    html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 

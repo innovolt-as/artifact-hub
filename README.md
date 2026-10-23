@@ -187,6 +187,12 @@ iframe. Den vises heller ikke ved utskrift.
 Knappen «▭ banner» i `/admin` slår stripa av for én app. Det lagres som `"banner": false` i appens meta
 og beholdes ved ny opplasting.
 
+Et lite skript rett bak stripa flytter den ut av `<body>`, så flex- eller grid-oppsett på `body` ikke flytter
+den. Skriptet trekker den også opp over eventuell luke over seg, for eksempel safe-area-padding på `:root`. Uten
+JS står stripa der serveren satte den. Slå av stripa for apper som har **fast topplinje** (`position: fixed;
+top: 0`), for da dekker stripa topplinjen til du ruller. Det samme gjelder apper som **ikke ruller**
+(`html, body { height: 100%; overflow: hidden }`), for da blir bunnen av appen kuttet.
+
 ## Tilgang
 
 - `ADMIN_EMAILS` – ser admin-siden og alt som er `admin_only`

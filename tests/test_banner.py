@@ -162,3 +162,32 @@ def test_admin_shows_banner_button_not_on_links(admin_client, upload):
     admin_client.post("/api/link", data={"title": "L", "url": "https://example.com"})
     page = admin_client.get("/admin").text
     assert page.count('class="small banner"') == 1
+
+
+# ---------------------------------------------------------------- final review fixes
+def test_body_inside_style_title_or_textarea_is_skipped(admin_client, upload):
+    upload(admin_client, "s.html", "<html><head><style>/* <body> */ p{color:red}</style><title>a <BODY> b</title></head>"
+           "<body><textarea><body></textarea><p>x</p></body></html>")
+    html = admin_client.get("/a/s/").text
+    assert html.index("</title>") < html.index("<hub-banner>") < html.index("<textarea>")
+
+
+def test_header_is_not_mistaken_for_head(admin_client, upload):
+    upload(admin_client, "h.html", "<!doctype html><html><body><header>H</header><p>x</p></body></html>")
+    html = admin_client.get("/a/h/").text
+    assert html.index("hub.js") < html.index("<body>") < html.index("<hub-banner>") < html.index("<header>")
+
+
+def test_banner_moves_itself_out_of_body_and_up(admin_client, upload):
+    # body flex/grid layouts and padding above it (e.g. :root safe-area padding) must not move the banner
+    upload(admin_client, "a.html", "<body><p>x</p></body>")
+    after = admin_client.get("/a/a/").text.split("</hub-banner>")[1]
+    script = after[: after.index("</script>")]
+    assert after.startswith("<script>") and "insertBefore" in script and "document.body" in script
+    assert "margin-top" in script and "resize" in script
+
+
+def test_inject_is_usable_on_its_own():
+    out = banner.inject("<html><head></head><body><p>x</p></body></html>", "<!--head-->", banner.render(APP, "S"))
+    assert out.index("<!--head-->") < out.index("<body>") < out.index("<hub-banner>") < out.index("<p>x")
+    assert banner.inject("<body>x</body>", "<!--head-->", None) == "<!--head--><body>x</body>"

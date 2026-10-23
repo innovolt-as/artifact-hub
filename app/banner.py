@@ -4,9 +4,14 @@ It is a declarative shadow root (<template shadowrootmode>), so the app's CSS ca
 cannot leak into the app, and it works without JS. CSS_HOST goes in <head> and styles the host element itself,
 which the app's CSS can still match (e.g. `* { ... }`). It resets the host with all:initial !important, and an
 !important rule from the page also beats :host rules inside the shadow root, so the host's whole look lives here.
+
+The server puts it right after <body>. A small script right behind it then moves it out of <body> (so a flex/grid
+body or body margins cannot move it) and pulls it up over any space above it (e.g. :root safe-area padding, which
+the banner has itself). Without JS it simply stays where the server put it.
 """
 from __future__ import annotations
 
+import re
 from html import escape
 
 CSS_HOST = (
@@ -44,6 +49,33 @@ def _icon(app: dict) -> str:
         return f'<span class="ico">{escape(app["emoji"])}</span>'
     letter = escape((app.get("title") or "?")[:1].upper())
     return f'<span class="ico letter" style="background:hsl({int(app.get("hue", 0))} 55% 45%)">{letter}</span>'
+
+
+_PLACE = (
+    "<script>(function(s){var b=s.previousElementSibling,h=document.documentElement;s.remove();"
+    "if(!b||b.localName!=='hub-banner'||b.parentNode!==document.body)return;h.insertBefore(b,document.body);"
+    "function fit(){b.style.removeProperty('margin-top');var t=b.getBoundingClientRect().top+scrollY;"
+    "if(t>0.5)b.style.setProperty('margin-top',-t+'px','important')}"
+    "fit();addEventListener('resize',fit)})(document.currentScript)</script>"
+)
+
+_HEAD_TAG = re.compile(r"<head(?:\s[^>]*)?>", re.I)
+# The first real <body> tag; comments and raw-text elements are matched too, so a "<body>" inside them is skipped.
+_BODY_TAG = re.compile(r"<!--.*?-->|<(script|style|title|textarea)\b.*?</\1\s*>|<body\b[^>]*>", re.I | re.S)
+
+
+def inject(html: str, head: str, banner: str | None) -> str:
+    """Put `head` right after <head> (or first), and `banner` right after the first real <body> tag
+    (or right after `head` when there is none)."""
+    m = _HEAD_TAG.search(html)
+    at = m.end() if m else 0
+    html = html[:at] + head + html[at:]
+    if not banner:
+        return html
+    after_head = at + len(head)
+    body = next((b for b in _BODY_TAG.finditer(html, after_head) if b.group().lower().startswith("<body")), None)
+    at = body.end() if body else after_head
+    return html[:at] + banner + _PLACE + html[at:]
 
 
 def render(app: dict, site: str) -> str:
