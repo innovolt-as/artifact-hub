@@ -34,7 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from app import home, versions
+from app import banner, home, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -328,6 +328,7 @@ def list_artifacts(user: str) -> list[dict]:
                 "title": meta.get("title") or fallback,
                 "description": meta.get("description", ""),
                 "admin_only": bool(meta.get("admin_only")),
+                "banner": meta.get("banner") is not False,  # the strip at the top of the app (banner.py)
                 "updated": mtime,
                 "emoji": meta.get("emoji", ""),
                 "icon_url": f"/icon/{slug}?v={int(icon.stat().st_mtime)}" if icon else None,
@@ -473,7 +474,7 @@ def artifact_redirect(slug: str):
 
 
 @app.get("/a/{slug}/{path:path}")
-def serve_artifact(slug: str, path: str, user: str = Depends(require_user)):
+def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(require_user)):
     found = artifact_root(slug)
     if not found:
         raise HTTPException(404)
@@ -482,10 +483,12 @@ def serve_artifact(slug: str, path: str, user: str = Depends(require_user)):
         raise HTTPException(404)
     if path in ("", "index.html"):
         _log_visit(user, slug)
+    # only a page the browser opens gets the banner, not HTML an app fetches or shows in an iframe
+    with_banner = request.headers.get("sec-fetch-dest", "document") == "document"
     if root.is_file():
         if path not in ("", "index.html"):
             raise HTTPException(404)
-        return _html_with_shim(root, slug, user)
+        return _html_with_shim(root, slug, user, with_banner=with_banner)
     target = (root / (path or "index.html")).resolve()
     if root.resolve() not in target.parents and target != root.resolve():
         raise HTTPException(404)
@@ -494,7 +497,7 @@ def serve_artifact(slug: str, path: str, user: str = Depends(require_user)):
     if not target.is_file() or target.name == "meta.json":
         raise HTTPException(404)
     if target.suffix.lower() in (".html", ".htm"):
-        return _html_with_shim(target, slug, user)
+        return _html_with_shim(target, slug, user, with_banner=with_banner)
     return FileResponse(target)
 
 
@@ -526,14 +529,25 @@ def open_link(slug: str, user: str = Depends(require_user)):
     return RedirectResponse(link["url"], status_code=302)
 
 
-def _html_with_shim(path: Path, slug: str, user: str) -> HTMLResponse:
-    """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists."""
+# The first real <body> tag; comments and scripts are matched too so a "<body>" inside them is skipped.
+_BODY_TAG = re.compile(r"<!--.*?-->|<script\b.*?</script\s*>|<body\b[^>]*>", re.I | re.S)
+
+
+def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool) -> HTMLResponse:
+    """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
+    and the hub banner right after <body> unless the app has it turned off."""
     html = path.read_text("utf-8", errors="replace")
-    tag = NO_SIDEWAYS_CSS + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
+    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0"
     )
     m = re.search(r"<head[^>]*>", html, re.I)
-    html = html[: m.end()] + tag + html[m.end():] if m else tag + html
+    at = m.end() if m else 0
+    html = html[:at] + tag + html[at:]
+    app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
+    if app and app["banner"]:
+        body = next((b for b in _BODY_TAG.finditer(html, at + len(tag)) if b.group().lower().startswith("<body")), None)
+        at = body.end() if body else at + len(tag)
+        html = html[:at] + banner.render(app, SITE_NAME) + html[at:]
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 

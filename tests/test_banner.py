@@ -38,3 +38,67 @@ def test_one_line_and_print_hidden():
     assert "white-space:nowrap" in out.replace(" ", "") and "ellipsis" in out
     assert "safe-area-inset-top" in out
     assert "@media print" in banner.CSS_HOST
+
+
+# ---------------------------------------------------------------- served pages
+@pytest.fixture
+def zip_bytes():
+    def _zip(files: dict[str, str]) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for name, text in files.items():
+                z.writestr(name, text)
+        return buf.getvalue()
+    return _zip
+
+
+def test_banner_after_body(admin_client, upload):
+    upload(admin_client, "mat.html", '<!doctype html><html><head><title>Matboka</title></head>'
+           '<BODY class="x"><h1>Hei</h1></body></html>', title="Matboka")
+    html = admin_client.get("/a/mat/").text
+    assert html.index('<BODY class="x">') < html.index("<hub-banner>") < html.index("<h1>Hei")
+    assert "hub-banner{all:initial" in html.split("</head>")[0].replace(" ", "")
+
+
+def test_banner_skips_body_in_comment_before_real_one(admin_client, upload):
+    upload(admin_client, "c.html", "<html><head><!-- <body> --><title>C</title></head><body><p>x</p></body></html>")
+    html = admin_client.get("/a/c/").text
+    assert html.index("<title>C") < html.index("<hub-banner>") < html.index("<p>x")
+
+
+def test_banner_without_body_tag(admin_client, upload):
+    upload(admin_client, "frag.html", "<title>F</title><p>x</p>")
+    html = admin_client.get("/a/frag/").text
+    assert html.index("hub.js") < html.index("<hub-banner>") < html.index("<p>x")
+
+
+def test_no_banner_for_fetch_or_iframe(admin_client, upload):
+    upload(admin_client, "a.html", "<body><p>x</p></body>")
+    for dest in ("empty", "iframe"):
+        r = admin_client.get("/a/a/", headers={"Sec-Fetch-Dest": dest})
+        assert "<hub-banner>" not in r.text and "hub.js" in r.text
+    assert "<hub-banner>" in admin_client.get("/a/a/", headers={"Sec-Fetch-Dest": "document"}).text
+
+
+def test_banner_off_in_meta(hub, admin_client, upload):
+    upload(admin_client, "a.html", "<body><p>x</p></body>")
+    p = hub._meta_path("a") or hub.ARTIFACTS_DIR / "a.meta.json"
+    m = hub._read_meta(p)
+    m["banner"] = False
+    hub._write_meta(p, m)
+    assert "<hub-banner>" not in admin_client.get("/a/a/").text
+
+
+def test_banner_on_folder_subpage(admin_client, upload, zip_bytes):
+    upload(admin_client, "app.zip", zip_bytes({"index.html": "<body>i</body>", "sub/side.html": "<body>s</body>"}))
+    assert "<hub-banner>" in admin_client.get("/a/app/sub/side.html").text
+
+
+def test_banner_name_for_admin_only_app(admin_client, upload):
+    upload(admin_client, "hemmelig.html", "<body>x</body>", title="Hemmelig", admin_only="true")
+    assert "Hemmelig" in admin_client.get("/a/hemmelig/").text.split("<hub-banner>")[1]
+
+
+def test_banner_for_regular_user(admin_client, user_client, upload):
+    upload(admin_client, "a.html", "<body>x</body>", title="Delt")
+    assert "Delt" in user_client.get("/a/a/").text.split("<hub-banner>")[1]
