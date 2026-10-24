@@ -80,7 +80,7 @@ def test_users_isolated(hub):
     with hub.db() as con:
         hub.home.set_pin(con, "x@t.no", "b", True)
         hub.home.set_view(con, "x@t.no", "cards")
-        assert hub.home.get_prefs(con, "y@t.no") == {"view": "icons", "pins": []}
+        assert hub.home.get_prefs(con, "y@t.no") == {"view": "icons", "pins": [], "apps": [], "seen": None}
     favs, top, _ = _sections(hub, "y@t.no", _apps("a", "b"))
     assert favs == [] and top == []
 
@@ -103,7 +103,7 @@ def test_new_dot(hub):
 
 def test_prefs_defaults_and_validation(hub):
     with hub.db() as con:
-        assert hub.home.get_prefs(con, "x@t.no") == {"view": "icons", "pins": []}
+        assert hub.home.get_prefs(con, "x@t.no") == {"view": "icons", "pins": [], "apps": [], "seen": None}
         with pytest.raises(ValueError):
             hub.home.set_view(con, "x@t.no", "list")
         hub.home.set_view(con, "x@t.no", "cards")
@@ -111,7 +111,7 @@ def test_prefs_defaults_and_validation(hub):
         assert hub.home.set_pin(con, "x@t.no", "a", True) == ["a"]
         assert hub.home.set_pin(con, "x@t.no", "b", True) == ["a", "b"]
         assert hub.home.set_pin(con, "x@t.no", "a", False) == ["b"]
-        assert hub.home.get_prefs(con, "x@t.no") == {"view": "cards", "pins": ["b"]}
+        assert hub.home.get_prefs(con, "x@t.no") == {"view": "cards", "pins": ["b"], "apps": [], "seen": None}
 
 
 def _doc_summary(con, slug, owner, data, at):
@@ -211,8 +211,12 @@ def _section(html, sid):
 
 
 def _two_public_pages(hub):
+    """Two shared apps, both on user@test.no's front page."""
     hub.save_page("a", PAGE, create=True, private=False, title="Alfa")
     hub.save_page("b", PAGE, create=True, private=False, title="Beta")
+    with hub.db() as con:
+        for s in ("a", "b"):
+            hub.home.set_added(con, "user@test.no", s, True)
 
 
 def test_index_sections(hub, user_client):
@@ -311,3 +315,117 @@ def test_reload_within_ten_minutes_is_one_visit(hub):
 
 def test_no_translucent_status_bar(user_client):
     assert "black-translucent" not in user_client.get("/").text
+
+
+# ---------------------------------------------------------------- choosing apps for the front page
+def _prefs(hub, email):
+    with hub.db() as con:
+        return hub.home.get_prefs(con, email)
+
+
+def test_admin_starts_with_everything_once(hub):
+    with hub.db() as con:
+        hub.home.start(con, "admin@test.no", ["a", "b"], admin=True)
+        hub.home.start(con, "admin@test.no", ["a", "b", "c"], admin=True)
+        hub.home.start(con, "x@t.no", ["a"], admin=False)
+    assert _prefs(hub, "admin@test.no")["apps"] == ["a", "b"] and _prefs(hub, "admin@test.no")["seen"] == ["a", "b"]
+    assert _prefs(hub, "x@t.no")["apps"] == [] and _prefs(hub, "x@t.no")["seen"] is None
+
+
+def test_set_added_marks_seen(hub):
+    with hub.db() as con:
+        assert hub.home.set_added(con, "x@t.no", "a", True) == ["a"]
+        assert hub.home.set_added(con, "x@t.no", "b", True) == ["a", "b"]
+        assert hub.home.set_added(con, "x@t.no", "a", False) == ["b"]
+    assert sorted(_prefs(hub, "x@t.no")["seen"]) == ["a", "b"]
+
+
+def test_picker_puts_unseen_first(hub):
+    out = hub.home.picker(_apps("a", "b", "c", "d"), ["b"], ["a", "b"])
+    assert _slugs(out) == ["c", "d", "a", "b"]
+    assert [a["unseen"] for a in out] == [True, True, False, False]
+    assert [a["added"] for a in out] == [False, False, False, True]
+    assert not any(a["unseen"] for a in hub.home.picker(_apps("a", "b"), [], None))
+    assert not hub.home.picker(_apps("a"), ["a"], [])[0]["unseen"]
+
+
+def test_add_for_only_users_with_choices(hub):
+    with hub.db() as con:
+        hub.home.start(con, "admin@test.no", ["a"], admin=True)
+        hub.home.add_for(con, ["admin@test.no", "annen@admin.no"], "z")
+    assert _prefs(hub, "admin@test.no")["apps"] == ["a", "z"] and "z" in _prefs(hub, "admin@test.no")["seen"]
+    assert _prefs(hub, "annen@admin.no")["apps"] == [] and _prefs(hub, "annen@admin.no")["seen"] is None
+
+
+def test_rename_follows_choices_pins_and_seen(hub):
+    with hub.db() as con:
+        hub.home.set_added(con, "x@t.no", "a", True)
+        hub.home.set_pin(con, "x@t.no", "a", True)
+        hub.home.rename(con, "a", "a2")
+    p = _prefs(hub, "x@t.no")
+    assert p["apps"] == ["a2"] and p["pins"] == ["a2"] and p["seen"] == ["a2"]
+
+
+def test_index_shows_only_chosen(hub, make_page, user_client):
+    make_page("a", title="Alfa")
+    make_page("b", title="Beta")
+    assert 'data-slug="a"' not in _section(user_client.get("/").text, "rest")
+    r = user_client.post("/api/prefs/apps", json={"slug": "a", "added": True})
+    assert r.status_code == 200 and r.json()["apps"] == ["a"]
+    rest = _section(user_client.get("/").text, "rest")
+    assert 'data-slug="a"' in rest and 'data-slug="b"' not in rest
+
+
+def test_prefs_apps_api_rejects(hub, make_page, user_client, client):
+    make_page("a")
+    make_page("p", "people", ["venn@test.no"])
+    assert user_client.post("/api/prefs/apps", json={"slug": "p", "added": True}).status_code == 404
+    assert user_client.post("/api/prefs/apps", json={"slug": "a", "added": "ja"}).status_code == 400
+    assert user_client.post("/api/prefs/apps", data={"slug": "a"}).status_code == 415
+    assert client.post("/api/prefs/apps", json={"slug": "a", "added": True}).status_code == 401
+
+
+def test_prefs_seen_api(hub, make_page, user_client):
+    make_page("a")
+    make_page("p", "people", ["venn@test.no"])
+    assert user_client.post("/api/prefs/seen", json={}).status_code == 200
+    assert _prefs(hub, "user@test.no")["seen"] == ["a"]
+
+
+def test_lost_access_hides_then_returns(hub, make_page, admin_client, friend_client):
+    make_page("p", "people", ["venn@test.no"])
+    friend_client.post("/api/prefs/apps", json={"slug": "p", "added": True})
+    friend_client.post("/api/prefs/pin", json={"slug": "p", "pinned": True})
+    admin_client.post("/api/access", json={"slug": "p", "level": "admin", "people": ["venn@test.no"]})
+    assert 'data-slug="p"' not in friend_client.get("/").text
+    assert friend_client.post("/api/prefs/apps", json={"slug": "p", "added": False}).status_code == 404
+    admin_client.post("/api/access", json={"slug": "p", "level": "people", "people": ["venn@test.no"]})
+    assert 'data-slug="p"' in _section(friend_client.get("/").text, "fav")
+
+
+def test_admin_front_page_keeps_everything(hub, make_page, admin_client):
+    make_page("a")
+    make_page("q", "admin")
+    rest = _section(admin_client.get("/").text, "rest")
+    assert 'data-slug="a"' in rest and 'data-slug="q"' in rest
+
+
+def test_new_apps_land_on_admin_front_page_only(hub, admin_client, user_client, upload):
+    admin_client.get("/")
+    upload(admin_client, "c.html", "<body>c</body>")
+    hub.save_page("d", PAGE, create=True, private=False)
+    admin_client.post("/api/link", data={"title": "Lenke", "url": "https://x.no/"})
+    rest = _section(admin_client.get("/").text, "rest")
+    assert all(f'data-slug="{s}"' in rest for s in ("c", "d", "lenke"))
+    assert 'data-slug="c"' not in _section(user_client.get("/").text, "rest")
+    with hub.db() as con:
+        hub.home.set_added(con, "admin@test.no", "c", False)
+    upload(admin_client, "c.html", "<body>c2</body>")  # replacing is not new
+    assert 'data-slug="c"' not in _section(admin_client.get("/").text, "rest")
+
+
+def test_new_address_keeps_app_on_front_page(hub, make_page, admin_client, user_client):
+    make_page("a")
+    user_client.post("/api/prefs/apps", json={"slug": "a", "added": True})
+    assert admin_client.post("/api/edit", data={"slug": "a", "new_slug": "a2"}).status_code == 200
+    assert 'data-slug="a2"' in _section(user_client.get("/").text, "rest")

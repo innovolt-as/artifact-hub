@@ -1,5 +1,6 @@
-"""Front page data, per logged-in user: which apps they open, what they pin, how they view the list,
-and the one-line summary each app can leave for its card.
+"""Front page data, per logged-in user: which apps they have chosen for it, which apps they have seen in the
+"Velg apper" list, which apps they open, what they pin, how they view the list, and the one-line summary each
+app can leave for its card.
 
 Everything takes an open connection from main.db() (rows as sqlite3.Row) and an e-mail; nothing here
 is shared between users.
@@ -68,10 +69,17 @@ def _put(con: sqlite3.Connection, email: str, key: str, value) -> None:
     )
 
 
+def _slugs(value) -> list[str]:
+    return [s for s in value if isinstance(s, str)] if isinstance(value, list) else []
+
+
 def get_prefs(con: sqlite3.Connection, email: str) -> dict:
+    """view, pins, apps (chosen for the front page; [] when never chosen) and seen (None until the list
+    has been opened)."""
     view = _get(con, email, "view", "icons")
-    pins = _get(con, email, "pins", [])
-    return {"view": view if view in VIEWS else "icons", "pins": [p for p in pins if isinstance(p, str)]}
+    seen = _get(con, email, "seen", None)
+    return {"view": view if view in VIEWS else "icons", "pins": _slugs(_get(con, email, "pins", [])),
+            "apps": _slugs(_get(con, email, "apps", [])), "seen": None if seen is None else _slugs(seen)}
 
 
 def set_view(con: sqlite3.Connection, email: str, view: str) -> None:
@@ -86,6 +94,56 @@ def set_pin(con: sqlite3.Connection, email: str, slug: str, pinned: bool) -> lis
         pins.append(slug)
     _put(con, email, "pins", pins)
     return pins
+
+
+# ---------------------------------------------------------------- the apps each user has chosen
+def start(con: sqlite3.Connection, email: str, visible: list[str], *, admin: bool) -> None:
+    """The first time: an admin gets every app they can see (their front page looks as before); anyone
+    else starts with an empty front page, so nothing is stored for them."""
+    if admin and _get(con, email, "apps", None) is None:
+        _put(con, email, "apps", list(visible))
+        _put(con, email, "seen", list(visible))
+
+
+def mark_seen(con: sqlite3.Connection, email: str, slugs: list[str]) -> None:
+    seen = get_prefs(con, email)["seen"] or []
+    _put(con, email, "seen", seen + [s for s in slugs if s not in seen])
+
+
+def set_added(con: sqlite3.Connection, email: str, slug: str, added: bool) -> list[str]:
+    apps = [a for a in get_prefs(con, email)["apps"] if a != slug]
+    if added:
+        apps.append(slug)
+    _put(con, email, "apps", apps)
+    mark_seen(con, email, [slug])
+    return apps
+
+
+def add_for(con: sqlite3.Connection, emails, slug: str) -> None:
+    """Put a brand-new app on these users' front pages (admins). Users who have never had choices stored
+    get it anyway through start()."""
+    for email in emails:
+        if _get(con, email, "apps", None) is not None and slug not in get_prefs(con, email)["apps"]:
+            set_added(con, email, slug, True)
+
+
+def rename(con: sqlite3.Connection, old: str, new: str) -> None:
+    """An app got a new address: it stays chosen, pinned and seen for everyone."""
+    for row in con.execute("SELECT email, key, value FROM prefs WHERE key IN ('apps', 'seen', 'pins')").fetchall():
+        value = json.loads(row["value"])
+        if isinstance(value, list) and old in value:
+            _put(con, row["email"], row["key"], [new if s == old else s for s in value if s != new])
+
+
+def picker(apps: list[dict], chosen: list[str], seen: list[str] | None) -> list[dict]:
+    """The "Velg apper" list: marks each app added/unseen; unseen first, each group in the given order.
+
+    Unseen = came after the user last opened the list. Before the first opening nothing is unseen, and an
+    app on the front page always counts as seen."""
+    for a in apps:
+        a["added"] = a["slug"] in chosen
+        a["unseen"] = seen is not None and not a["added"] and a["slug"] not in seen
+    return [a for a in apps if a["unseen"]] + [a for a in apps if not a["unseen"]]
 
 
 # ---------------------------------------------------------------- summaries

@@ -451,16 +451,19 @@ NO_MONTHS = ("januar", "februar", "mars", "april", "mai", "juni", "juli", "augus
 def index(request: Request, user: str = Depends(require_user)):
     apps = list_artifacts(user)
     with db() as con:
+        home.start(con, user, [a["slug"] for a in apps], admin=is_admin(user))
         prefs = home.get_prefs(con, user)
+        mine = [a for a in apps if a["slug"] in prefs["apps"]]  # only the apps this user has chosen
         stats = home.visit_stats(con, user)
-        summaries = home.summaries(con, user, [a["slug"] for a in apps]) if prefs["view"] == "cards" else {}
-    favs, top, rest = home.build_sections(apps, stats, prefs["pins"])
+        summaries = home.summaries(con, user, [a["slug"] for a in mine]) if prefs["view"] == "cards" else {}
+    favs, top, rest = home.build_sections(mine, stats, prefs["pins"])
+    available = home.picker(apps, prefs["apps"], prefs["seen"])
     now = time.localtime()  # fallback only; the page rewrites the date and greeting with the viewer's clock
     return templates.TemplateResponse(
         request,
         "index.html",
         {"site": SITE_NAME, "user": user, "admin": is_admin(user), "view": prefs["view"], "favs": favs, "top": top, "rest": rest,
-         "summaries": summaries, "today": f"{NO_DAYS[now.tm_wday]} {now.tm_mday}. {NO_MONTHS[now.tm_mon - 1]}"},
+         "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": f"{NO_DAYS[now.tm_wday]} {now.tm_mday}. {NO_MONTHS[now.tm_mon - 1]}"},
     )
 
 
@@ -842,6 +845,30 @@ async def prefs_pin(request: Request, user: str = Depends(api_user)):
     return {"ok": True, "pins": pins}
 
 
+@app.post("/api/prefs/apps")
+async def prefs_apps(request: Request, user: str = Depends(api_user)):
+    """Add an app to, or take it off, the user's front page."""
+    _require_json(request)
+    body = await request.json()
+    slug, added = (body.get("slug"), body.get("added")) if isinstance(body, dict) else (None, None)
+    if not isinstance(slug, str) or not isinstance(added, bool):
+        raise HTTPException(400, 'Send {"slug": "...", "added": true|false}')
+    if slug not in {a["slug"] for a in list_artifacts(user)}:
+        raise HTTPException(404)
+    with db() as con:
+        apps = home.set_added(con, user, slug, added)
+    return {"ok": True, "apps": apps}
+
+
+@app.post("/api/prefs/seen")
+def prefs_seen(request: Request, user: str = Depends(api_user)):
+    """The user opened the "Velg apper" list: nothing in it is new any more."""
+    _require_json(request)
+    with db() as con:
+        home.mark_seen(con, user, [a["slug"] for a in list_artifacts(user)])
+    return {"ok": True}
+
+
 @app.get("/api/data/{app_name}")
 def data_list(app_name: str, prefix: str = "", user: str = Depends(api_user)):
     _check_app_key(app_name)
@@ -929,6 +956,12 @@ def _slugify(name: str) -> str:
     return s[:80] or "artifact"
 
 
+def _new_app(slug: str) -> None:
+    """A brand-new app goes straight onto the admins' front pages (others pick it from their list)."""
+    with db() as con:
+        home.add_for(con, ADMIN_EMAILS, slug)
+
+
 def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: str | None) -> str:
     filename = upload.filename or "artifact"
     stem, ext = os.path.splitext(filename)
@@ -937,6 +970,7 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
         raise HTTPException(400, f"Ugyldig navn: {slug}")
     # a new version keeps the old name, emoji, private flag and banner switch (stored as false) unless overridden
     old = _meta_path(slug)
+    is_new = old is None
     old_meta = _read_meta(old) if old else {}
     meta = {k: old_meta[k] for k in META_KEYS if old_meta.get(k) or old_meta.get(k) is False}
     if title:
@@ -984,6 +1018,8 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
             (ARTIFACTS_DIR / f"{slug}.meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
     else:
         raise HTTPException(400, "Bare .html eller .zip (med index.html) støttes")
+    if is_new:
+        _new_app(slug)
     log.info("Uploaded artifact %s", slug)
     return slug
 
@@ -1056,6 +1092,8 @@ def save_page(slug: str, html: str, *, create: bool, title: str | None = None, d
         access.set_level(meta, "admin" if private else "all")
     dest.write_text(html, "utf-8")
     _write_meta(meta_path, meta)
+    if create:
+        _new_app(slug)
     log.info("%s page %s", "Created" if create else "Updated", slug)
     return slug
 
@@ -1286,6 +1324,7 @@ def api_link(
     if admin_only:
         meta["admin_only"] = True
     (ARTIFACTS_DIR / f"{slug}.link.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    _new_app(slug)
     log.info("Added link card %s -> %s", slug, url)
     return JSONResponse({"ok": True, "slug": slug})
 
@@ -1346,8 +1385,9 @@ async def api_edit(
         for src, dst in moves:
             if src.exists():
                 src.rename(dst)
-        with db() as con:  # users' stored data follows the artifact
+        with db() as con:  # users' stored data, choices and pins follow the artifact
             con.execute("UPDATE OR REPLACE docs SET slug=? WHERE slug=?", (new_slug, slug))
+            home.rename(con, slug, new_slug)
         log.info("Renamed artifact %s -> %s", slug, new_slug)
     return JSONResponse({"ok": True, "slug": new_slug})
 
