@@ -10,6 +10,9 @@ Invited e-mails (the "Personer" list on the admin page) are kept in the db table
 """
 from __future__ import annotations
 
+import sqlite3
+import time
+
 LEVELS = ("all", "people", "admin")
 _ICONS = {"all": "🌍", "people": "👥", "admin": "🔒"}
 
@@ -80,3 +83,24 @@ def describe(meta: dict) -> str:
 def label(meta: dict) -> str:
     text = describe(meta)
     return f"{_ICONS[level(meta)]} {text[:1].upper()}{text[1:]}"
+
+
+# ---------------------------------------------------------------- invited people (may log in)
+def create_tables(con: sqlite3.Connection) -> None:
+    con.execute("CREATE TABLE IF NOT EXISTS invites(email TEXT PRIMARY KEY, at INTEGER NOT NULL)")
+
+
+def invite(con: sqlite3.Connection, email: str, now: int | None = None) -> None:
+    con.execute("INSERT OR IGNORE INTO invites(email, at) VALUES(?,?)", (norm(email), int(now or time.time())))
+
+
+def uninvite(con: sqlite3.Connection, email: str) -> None:
+    con.execute("DELETE FROM invites WHERE email=?", (norm(email),))
+
+
+def invited(con: sqlite3.Connection) -> list[str]:
+    return [r[0] for r in con.execute("SELECT email FROM invites ORDER BY email")]
+
+
+def is_invited(con: sqlite3.Connection, email: str) -> bool:
+    return con.execute("SELECT 1 FROM invites WHERE email=?", (norm(email),)).fetchone() is not None

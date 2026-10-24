@@ -38,7 +38,7 @@ def _clean():
             p.unlink()
     with main.db() as con:
         for table in ("magic_tokens", "logins", "docs", "app_data",
-                      "oauth_clients", "oauth_requests", "oauth_codes", "oauth_tokens", "visits", "prefs"):
+                      "oauth_clients", "oauth_requests", "oauth_codes", "oauth_tokens", "visits", "prefs", "invites"):
             con.execute(f"DELETE FROM {table}")
     main._ip_sends.clear()
     yield

@@ -158,6 +158,8 @@ with db() as con:
     )
     # Front page per user: app opens, pins and view mode (app/home.py)
     home.create_tables(con)
+    # People the admin has invited; they may log in (app/access.py)
+    access.create_tables(con)
 
 
 # ---------------------------------------------------------------- auth helpers
@@ -165,6 +167,9 @@ def email_allowed(email: str) -> bool:
     email = email.lower()
     if email in ADMIN_EMAILS or email in ALLOWED_EMAILS:
         return True
+    with db() as con:
+        if access.is_invited(con, email):
+            return True
     if OPEN_SIGNUP:
         return bool(EMAIL_RE.match(email))
     domain = email.rsplit("@", 1)[-1] if "@" in email else ""
@@ -1156,6 +1161,68 @@ def api_toggle_banner(request: Request, slug: str = Form(...)):
         meta["banner"] = False
     _write_meta(meta_path, meta)
     return JSONResponse({"ok": True, "banner": meta.get("banner") is not False})
+
+
+# ---------------------------------------------------------------- routes: invited people (app/access.py)
+def _all_slugs() -> list[str]:
+    """Every app and link card in the data dir."""
+    slugs = set()
+    for p in ARTIFACTS_DIR.iterdir():
+        name = p.name
+        if name.startswith("."):
+            continue
+        if name.endswith(".link.json"):
+            slugs.add(name[: -len(".link.json")])
+        elif p.is_file() and name.endswith(".html"):
+            slugs.add(name[: -len(".html")])
+        elif p.is_dir() and (p / "index.html").is_file():
+            slugs.add(name)
+    return sorted(slugs)
+
+
+def remove_person(email: str) -> list[str]:
+    """Take back an invitation and take the e-mail off every app's list; returns the apps it was on."""
+    email = access.norm(email)
+    with db() as con:
+        access.uninvite(con, email)
+    removed = []
+    for slug in _all_slugs():
+        meta_path = _meta_path(slug)
+        meta = _read_meta(meta_path) if meta_path else {}
+        if email in access.people(meta):
+            access.set_level(meta, access.level(meta), [e for e in access.people(meta) if e != email])
+            _write_meta(meta_path, meta)
+            removed.append(slug)
+    return removed
+
+
+async def _email_in(request: Request) -> str:
+    """The trimmed, lower-case "email" of a JSON body; 400 if it is not an e-mail address."""
+    _require_json(request)
+    body = await request.json()
+    email = access.norm(body["email"]) if isinstance(body, dict) and isinstance(body.get("email"), str) else ""
+    if not EMAIL_RE.match(email):
+        raise HTTPException(400, "Ugyldig e-post")
+    return email
+
+
+@app.post("/api/people/invite")
+async def people_invite(request: Request, user: str = Depends(require_admin)):
+    email = await _email_in(request)
+    if email in ADMIN_EMAILS:
+        raise HTTPException(400, "Admin har alltid tilgang")
+    with db() as con:
+        access.invite(con, email)
+    return {"ok": True, "email": email}
+
+
+@app.post("/api/people/remove")
+async def people_remove(request: Request, user: str = Depends(require_admin)):
+    email = await _email_in(request)
+    with db() as con:
+        if not access.is_invited(con, email):
+            raise HTTPException(404, "Ikke invitert")
+    return {"ok": True, "apps": remove_person(email)}
 
 
 def _check_url(url: str) -> str:
