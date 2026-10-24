@@ -169,11 +169,15 @@ table.list td a { overflow-wrap: anywhere; }
 }
 
 .editor { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); padding: 24px; width: min(440px, calc(100vw - 32px)); }
+/* Text fields are 16px: iOS zooms in on smaller ones when they get focus, and stays zoomed after.
+   While a dialog is open only the dialog scrolls, not the page behind it. */
+html:has(dialog[open]) { overflow: hidden; }
+dialog { overscroll-behavior: contain; }
 .editor::backdrop { background: rgb(0 0 0 / .35); }
-.editor h1 { font-size: 20px; margin: 0 0 12px; }
+.editor h1 { font-size: 20px; margin: 0 0 12px; outline: none; }  /* takes focus when opened: no keyboard, no focus ring */
 .editor label { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 14px; font-weight: 600; }
 .editor label.check { flex-direction: row; font-weight: 400; }
-.editor input:not([type=checkbox]):not([type=radio]) { font: inherit; font-weight: 400; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); width: 100%; }
+.editor input:not([type=checkbox]):not([type=radio]) { font: inherit; font-size: 16px; font-weight: 400; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); width: 100%; }
 .editor .prefixed { display: flex; align-items: center; gap: 4px; font-weight: 400; }
 .editor-preview { display: flex; align-items: center; gap: 12px; }
 .editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
@@ -181,10 +185,9 @@ table.list td a { overflow-wrap: anywhere; }
 .err { color: var(--danger); margin: 8px 0 0; min-height: 1em; }
 .link-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
 .link-form span { flex-basis: 100%; }
-.link-form input { flex: 1 1 160px; font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+.link-form input { flex: 1 1 160px; font: inherit; font-size: 16px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
 .link-form button.small { margin: 0; padding: 7px 12px; font-size: 14px; }
 .editor [hidden] { display: none !important; }
-#accessDlg h1 { outline: none; }  /* takes focus when opened, so no option shows a focus ring */
 .ac-people { margin-top: 8px; padding: 8px 0 0 26px; }
 .ac-list { list-style: none; margin: 0 0 4px; padding: 0; max-height: 40vh; overflow: auto; }
 .ac-list label.check { margin-top: 6px; overflow-wrap: anywhere; }
