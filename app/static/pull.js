@@ -11,8 +11,8 @@
   window.__hubPull = true;
   if (!(navigator.standalone === true || matchMedia("(display-mode: standalone)").matches)) return;
 
-  const ARM = 80;   // px to pull before letting go reloads
-  const MAX = 140;  // px after which the indicator stops following
+  const ARM = 120;  // px to pull before letting go reloads (80 was too easy to set off)
+  const MAX = 180;  // px after which the indicator stops following
   let startY = null, dist = 0, host = null, ring = null;
 
   function blocked(target) {
