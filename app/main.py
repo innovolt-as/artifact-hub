@@ -1096,10 +1096,25 @@ def page_source(slug: str) -> str:
     return _single_page(slug).read_text("utf-8")
 
 
+def known_people() -> list[str]:
+    """E-mails offered in the access dialog: invited, ALLOWED_EMAILS, anyone who has logged in and everyone
+    on an app's list. Admins always have access, so they are left out."""
+    with db() as con:
+        found = set(access.invited(con)) | {access.norm(r[0]) for r in con.execute("SELECT DISTINCT email FROM logins")}
+    found |= ALLOWED_EMAILS
+    for slug in _all_slugs():
+        found |= set(access.people(_read_meta(_meta_path(slug))))
+    return sorted(found - ADMIN_EMAILS)
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, user: str = Depends(require_admin)):
+    with db() as con:
+        invited = set(access.invited(con))
+    people = [{"email": e, "invited": e in invited} for e in sorted((invited | ALLOWED_EMAILS) - ADMIN_EMAILS)]
     return templates.TemplateResponse(
-        request, "admin.html", {"site": SITE_NAME, "user": user, "admin": True, "artifacts": list_artifacts(user)}
+        request, "admin.html", {"site": SITE_NAME, "user": user, "admin": True, "artifacts": list_artifacts(user),
+                                "known": known_people(), "people": people}
     )
 
 
@@ -1135,16 +1150,34 @@ def api_delete(request: Request, slug: str = Form(...)):
     return JSONResponse({"ok": True})
 
 
-@app.post("/api/toggle-private")
-def api_toggle_private(request: Request, slug: str = Form(...)):
-    _upload_authorized(request)
-    meta_path = _meta_path(slug)
+@app.post("/api/access")
+async def api_access(request: Request, user: str = Depends(require_admin)):
+    """Who may see an app: {"slug", "level": "all" | "people" | "admin", "people": [e-mails]}.
+    The list is kept whatever the level; with "people" everyone on it is also invited (may log in)."""
+    _require_json(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, 'Send {"slug", "level", "people"}')
+    slug, level, people = body.get("slug"), body.get("level"), body.get("people", [])
+    meta_path = _meta_path(slug) if isinstance(slug, str) else None
     if not meta_path:
         raise HTTPException(404)
+    if level not in access.LEVELS:
+        raise HTTPException(400, f"Ukjent tilgang: {level}")
+    if not isinstance(people, list) or not all(isinstance(e, str) for e in people):
+        raise HTTPException(400, "people må være en liste med e-poster")
+    bad = [e for e in people if not EMAIL_RE.match(access.norm(e))]
+    if bad:
+        raise HTTPException(400, f"Ugyldig e-post: {', '.join(bad)}")
+    people = [e for e in access.people({"people": people}) if e not in ADMIN_EMAILS]
     meta = _read_meta(meta_path)
-    meta["admin_only"] = not meta.get("admin_only", False)
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-    return JSONResponse({"ok": True, "admin_only": meta["admin_only"]})
+    access.set_level(meta, level, people)
+    _write_meta(meta_path, meta)
+    if level == "people":
+        with db() as con:
+            for e in people:
+                access.invite(con, e)
+    return {"ok": True, "level": level, "label": access.label(meta)}
 
 
 @app.post("/api/toggle-banner")

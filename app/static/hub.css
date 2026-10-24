@@ -135,7 +135,7 @@ table.list td a { overflow-wrap: anywhere; }
 .editor h1 { font-size: 20px; margin: 0 0 12px; }
 .editor label { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 14px; font-weight: 600; }
 .editor label.check { flex-direction: row; font-weight: 400; }
-.editor input:not([type=checkbox]) { font: inherit; font-weight: 400; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); width: 100%; }
+.editor input:not([type=checkbox]):not([type=radio]) { font: inherit; font-weight: 400; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); width: 100%; }
 .editor .prefixed { display: flex; align-items: center; gap: 4px; font-weight: 400; }
 .editor-preview { display: flex; align-items: center; gap: 12px; }
 .editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
@@ -146,3 +146,11 @@ table.list td a { overflow-wrap: anywhere; }
 .link-form input { flex: 1 1 160px; font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
 .link-form button.small { margin: 0; padding: 7px 12px; font-size: 14px; }
 .editor [hidden] { display: none !important; }
+.ac-people { margin-top: 8px; padding: 8px 0 0 26px; }
+.ac-list { list-style: none; margin: 0 0 4px; padding: 0; max-height: 40vh; overflow: auto; }
+.ac-list label.check { margin-top: 6px; overflow-wrap: anywhere; }
+.ac-people .link-form { margin-top: 8px; }
+.plist { list-style: none; margin: 12px 0 0; padding: 0; }
+.plist li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.plist .e { min-width: 0; overflow-wrap: anywhere; }
+.plist button.small { margin: 0; flex: none; }

@@ -32,7 +32,8 @@
         <button class="small edit" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}"
                 data-kind="{{ a.kind }}" data-url="{{ a.url if a.kind == 'link' else '' }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}">Rediger</button>
         {% if a.kind != 'link' %}<button class="small banner" data-slug="{{ a.slug }}" title="Hub-stripa øverst i appen">{{ '▭ banner' if a.banner else '▭ uten banner' }}</button>{% endif %}
-        <button class="small toggle" data-slug="{{ a.slug }}">{{ '🔒 privat' if a.admin_only else '🌐 delt' }}</button>
+        <button class="small access" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-level="{{ a.access }}"
+                data-people='{{ a.people|tojson }}' title="Hvem som har tilgang">{{ a.access_label }}</button>
         <button class="small danger del" data-slug="{{ a.slug }}">Slett</button>
       </td>
     </tr>
@@ -40,6 +41,47 @@
     </tbody>
   </table>
 </section>
+
+<section class="card" id="people">
+  <h1>Personer</h1>
+  <p class="muted">Kan logge inn. De ser appene som står på «Alle», og appene de står på.</p>
+  <form id="inviteForm" class="link-form">
+    <input name="email" type="email" placeholder="navn@epost.no" required>
+    <button class="small">Inviter</button>
+  </form>
+  <p id="peopleError" class="err small"></p>
+  <ul class="plist">
+    {% for p in people %}
+    <li><span class="e">{{ p.email }}</span>
+      {% if p.invited %}<button class="small danger unperson" data-email="{{ p.email }}">Fjern</button>
+      {% else %}<span class="muted small">fra serveroppsettet</span>{% endif %}</li>
+    {% else %}
+    <li class="muted">Ingen er invitert ennå.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<dialog id="accessDlg" class="editor">
+  <form id="accessForm" method="dialog">
+    <h1>Tilgang: <span id="acTitle"></span></h1>
+    <label class="check"><input type="radio" name="level" value="all"> Alle som kan logge inn</label>
+    <label class="check"><input type="radio" name="level" value="people"> Bestemte personer</label>
+    <label class="check"><input type="radio" name="level" value="admin"> Bare meg</label>
+    <div id="acPeople" class="ac-people">
+      <ul id="acList" class="ac-list"></ul>
+      <div class="link-form">
+        <input type="email" id="acNew" placeholder="ny@epost.no">
+        <button type="button" class="small" id="acAdd">Legg til</button>
+      </div>
+    </div>
+    <p id="acError" class="err small"></p>
+    <div class="editor-actions">
+      <button type="button" class="small" id="acCancel">Avbryt</button>
+      <button type="submit" class="primary">Lagre</button>
+    </div>
+  </form>
+</dialog>
+<script type="application/json" id="known">{{ known|tojson }}</script>
 
 <dialog id="editor" class="editor">
   <form id="editForm" method="dialog">
@@ -112,9 +154,6 @@ document.querySelectorAll('.del').forEach(b => b.onclick = async () => {
   if (!confirm(`Slette "${b.dataset.slug}"?`)) return;
   if (await post('/api/delete', b.dataset.slug)) b.closest('tr').remove();
 });
-document.querySelectorAll('.toggle').forEach(b => b.onclick = async () => {
-  if (await post('/api/toggle-private', b.dataset.slug)) location.reload();
-});
 document.querySelectorAll('.banner').forEach(b => b.onclick = async () => {
   if (await post('/api/toggle-banner', b.dataset.slug)) location.reload();
 });
@@ -165,6 +204,78 @@ f.addEventListener('submit', async e => {
   if (r.ok) return location.reload();
   const j = await r.json().catch(() => ({}));
   $('edError').textContent = j.detail || `Feil (${r.status})`;
+});
+
+const postJson = (url, body) =>
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+const failText = async r => (await r.json().catch(() => ({}))).detail || `Feil (${r.status})`;
+
+// --- access dialog: everyone, the checked people, or only me (the list is kept whatever is chosen)
+const acDlg = $('accessDlg'), acForm = $('accessForm');
+const known = JSON.parse($('known').textContent);
+let acSlug = null;
+
+function personRow(email, checked) {
+  const li = document.createElement('li');
+  const label = document.createElement('label');
+  label.className = 'check';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox'; cb.value = email; cb.checked = checked;
+  label.append(cb, ' ' + email);
+  li.append(label);
+  return li;
+}
+const showPeople = () => { $('acPeople').hidden = acForm.level.value !== 'people'; };
+
+document.querySelectorAll('.access').forEach(b => b.onclick = () => {
+  acSlug = b.dataset.slug;
+  const mine = JSON.parse(b.dataset.people);
+  $('acTitle').textContent = b.dataset.title;
+  acForm.level.value = b.dataset.level;
+  $('acList').replaceChildren(...[...new Set([...mine, ...known])].sort().map(e => personRow(e, mine.includes(e))));
+  $('acNew').value = '';
+  $('acError').textContent = '';
+  showPeople();
+  acDlg.showModal();
+});
+acForm.querySelectorAll('input[name=level]').forEach(r => r.onchange = showPeople);
+
+function addPerson() {
+  const input = $('acNew'), email = input.value.trim().toLowerCase();
+  if (!email) return true;
+  if (!input.checkValidity()) { $('acError').textContent = 'Skriv en gyldig e-post'; return false; }
+  const row = [...$('acList').querySelectorAll('input')].find(cb => cb.value === email);
+  if (row) row.checked = true;
+  else $('acList').prepend(personRow(email, true));
+  input.value = '';
+  $('acError').textContent = '';
+  return true;
+}
+$('acAdd').onclick = addPerson;
+$('acNew').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addPerson(); } });
+$('acCancel').onclick = () => acDlg.close();
+
+acForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!addPerson()) return;  // an address typed but not added yet still counts
+  const people = [...$('acList').querySelectorAll('input:checked')].map(cb => cb.value);
+  const r = await postJson('/api/access', { slug: acSlug, level: acForm.level.value, people });
+  if (r.ok) return location.reload();
+  $('acError').textContent = await failText(r);
+});
+
+// --- people who may log in
+$('inviteForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const r = await postJson('/api/people/invite', { email: e.target.email.value });
+  if (r.ok) return location.reload();
+  $('peopleError').textContent = await failText(r);
+});
+document.querySelectorAll('.unperson').forEach(b => b.onclick = async () => {
+  if (!confirm(`Fjerne ${b.dataset.email}? Personen kan ikke logge inn lenger og tas av alle appene.`)) return;
+  const r = await postJson('/api/people/remove', { email: b.dataset.email });
+  if (r.ok) return location.reload();
+  $('peopleError').textContent = await failText(r);
 });
 </script>
 {% endblock %}
