@@ -1,5 +1,6 @@
 """Front page: per-user visits, pins, view mode, app summaries and the new-dot (app/home.py)."""
 import json
+import re
 
 import pytest
 
@@ -429,3 +430,53 @@ def test_new_address_keeps_app_on_front_page(hub, make_page, admin_client, user_
     user_client.post("/api/prefs/apps", json={"slug": "a", "added": True})
     assert admin_client.post("/api/edit", data={"slug": "a", "new_slug": "a2"}).status_code == 200
     assert 'data-slug="a2"' in _section(user_client.get("/").text, "rest")
+
+
+# ---------------------------------------------------------------- the "Velg apper" list on the front page
+def _picker(html):
+    return html[html.find('id="picker"'):html.find("</dialog>")]
+
+
+def test_empty_front_page_shows_add_card(hub, make_page, user_client):
+    make_page("a", title="Alfa")
+    html = user_client.get("/").text
+    assert 'class="addcard"' in html and "Legg til apper" in html and "Velg hvilke apper du vil ha på forsiden din" in html
+    assert "Ingen apper ennå" not in html and 'class="more"' not in html
+    p = _picker(html)
+    assert "Velg apper" in p and 'data-slug="a"' in p and "Alfa" in p and "checked" not in p
+
+
+def test_after_choosing_small_button_and_checked(hub, make_page, user_client):
+    make_page("a", title="Alfa")
+    make_page("b", title="Beta")
+    user_client.post("/api/prefs/apps", json={"slug": "a", "added": True})
+    html = user_client.get("/").text
+    assert 'class="more"' in html and "Legg til eller fjern apper" in html and 'class="addcard"' not in html
+    assert re.search(r'data-slug="a"[^>]*checked', _picker(html)) and not re.search(r'data-slug="b"[^>]*checked', _picker(html))
+
+
+def test_new_apps_first_with_dot_until_seen(hub, make_page, user_client):
+    make_page("a", title="Alfa")
+    user_client.post("/api/prefs/apps", json={"slug": "a", "added": True})
+    make_page("b", title="Beta")
+    html = user_client.get("/").text
+    p = _picker(html)
+    assert p.index('data-slug="b"') < p.index('data-slug="a"') and p.count(">Ny<") == 1
+    more = html[html.find('class="more"'):]
+    assert 'class="dot"' in more[:more.find("</button>")]
+    user_client.post("/api/prefs/seen", json={})
+    html = user_client.get("/").text
+    assert ">Ny<" not in _picker(html) and 'class="dot"' not in html[html.find('class="more"'):].split("</button>")[0]
+
+
+def test_picker_empty_text_and_escaping(hub, make_page, user_client):
+    assert "Det finnes ingen apper ennå." in _picker(user_client.get("/").text)
+    make_page("x", title="<b>x</b>")
+    p = _picker(user_client.get("/").text)
+    assert "&lt;b&gt;x&lt;/b&gt;" in p and "<b>x</b>" not in p
+
+
+def test_admin_picker_shows_lock(hub, make_page, admin_client):
+    make_page("q", "admin", title="Hemmelig")
+    p = _picker(admin_client.get("/").text)
+    assert "Hemmelig" in p and "🔒" in p

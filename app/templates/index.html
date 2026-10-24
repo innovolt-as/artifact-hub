@@ -51,7 +51,11 @@
 
 {% block body %}
 {% if not favs and not top and not rest %}
-  <p class="empty">Ingen apper ennå.</p>
+  <button type="button" class="addcard" data-open-picker>
+    <span class="plus" aria-hidden="true">+</span>
+    <b>Legg til apper</b>
+    <span>Velg hvilke apper du vil ha på forsiden din</span>
+  </button>
 {% else %}
 <div class="apps" data-view="{{ view }}">
   {% if favs %}
@@ -76,7 +80,35 @@
       {% for a in rest %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
   </section>
+  <button type="button" class="more" data-open-picker>＋ Legg til eller fjern apper{% if has_new %}<span class="dot" title="Nye apper"></span>{% endif %}</button>
 </div>
 {% endif %}
+
+<dialog id="picker" class="sheet" aria-labelledby="pickerTitle">
+  <div class="sheet-in">
+    <header>
+      <h1 id="pickerTitle">Velg apper</h1>
+      <p>Huk av det du vil ha på forsiden</p>
+    </header>
+    {% if available %}
+    <ul>
+      {% for a in available %}
+      <li><label>
+        <input type="checkbox" data-slug="{{ a.slug }}"{% if a.added %} checked{% endif %}>
+        {{ icon(a) }}
+        <span class="txt">
+          <b>{{ a.title }}{% if a.unseen %} <span class="new">Ny</span>{% endif %}{% if a.admin_only %} <span class="lockmark" title="Kun admin">🔒</span>{% endif %}</b>
+          {% if a.description %}<small>{{ a.description }}</small>{% endif %}
+        </span>
+        <span class="tick" aria-hidden="true"></span>
+      </label></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="none">Det finnes ingen apper ennå.</p>
+    {% endif %}
+    <footer><button type="button" class="primary" data-close>Ferdig</button></footer>
+  </div>
+</dialog>
 <script src="/static/home.js" defer></script>
 {% endblock %}

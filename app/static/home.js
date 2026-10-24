@@ -1,6 +1,6 @@
 // Front page: greeting and date from the viewer's clock, view toggle, pinning (star in the card view,
-// long-press / right-click menu in the icon view), and a fresh page when coming back after a while.
-// Prefs live on the account (/api/prefs/*).
+// long-press / right-click menu in the icon view), the "Velg apper" list, and a fresh page when coming back
+// after a while. Prefs live on the account (/api/prefs/*).
 (function () {
   const STALE_MS = 5 * 60 * 1000; // back after longer than this (e.g. the home-screen app resumed) -> reload
   let hiddenAt = null;
@@ -33,6 +33,29 @@
       post("/api/prefs/view", { view: b.dataset.setView }).then(() => location.reload(), failed);
     };
   });
+
+  // "Velg apper": each tick is saved at once; closing the list reloads the page if anything changed
+  const picker = document.getElementById("picker");
+  let changed = false, seenSent = false;
+  document.querySelectorAll("[data-open-picker]").forEach((b) => {
+    b.onclick = () => {
+      picker.showModal();
+      if (!seenSent) {
+        seenSent = true;
+        post("/api/prefs/seen", {}).catch(() => {});
+      }
+    };
+  });
+  picker.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.onchange = () =>
+      post("/api/prefs/apps", { slug: cb.dataset.slug, added: cb.checked }).then(
+        () => { changed = true; },
+        () => { cb.checked = !cb.checked; failed(); },
+      );
+  });
+  picker.querySelector("[data-close]").onclick = () => picker.close();
+  picker.addEventListener("click", (e) => { if (e.target === picker) picker.close(); }); // the backdrop
+  picker.addEventListener("close", () => { if (changed) location.reload(); });
 
   const togglePin = (li) =>
     post("/api/prefs/pin", { slug: li.dataset.slug, pinned: li.dataset.pinned !== "true" }).then(() => location.reload(), failed);
