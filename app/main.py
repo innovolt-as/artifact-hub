@@ -163,17 +163,22 @@ with db() as con:
 
 
 # ---------------------------------------------------------------- auth helpers
-def email_allowed(email: str) -> bool:
+def allowed_by_config(email: str) -> bool:
+    """Let in by the server config (ADMIN_EMAILS, ALLOWED_EMAILS, ALLOWED_DOMAINS), not by an invitation."""
     email = email.lower()
     if email in ADMIN_EMAILS or email in ALLOWED_EMAILS:
         return True
-    with db() as con:
-        if access.is_invited(con, email):
-            return True
     if OPEN_SIGNUP:
         return bool(EMAIL_RE.match(email))
     domain = email.rsplit("@", 1)[-1] if "@" in email else ""
     return domain in ALLOWED_DOMAINS
+
+
+def email_allowed(email: str) -> bool:
+    if allowed_by_config(email):
+        return True
+    with db() as con:
+        return access.is_invited(con, email)
 
 
 def is_admin(email: str | None) -> bool:
@@ -1149,7 +1154,9 @@ def known_people() -> list[str]:
 def admin_page(request: Request, user: str = Depends(require_admin)):
     with db() as con:
         invited = set(access.invited(con))
-    people = [{"email": e, "invited": e in invited} for e in sorted((invited | ALLOWED_EMAILS) - ADMIN_EMAILS)]
+    # "Fjern" only for those an invitation lets in; ALLOWED_EMAILS are let in by the server config
+    people = [{"email": e, "invited": e in invited and e not in ALLOWED_EMAILS}
+              for e in sorted((invited | ALLOWED_EMAILS) - ADMIN_EMAILS)]
     return templates.TemplateResponse(
         request, "admin.html", {"site": SITE_NAME, "user": user, "admin": True, "artifacts": list_artifacts(user),
                                 "known": known_people(), "people": people}
@@ -1214,7 +1221,8 @@ async def api_access(request: Request, user: str = Depends(require_admin)):
     if level == "people":
         with db() as con:
             for e in people:
-                access.invite(con, e)
+                if not allowed_by_config(e):  # already let in by the server config: no invitation to take back
+                    access.invite(con, e)
     return {"ok": True, "level": level, "label": access.label(meta)}
 
 
@@ -1248,7 +1256,7 @@ def _all_slugs() -> list[str]:
             slugs.add(name[: -len(".html")])
         elif p.is_dir() and (p / "index.html").is_file():
             slugs.add(name)
-    return sorted(slugs)
+    return sorted(s for s in slugs if SLUG_RE.match(s))  # a file copied in by hand may not be a valid slug
 
 
 def remove_person(email: str) -> list[str]:

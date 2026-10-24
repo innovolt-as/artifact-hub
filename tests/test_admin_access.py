@@ -66,3 +66,30 @@ def test_admin_page_access_buttons_and_people(hub, make_page, admin_client):
 def test_toggle_private_route_gone(make_page, admin_client):
     make_page("p")
     assert admin_client.post("/api/toggle-private", data={"slug": "p"}).status_code in (404, 405)
+
+
+def test_admin_page_survives_odd_file_names(hub, make_page, admin_client):
+    make_page("p", "people", ["venn@test.no"])
+    (hub.ARTIFACTS_DIR / "Timeliste.html").write_text("<body>x</body>")  # scp'd in by hand; not a valid slug
+    assert admin_client.get("/admin").status_code == 200
+    assert hub.known_people() == ["user@test.no", "venn@test.no"]
+
+
+def _person_row(html, email):
+    people = html[html.find('id="people"'):]
+    return people[people.find(email):].split("</li>")[0]
+
+
+def test_server_config_people_are_not_invited(hub, make_page, admin_client):
+    make_page("p")
+    admin_client.post("/api/access", json={"slug": "p", "level": "people", "people": ["user@test.no", "ny@test.no"]})
+    with hub.db() as con:
+        assert hub.access.invited(con) == ["ny@test.no"]
+    row = _person_row(admin_client.get("/admin").text, "user@test.no")
+    assert "fra serveroppsettet" in row and "Fjern" not in row
+
+
+def test_server_config_person_invited_earlier_has_no_remove(hub, admin_client):
+    admin_client.post("/api/people/invite", json={"email": "user@test.no"})
+    row = _person_row(admin_client.get("/admin").text, "user@test.no")
+    assert "fra serveroppsettet" in row and "Fjern" not in row
