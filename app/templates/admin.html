@@ -2,6 +2,7 @@
 {% from "_icon.html" import icon %}
 {% block title %}Admin · {{ site }}{% endblock %}
 {% block body %}
+{% with tab = 'apps' %}{% include "_admin_tabs.html" %}{% endwith %}
 <section class="card">
   <h1>Last opp</h1>
   <p class="muted">Dra inn <code>.html</code>-filer eller en <code>.zip</code> med <code>index.html</code>. Samme filnavn erstatter eksisterende.</p>

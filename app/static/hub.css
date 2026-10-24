@@ -1,10 +1,11 @@
 :root {
   --bg: #f6f5f1; --fg: #1d1c1a; --muted: #6e6a62; --card: #ffffff; --line: #e4e1da;
   --accent: #2f5fd1; --accent-fg: #fff; --danger: #b4321f; --ok: #227a4c;
+  --bar: #2f5fd1;
   --radius: 12px; --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; }
+  :root { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --bar: #5b86f0; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--font); }
@@ -196,3 +197,26 @@ dialog { overscroll-behavior: contain; }
 .plist li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
 .plist .e { min-width: 0; overflow-wrap: anywhere; }
 .plist button.small { margin: 0; flex: none; }
+
+/* ---------------------------------------------------------------- admin: tabs and statistics */
+.tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
+.tabs a { padding: 8px 14px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 600; font-size: 15px; }
+.tabs a[aria-current="page"] { color: var(--fg); border-bottom-color: var(--accent); }
+.kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0 24px; }
+.kpi { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.kpi span { display: block; font-size: 13px; color: var(--muted); }
+.kpi b { display: block; font-size: 32px; font-weight: 650; line-height: 1.2; font-variant-numeric: tabular-nums; }
+#stats .sec { margin-top: 8px; }
+.rank { list-style: none; margin: 0 0 16px; padding: 0; }
+.rank > li { border-top: 1px solid var(--line); }
+.rank summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 0; cursor: pointer; list-style: none; }
+.rank summary::-webkit-details-marker { display: none; }
+.rank .name { flex: 1 1 auto; font-weight: 600; overflow-wrap: break-word; }  /* a long e-mail pushes .meta onto the next line */
+.rank .meta { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.rank .who { font-size: 13px; color: var(--muted); }
+.rank .n { min-width: 3ch; text-align: right; font-weight: 650; font-variant-numeric: tabular-nums; }
+.rank .bar { flex-basis: 100%; height: 8px; }
+.rank .bar i { display: block; height: 100%; min-width: 4px; border-radius: 0 4px 4px 0; background: var(--bar); }
+.rank .sub { list-style: none; margin: 0 0 10px; padding: 0; font-size: 14px; }
+.rank .sub li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; color: var(--muted); overflow-wrap: anywhere; }
+.icon-xs { --size: 24px; }

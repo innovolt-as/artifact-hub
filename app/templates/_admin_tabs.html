@@ -1,0 +1,5 @@
+{# Tabs at the top of the admin pages; `tab` is "apps" or "stats". #}
+<nav class="tabs" aria-label="Admin">
+  <a href="/admin"{% if tab == 'apps' %} aria-current="page"{% endif %}>Apper</a>
+  <a href="/admin/stats"{% if tab == 'stats' %} aria-current="page"{% endif %}>Statistikk</a>
+</nav>

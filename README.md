@@ -6,6 +6,8 @@ Liten FastAPI-app som hoster Claude-artifacts (HTML-sider og små apper) bak inn
 - **Artifacts** serveres på `/a/<slug>/` (bare for innloggede)
 - **Admin** på `/admin` – drag-and-drop-opplasting, slett, tilgang per app (alle, bestemte personer eller bare meg),
   inviter og fjern personer, endre navn/adresse og ikon (bilde eller emoji)
+- **Statistikk** på `/admin/stats` – siste 7 dager: aktive brukere, åpninger, mest brukte apper (med hvem) og hva
+  hver bruker har åpnet. Admin telles ikke med. Bygger på åpningene huben logger for «Mest brukt».
 - **`scripts/push.sh`** – last opp fra terminalen uten å logge inn
 - **Claude-connector** på `/mcp` – publiser og oppdater apper rett fra en samtale i claude.ai (også i mobilappen)
 - **Lagring for artifacts** – artifacts fra claude.ai som bruker `window.claude.use("db")` fungerer uendret (se under)

@@ -16,6 +16,7 @@ MOST_USED_DAYS = 30    # what counts towards "Mest brukt"
 KEEP_DAYS = 90         # visits older than this are deleted
 REVISIT_GAP = 600      # opening the same app again within 10 minutes (reloads) is not a new visit
 MOST_USED_MAX = 4
+STATS_DAYS = 7         # the admin statistics cover the last week
 SUMMARY_MAX = 140
 VIEWS = ("icons", "cards")
 SUMMARY_DOC = ("hub", "summary")      # db.doc("hub/summary") in apps using window.claude.use("db")
@@ -54,6 +55,39 @@ def visit_stats(con: sqlite3.Connection, email: str, now: int | None = None) -> 
         (now - MOST_USED_DAYS * DAY, email.lower()),
     ).fetchall()
     return {r["slug"]: {"count": int(r["count"] or 0), "last": int(r["last"])} for r in rows}
+
+
+def week_stats(con: sqlite3.Connection, exclude=(), now: int | None = None) -> dict:
+    """App opens in the last 7 days, for the admin statistics: who is active and which apps are used.
+
+    {"opens": total, "users": [{"email", "opens", "last", "apps": [(slug, opens)]}],
+     "apps": [{"slug", "opens", "users": [(email, opens)]}]}, both lists most opens first (ties: A-Z).
+    `exclude` (the admins) is left out."""
+    now = int(now if now is not None else time.time())
+    rows = con.execute(
+        "SELECT email, slug, COUNT(*) AS n, MAX(at) AS last FROM visits WHERE at >= ? GROUP BY email, slug",
+        (now - STATS_DAYS * DAY,),
+    ).fetchall()
+    rows = [r for r in rows if r["email"] not in {e.lower() for e in exclude}]
+    users: dict[str, dict] = {}
+    apps: dict[str, dict] = {}
+    for r in rows:
+        u = users.setdefault(r["email"], {"email": r["email"], "opens": 0, "last": 0, "apps": []})
+        u["opens"] += r["n"]
+        u["last"] = max(u["last"], r["last"])
+        u["apps"].append((r["slug"], r["n"]))
+        a = apps.setdefault(r["slug"], {"slug": r["slug"], "opens": 0, "users": []})
+        a["opens"] += r["n"]
+        a["users"].append((r["email"], r["n"]))
+    for u in users.values():
+        u["apps"].sort(key=lambda pair: (-pair[1], pair[0]))
+    for a in apps.values():
+        a["users"].sort(key=lambda pair: (-pair[1], pair[0]))
+    return {
+        "opens": sum(u["opens"] for u in users.values()),
+        "users": sorted(users.values(), key=lambda u: (-u["opens"], u["email"])),
+        "apps": sorted(apps.values(), key=lambda a: (-a["opens"], a["slug"])),
+    }
 
 
 # ---------------------------------------------------------------- prefs

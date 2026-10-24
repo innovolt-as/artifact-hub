@@ -1163,6 +1163,38 @@ def admin_page(request: Request, user: str = Depends(require_admin)):
     )
 
 
+def _ago(ts: int, now: int) -> str:
+    """How long ago, without a clock time (the server's time zone may not be the viewer's)."""
+    secs = max(0, now - ts)
+    if secs < 3600:
+        return f"for {max(1, secs // 60)} min siden"
+    if secs < 86400:
+        return f"for {secs // 3600} t siden"
+    return f"for {secs // 86400} d siden"
+
+
+@app.get("/admin/stats", response_class=HTMLResponse)
+def admin_stats(request: Request, user: str = Depends(require_admin)):
+    """Who opened which apps in the last 7 days; admins are left out."""
+    with db() as con:
+        stats = home.week_stats(con, exclude=ADMIN_EMAILS)
+    known = {a["slug"]: a for a in list_artifacts(user)}
+    now = int(time.time())
+    for u in stats["users"]:
+        u["ago"] = _ago(u["last"], now)
+    top = max((a["opens"] for a in stats["apps"]), default=0)
+    for a in stats["apps"]:
+        a["app"] = known.get(a["slug"])  # None for an app that has been deleted since
+        a["width"] = round(100 * a["opens"] / top) if top else 0
+    used = {a["slug"] for a in stats["apps"]}
+    return templates.TemplateResponse(
+        request, "admin_stats.html",
+        {"site": SITE_NAME, "user": user, "admin": True, "stats": stats,
+         "idle": [a for a in known.values() if a["slug"] not in used],
+         "titles": {slug: a["title"] for slug, a in known.items()}},
+    )
+
+
 @app.post("/api/upload")
 async def api_upload(
     request: Request,
