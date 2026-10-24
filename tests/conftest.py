@@ -73,6 +73,27 @@ def user_client():
 
 
 @pytest.fixture
+def friend_client():
+    """Someone who is not in ALLOWED_EMAILS; gets apps only through a people list."""
+    return make_client("venn@test.no")
+
+
+@pytest.fixture
+def make_page():
+    """make_page(slug, level="all", people=(), title=None): a single-page app with that access level."""
+    from app import access
+
+    def _make(slug, level="all", people=(), title=None):
+        main.save_page(slug, f"<!doctype html><html><head><title>{slug}</title></head><body>{slug}</body></html>",
+                       create=True, private=False, title=title)
+        path = main._meta_path(slug)
+        meta = main._read_meta(path)
+        access.set_level(meta, level, list(people))
+        main._write_meta(path, meta)
+    return _make
+
+
+@pytest.fixture
 def upload():
     def _upload(client, name, content, **form):
         data = content.encode() if isinstance(content, str) else content

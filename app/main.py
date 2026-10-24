@@ -8,6 +8,9 @@ Layout of the data dir (ARTIFACTS_DIR, default /data/artifacts):
     my-app/meta.json               -> same, for folder artifacts
     recall.link.json               -> external link card: {"title": "...", "url": "...", "admin_only": true}
 
+Who sees an app (app/access.py): "admin_only": true = only admins; "access": "people" with "people": [e-mails]
+= those people; neither = everyone who can log in.
+
 Artifacts can keep per-user data through /api/me and /api/data/{app}/... (see "per-user app data" below).
 """
 from __future__ import annotations
@@ -34,7 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from app import banner, home, versions
+from app import access, banner, home, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -75,7 +78,7 @@ ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin pag
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
 MAX_ICON_BYTES = 2 * 1024 * 1024
-META_KEYS = ("title", "description", "emoji", "admin_only", "banner")  # what survives a re-upload
+META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner")  # what survives a re-upload
 
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -170,6 +173,11 @@ def email_allowed(email: str) -> bool:
 
 def is_admin(email: str | None) -> bool:
     return bool(email) and email.lower() in ADMIN_EMAILS
+
+
+def can_see(meta: dict, user: str | None) -> bool:
+    """Whether `user` may see the app with this meta (app/access.py)."""
+    return access.can_see(meta, user, is_admin(user))
 
 
 def current_user(request: Request) -> str | None:
@@ -316,7 +324,7 @@ def list_artifacts(user: str) -> list[dict]:
             fallback = _title_from_html(p / "index.html", slug)
         else:
             continue
-        if meta.get("admin_only") and not admin:
+        if not access.can_see(meta, user, admin):
             continue
         icon = _icon_file(slug)
         items.append(
@@ -327,7 +335,11 @@ def list_artifacts(user: str) -> list[dict]:
                 "open_url": f"/go/{slug}" if kind == "link" else url,  # /go logs the open, then redirects
                 "title": meta.get("title") or fallback,
                 "description": meta.get("description", ""),
-                "admin_only": bool(meta.get("admin_only")),
+                "admin_only": access.level(meta) == "admin",
+                "access": access.level(meta),
+                "access_label": access.label(meta),
+                "access_text": access.describe(meta),
+                "people": access.people(meta) if admin else [],
                 "banner": meta.get("banner") is not False,  # the strip at the top of the app (banner.py)
                 "updated": mtime,
                 "emoji": meta.get("emoji", ""),
@@ -339,16 +351,16 @@ def list_artifacts(user: str) -> list[dict]:
     return items
 
 
-def artifact_root(slug: str) -> tuple[Path, bool] | None:
-    """Return (path, admin_only) for a slug, or None."""
+def artifact_root(slug: str) -> tuple[Path, dict] | None:
+    """Return (path, meta) for a slug, or None."""
     if not SLUG_RE.match(slug):
         return None
     f = ARTIFACTS_DIR / f"{slug}.html"
     if f.is_file():
-        return f, bool(_read_meta(ARTIFACTS_DIR / f"{slug}.meta.json").get("admin_only"))
+        return f, _read_meta(ARTIFACTS_DIR / f"{slug}.meta.json")
     d = ARTIFACTS_DIR / slug
     if d.is_dir() and (d / "index.html").is_file():
-        return d, bool(_read_meta(d / "meta.json").get("admin_only"))
+        return d, _read_meta(d / "meta.json")
     return None
 
 
@@ -478,8 +490,8 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     found = artifact_root(slug)
     if not found:
         raise HTTPException(404)
-    root, admin_only = found
-    if admin_only and not is_admin(user):
+    root, meta = found
+    if not can_see(meta, user):
         raise HTTPException(404)
     if path in ("", "index.html"):
         _log_visit(user, slug)
@@ -553,7 +565,7 @@ MAX_DOC_BYTES = 256 * 1024
 def _store_owner(slug: str, user: str) -> str:
     """The store is private per user; you need access to the artifact to use it."""
     found = artifact_root(slug)
-    if not found or (found[1] and not is_admin(user)):
+    if not found or not can_see(found[1], user):
         raise HTTPException(404)
     return user.lower()
 
@@ -660,7 +672,7 @@ MAX_DATA_DOCS_LISTED = 500
 
 def _data_owner(slug: str, user: str) -> str:
     found = artifact_root(slug)
-    if not found or (found[1] and not is_admin(user)):
+    if not found or not can_see(found[1], user):
         raise HubError(f"Fant ingen app som heter «{slug}». Lenkekort har ikke data.")
     return user.lower()
 
@@ -1036,10 +1048,7 @@ def save_page(slug: str, html: str, *, create: bool, title: str | None = None, d
         versions.save(ARTIFACTS_DIR, slug)  # keep the previous version before replacing it
     _apply_info(meta, title, description, emoji)
     if private is not None:
-        if private:
-            meta["admin_only"] = True
-        else:
-            meta.pop("admin_only", None)
+        access.set_level(meta, "admin" if private else "all")
     dest.write_text(html, "utf-8")
     _write_meta(meta_path, meta)
     log.info("%s page %s", "Created" if create else "Updated", slug)
@@ -1073,10 +1082,7 @@ def set_info(slug: str, *, title: str | None = None, description: str | None = N
     meta = _read_meta(meta_path)
     _apply_info(meta, title, description, emoji)
     if private is not None:
-        if private:
-            meta["admin_only"] = True
-        else:
-            meta.pop("admin_only", None)
+        access.set_level(meta, "admin" if private else "all")
     _write_meta(meta_path, meta)
 
 
@@ -1250,7 +1256,7 @@ async def api_edit(
 def serve_icon(slug: str, user: str = Depends(require_user)):
     meta_path = _meta_path(slug)
     icon = _icon_file(slug) if meta_path else None
-    if not icon or (_read_meta(meta_path).get("admin_only") and not is_admin(user)):
+    if not icon or not can_see(_read_meta(meta_path), user):
         raise HTTPException(404)
     # an SVG opened directly must not be able to run scripts on this origin
     return FileResponse(icon, media_type=ICON_TYPES[icon.suffix],
