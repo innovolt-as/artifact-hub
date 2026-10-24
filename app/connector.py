@@ -77,8 +77,9 @@ def build_mcp() -> MCPServer:
     @mcp.tool(
         name="list_apps",
         title="List apps",
-        description="List every app and link card on the hub, with slug, title, description, URL, whether it is "
-        "private, and whether it is editable (pages and folder apps are; link cards are not). Use this to find the slug of an "
+        description="List every app and link card on the hub, with slug, title, description, URL, who has access "
+        "('alle' = everyone who can log in, 'bare meg' = only admins, 'N personer' = specific people chosen on the "
+        "admin page), and whether it is editable (pages and folder apps are; link cards are not). Use this to find the slug of an "
         "existing app before get_app, update_app, edit_app or update_app_info.",
         annotations=ToolAnnotations(readOnlyHint=True),
         structured_output=False,
@@ -96,7 +97,7 @@ def build_mcp() -> MCPServer:
                 "emoji": a["emoji"],
                 "kind": a["kind"],
                 "url": a["url"] if a["kind"] == "link" else _url(a["slug"]),
-                "private": a["admin_only"],
+                "access": a["access_text"],
                 "editable": a["kind"] in ("page", "app"),
                 "updated": datetime.fromtimestamp(a["updated"], timezone.utc).isoformat(timespec="seconds"),
             }
@@ -129,7 +130,8 @@ def build_mcp() -> MCPServer:
         description="Publish a NEW single-file HTML app (a complete HTML document, max 1 MB) at /a/<slug>/. "
         "Only for apps that do not exist yet; it fails if the slug is taken (use list_apps to check, and "
         "update_app or edit_app to change an existing app). New apps are private (only admins see them) "
-        "unless private=false; leave them private until the user explicitly asks to share them. "
+        "unless private=false (everyone who can log in); leave them private until the user explicitly asks to share them. "
+        "Sharing with specific people is done on the hub's admin page. "
         "Only call this when the user explicitly asks to publish. "
         "slug: lowercase letters, digits, '.', '-', '_'. emoji: one emoji used as the gallery icon.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
@@ -153,7 +155,8 @@ def build_mcp() -> MCPServer:
         "Fails if the slug does not exist or is a link card. Use list_apps to "
         "find the slug and call get_app first unless the current source is already in the conversation. "
         "For small changes prefer edit_app. Fields left out (title, description, emoji, private) stay as "
-        "they are. Only call this when the user explicitly asks to publish the change.",
+        "they are; private=true means only admins, private=false everyone who can log in. "
+        "Only call this when the user explicitly asks to publish the change.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True),
         structured_output=False,
     )
@@ -193,8 +196,9 @@ def build_mcp() -> MCPServer:
         title="Change app info",
         description="Change the gallery info of an existing app or link card without touching its HTML: title, "
         "description, emoji, or private. Fields left out stay as they are; an empty string removes the field. "
-        "private=false shares the app with everyone who can log in: only do that when the user explicitly "
-        "asks. Use list_apps to find the slug.",
+        "private=true makes it visible to admins only; private=false shares the app with everyone who can log in: "
+        "only do that when the user explicitly asks. Sharing with specific people is done on the hub's admin page "
+        "(a list of people is kept when private changes). Use list_apps to find the slug.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
         structured_output=False,
     )

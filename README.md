@@ -2,9 +2,10 @@
 
 Liten FastAPI-app som hoster Claude-artifacts (HTML-sider og små apper) bak innlogging med magisk lenke.
 
-- **Galleri** på `/` – alle artifacts brukeren har tilgang til
+- **Forside** på `/` – appene brukeren selv har valgt, blant dem de har tilgang til
 - **Artifacts** serveres på `/a/<slug>/` (bare for innloggede)
-- **Admin** på `/admin` – drag-and-drop-opplasting, slett, gjør privat/delt, endre navn/adresse og ikon (bilde eller emoji)
+- **Admin** på `/admin` – drag-and-drop-opplasting, slett, tilgang per app (alle, bestemte personer eller bare meg),
+  inviter og fjern personer, endre navn/adresse og ikon (bilde eller emoji)
 - **`scripts/push.sh`** – last opp fra terminalen uten å logge inn
 - **Claude-connector** på `/mcp` – publiser og oppdater apper rett fra en samtale i claude.ai (også i mobilappen)
 - **Lagring for artifacts** – artifacts fra claude.ai som bruker `window.claude.use("db")` fungerer uendret (se under)
@@ -73,7 +74,7 @@ og trykk «Gi tilgang» på godkjenningssiden. Bare e-poster i `ADMIN_EMAILS` ka
 
 | Verktøy | Gjør |
 |---|---|
-| `list_apps` | list alle apper og lenkekort (slug, tittel, privat, redigerbar) |
+| `list_apps` | list alle apper og lenkekort (slug, tittel, hvem som har tilgang, redigerbar) |
 | `get_app` | hent HTML-en til en enkeltfils-app |
 | `create_app` | publiser en ny enkeltfils-app (`slug`, `html`, `title`, valgfritt `description`, `emoji`, `private`) |
 | `update_app` | erstatt hele HTML-en til en eksisterende app |
@@ -86,8 +87,9 @@ Eksempler: «legg den i huben», «oppdater timelisten i huben», «gjør Timeli
 
 **Data i appene:** `list_app_data`, `get_app_data`, `set_app_data` og `delete_app_data` leser og skriver de samme dokumentene som appen bruker via `window.claude.use("db")`, for brukeren bak koblingen (bare din egen data). Slik kan du for eksempel si «i dag spiste jeg …» i en samtale, og Claude fører det inn i Matboka.
 
-**Nye apper fra Claude er private** (bare admin ser dem) til du deler dem: «🌐 delt»-knappen i `/admin`,
-eller be Claude sette `private: false`.
+**Nye apper fra Claude er private** (bare admin ser dem) til du deler dem: tilgangsknappen («🔒 Bare meg») i
+`/admin`, eller be Claude sette `private: false` (da ser alle som kan logge inn den). Deling med bestemte personer
+gjøres i `/admin`. `private` endrer ikke en liste med personer; den blir liggende til «Bestemte personer» velges igjen.
 
 ### Versjoner
 
@@ -103,6 +105,8 @@ Legge tilbake en gammel versjon: kopier fila til `data/artifacts/<slug>.html`
 Fjern e-posten fra `ADMIN_EMAILS` og kjør `docker compose up -d` (sjekkes ved hvert kall etter omstart). Å slette
 radene i SQLite-tabellen `oauth_tokens` i `data/hub.db` (evt. også `oauth_codes`, `oauth_requests` og
 `oauth_clients`) virker med en gang.
+Dette gjelder Claude-koblingen. Innlogging på selve huben trekkes tilbake med «Fjern» under «Personer» i `/admin`
+(se [Tilgang](#tilgang)).
 
 ### Tester
 
@@ -114,7 +118,7 @@ radene i SQLite-tabellen `oauth_tokens` i `data/hub.db` (evt. også `oauth_codes
 |---|---|
 | `navn.html` | én-fils artifact → `/a/navn/` |
 | `navn/index.html` (+ assets) | app med flere filer → `/a/navn/` |
-| `navn.meta.json` / `navn/meta.json` | valgfritt: `{"title": "...", "description": "...", "emoji": "📈", "admin_only": true}` |
+| `navn.meta.json` / `navn/meta.json` | valgfritt: `{"title": "...", "description": "...", "emoji": "📈", "admin_only": true}`; tilgang for bestemte personer: `"access": "people", "people": ["a@b.no"]` |
 | `navn.link.json` | eksternt kort: `{"title": "...", "url": "https://...", "admin_only": true}` |
 | `.icons/navn.png` (eller .jpg/.webp/.gif/.svg) | ikon lastet opp i admin; `"emoji": "📈"` i meta brukes ellers |
 
@@ -156,6 +160,15 @@ Huben legger derfor automatisk `<script src="/static/hub.js">` først i `<head>`
 
 ## Forsiden
 
+- **Hver bruker velger sine apper.** En ny bruker får et stort «Legg til apper»-kort. Det åpner listen «Velg apper»
+  med alle appene brukeren har tilgang til; huk av for å legge til, ta bort haken for å fjerne (lagres med en
+  gang). Etterpå åpner den lille knappen «＋ Legg til eller fjern apper» nederst den samme listen.
+- **Nye apper** havner ikke på forsiden av seg selv. De står øverst i listen merket «Ny», og den lille knappen
+  får en prikk, til brukeren har åpnet listen. Første gang listen åpnes er ingenting «Ny».
+- **Admin** fikk alle appene som fantes da dette kom på, og nye apper (opplasting, `push.sh`, Claude, lenkekort)
+  legges rett på admins forside. Erstatter du en app, kommer den ikke tilbake hvis du har fjernet den.
+- Tar man en app av forsiden, beholdes stjerna og besøkene; mister man tilgangen, forsvinner den til tilgangen
+  kommer tilbake. Får appen ny adresse, følger valget med.
 - **Favoritter** øverst: alle appene brukeren har lagt til i favoritter (★ i kortvisning, eller hold inne /
   høyreklikk på ikonet), uansett antall, i den rekkefølgen de ble lagt til.
 - **Mest brukt** under: brukerens 4 mest åpnede apper siste 30 dager som ikke er favoritter (huben logger
@@ -201,8 +214,22 @@ top: 0`), for da dekker stripa topplinjen til du ruller. Det samme gjelder apper
 
 ## Tilgang
 
-- `ADMIN_EMAILS` – ser admin-siden og alt som er `admin_only`
-- `ALLOWED_EMAILS` / `ALLOWED_DOMAINS` – kan logge inn og se delte artifacts
+Hvem som ser en app, velges med tilgangsknappen per app i `/admin` (lagres i appens meta, beholdes ved ny opplasting):
+
+- **🌍 Alle** – alle som kan logge inn
+- **👥 Bestemte personer** – e-postene du krysser av eller skriver inn. De blir samtidig invitert (kan logge inn).
+  Listen huskes om du bytter nivå, og gjelder bare så lenge «Bestemte personer» er valgt.
+- **🔒 Bare meg** – bare admin (`admin_only`)
+
+En app man ikke har tilgang til, finnes ikke for en: den står ikke i noen liste, og lenker og ikon gir 404.
+
+Hvem som kan logge inn:
+
+- `ADMIN_EMAILS` – ser admin-siden og alle apper
+- **«Personer» i `/admin`** – inviter en e-post for å slippe den inn uten å endre serveroppsettet. De ser
+  «Alle»-appene og appene de står på. «Fjern» tar bort invitasjonen og tar personen av alle app-listene; er de
+  innlogget, ser de etterpå bare «Alle»-appene. Å fjerne noen fra én app stenger dem ikke ute.
+- `ALLOWED_EMAILS` / `ALLOWED_DOMAINS` – kan logge inn som før (vises under «Personer» som «fra serveroppsettet»)
 - `ALLOWED_DOMAINS=*` – alle med en e-postadresse kan logge inn (åpen side bak innlogging)
 - Maks 3 aktive lenker per e-post og 10 utsendelser per IP per time, så skjemaet ikke kan brukes til spam
 - Alle andre får «sjekk e-posten din», men ingen e-post sendes (lekker ikke hvem som er på listen)

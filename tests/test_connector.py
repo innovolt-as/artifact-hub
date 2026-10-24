@@ -80,7 +80,7 @@ def test_create_then_list_then_get(mcp, token, hub):
 
     apps = json.loads(text(call(mcp, token, "list_apps")))
     hei = next(a for a in apps if a["slug"] == "hei")
-    assert hei["title"] == "Hei" and hei["private"] is True and hei["editable"] is True
+    assert hei["title"] == "Hei" and hei["access"] == "bare meg" and "private" not in hei and hei["editable"] is True
     assert datetime.fromisoformat(hei["updated"]).tzinfo is not None
 
     got = json.loads(text(call(mcp, token, "get_app", slug="hei")))
@@ -219,3 +219,9 @@ def test_app_data_refuses_bad_input(mcp, token, hub):
     assert res["isError"] is True and "oddetall" in text(res)
     res = call(mcp, token, "set_app_data", slug="mat", path="days/x", data={"s": "x" * 300_000})
     assert res["isError"] is True and "256 KB" in text(res)
+
+
+def test_list_apps_shows_people_level(mcp, token, hub, make_page):
+    make_page("p", "people", ["a@x.no", "b@x.no"])
+    apps = json.loads(text(call(mcp, token, "list_apps")))
+    assert next(a for a in apps if a["slug"] == "p")["access"] == "2 personer"
