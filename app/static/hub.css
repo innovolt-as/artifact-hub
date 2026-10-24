@@ -112,7 +112,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .sheet::backdrop { background: rgb(0 0 0 / .4); }
 .sheet-in { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .sheet header { padding: 18px 18px 8px; }
-.sheet h1 { font-size: 19px; margin: 0; }
+.sheet h1 { font-size: 19px; margin: 0; outline: none; }  /* takes focus when opened, so no tick shows a focus ring */
 .sheet header p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
 .sheet ul { list-style: none; margin: 0; padding: 4px 8px; overflow: auto; min-height: 0; flex: 1; overscroll-behavior: contain; }
 .sheet li label { position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 12px; cursor: pointer; }
@@ -184,6 +184,7 @@ table.list td a { overflow-wrap: anywhere; }
 .link-form input { flex: 1 1 160px; font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
 .link-form button.small { margin: 0; padding: 7px 12px; font-size: 14px; }
 .editor [hidden] { display: none !important; }
+#accessDlg h1 { outline: none; }  /* takes focus when opened, so no option shows a focus ring */
 .ac-people { margin-top: 8px; padding: 8px 0 0 26px; }
 .ac-list { list-style: none; margin: 0 0 4px; padding: 0; max-height: 40vh; overflow: auto; }
 .ac-list label.check { margin-top: 6px; overflow-wrap: anywhere; }
