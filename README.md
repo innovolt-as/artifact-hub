@@ -22,8 +22,11 @@ mkdir -p data/artifacts         # + kopier inn recall.link.json (data/ er ikke i
 docker compose up -d
 ```
 
-Caddy står foran appen og henter HTTPS-sertifikat for `apps.innovolt.no` automatisk
-(krever A-record mot serveren og åpne porter 80/443). Domenet endres i `Caddyfile`.
+Caddy står foran appen og henter HTTPS-sertifikat for domenet i `DOMAIN` (i `.env`) automatisk
+(krever A-record mot serveren og åpne porter 80/443). Valgfritt eget utseende: legg `logo.svg`,
+`favicon-32.png` og `apple-touch-icon.png` i `data/branding/`.
+
+Oppgradere en kjørende hub: se [docs/UPGRADING.md](docs/UPGRADING.md) (backup først, så fast tag i `docker-compose.override.yml`).
 
 Alt som skal overleve (artifacts + SQLite) ligger i `./data`. Sertifikatene ligger i volumet `caddy_data`.
 
@@ -40,7 +43,8 @@ GHCR_IMAGE=ghcr.io/<brukernavn>/artifact-hub ./scripts/build-and-push.sh
 docker compose pull && docker compose up -d
 ```
 
-(Det ligger også en valgfri GitHub Actions-workflow i `.github/workflows/build.yml`.)
+(Det ligger også en GitHub Actions-workflow i `.github/workflows/build.yml` som bygger og publiserer imaget fra `v*`-tagger.
+Pin taggen i `docker-compose.override.yml` på serveren – se [docs/UPGRADING.md](docs/UPGRADING.md).)
 
 ## Laste opp artifacts
 
