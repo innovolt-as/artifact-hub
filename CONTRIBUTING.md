@@ -9,7 +9,7 @@ scripts/test.sh
 tests/test_scripts.sh
 ```
 
-Both must pass before you open a pull request. CI runs them on every push.
+Both must pass before you open a pull request. CI runs the Python suite on every push; run `tests/test_scripts.sh` locally.
 
 ## Rules
 
