@@ -1,4 +1,4 @@
-from tests.conftest import make_client, set_pw
+from tests.conftest import set_pw
 
 
 def _login(client, email, password, next="/"):
@@ -69,3 +69,16 @@ def test_link_only_in_password_mode(hub, user_client, monkeypatch):
 def test_password_routes_404_in_default_mode(client, user_client):
     assert user_client.get("/password").status_code == 404
     assert user_client.post("/password", data={"new1": "x" * 10, "new2": "x" * 10}).status_code == 404
+
+
+def test_user_without_password_row_sees_message(pw_mode, hub, user_client):
+    for r in (user_client.get("/password"),
+              user_client.post("/password", data={"current": "x", "new1": "helt nytt passord", "new2": "helt nytt passord"})):
+        assert r.status_code == 200
+        assert "Du har ikke passord ennå. Be admin om et midlertidig passord." in r.text
+        assert 'name="new1"' not in r.text
+
+
+def test_index_confirms_voluntary_change(pw_mode, hub, user_client):
+    assert "Passordet er byttet." in user_client.get("/?pw=changed").text
+    assert "Passordet er byttet." not in user_client.get("/").text

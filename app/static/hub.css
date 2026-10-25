@@ -220,3 +220,4 @@ dialog { overscroll-behavior: contain; }
 .rank .sub { list-style: none; margin: 0 0 10px; padding: 0; font-size: 14px; }
 .rank .sub li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; color: var(--muted); overflow-wrap: anywhere; }
 .icon-xs { --size: 24px; }
+.notice { margin: 12px 0 0; }

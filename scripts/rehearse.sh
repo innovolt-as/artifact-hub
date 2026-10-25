@@ -32,7 +32,7 @@ cmd+=(-p "127.0.0.1:$PORT:8000" -v "$tmp:/data"
   -e "LOGIN_MODE=${LOGIN_MODE:-magic-link}" -e "SECRET_KEY=$secret" -e SMTP_HOST= -e "SITE_NAME=$SITE_NAME" "$IMAGE")
 
 if [ "${LOGIN_MODE:-magic-link}" = password ]; then
-  echo "Open http://localhost:$PORT/login and log in with e-mail + password. To set one: $RUNTIME exec -i hub-rehearsal-$PORT python -m app.passwd set $ADMIN_EMAIL" >&2
+  echo "Open http://localhost:$PORT/login and log in with e-mail + password. To set one: $RUNTIME exec -it hub-rehearsal-$PORT python -m app.passwd set $ADMIN_EMAIL" >&2
 else
   echo "Open http://localhost:$PORT/login, enter $ADMIN_EMAIL; the login link is printed below." >&2
 fi

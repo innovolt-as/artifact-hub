@@ -23,6 +23,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import threading
 import time
 import zipfile
 from html import escape
@@ -55,7 +56,7 @@ ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").sp
 ALLOWED_EMAILS = {e.strip().lower() for e in os.environ.get("ALLOWED_EMAILS", "").split(",") if e.strip()}
 ALLOWED_DOMAINS = {d.strip().lower().lstrip("@") for d in os.environ.get("ALLOWED_DOMAINS", "").split(",") if d.strip()}
 UPLOAD_TOKEN = os.environ.get("UPLOAD_TOKEN", "")  # for scripts/push.sh
-LOGIN_MODE = os.environ.get("LOGIN_MODE", "magic-link")  # 'magic-link' (default) or 'password'
+LOGIN_MODE = os.environ.get("LOGIN_MODE") or "magic-link"  # 'magic-link' (default) or 'password'
 if LOGIN_MODE not in ("magic-link", "password"):
     raise SystemExit(f"LOGIN_MODE must be 'magic-link' or 'password', got '{LOGIN_MODE}'")
 
@@ -80,6 +81,7 @@ MAX_PW_FAILS_PER_EMAIL = 10       # failed password logins per address per 15 mi
 MAX_PW_FAILS_PER_IP = 30          # failed password logins per IP per hour
 PW_FAIL_WINDOW_EMAIL = 15 * 60
 PW_FAIL_WINDOW_IP = 3600
+_pw_lock = threading.Lock()  # sync routes run in a thread pool; guards _pw_fails
 _pw_fails: dict[str, list[float]] = {}   # keys "e:<email>" and "ip:<ip>"
 
 ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin page
@@ -279,24 +281,32 @@ def _pw_prune(now: float) -> None:
             del _pw_fails[key]
 
 
-def pw_rate_limited(email: str, ip: str) -> bool:
-    _pw_prune(time.time())
-    return (len(_pw_fails.get(f"e:{email}", [])) >= MAX_PW_FAILS_PER_EMAIL
-            or len(_pw_fails.get(f"ip:{ip}", [])) >= MAX_PW_FAILS_PER_IP)
+def pw_rate_limited(email: str, ip: str, since: int = 0) -> bool:
+    """`since` is the password's updated_at: e-mail failures from before a (re)set don't count,
+    so a reset (CLI or admin) lifts the e-mail lockout. The IP limit is unaffected."""
+    with _pw_lock:
+        now = time.time()
+        _pw_prune(now)
+        # updated_at has whole-second resolution; a failure in the same second as a reset still counts
+        n_email = sum(1 for t in _pw_fails.get(f"e:{email}", []) if t >= since)
+        return (n_email >= MAX_PW_FAILS_PER_EMAIL
+                or len(_pw_fails.get(f"ip:{ip}", [])) >= MAX_PW_FAILS_PER_IP)
 
 
 def pw_fail(email: str, ip: str) -> None:
-    now = time.time()
-    _pw_prune(now)
-    if len(_pw_fails) > 10000:  # still too big after pruning: drop the oldest keys
-        for k in sorted(_pw_fails, key=lambda k: _pw_fails[k][-1])[:5000]:
-            del _pw_fails[k]
-    for key in (f"e:{email}", f"ip:{ip}"):
-        _pw_fails.setdefault(key, []).append(now)
+    with _pw_lock:
+        now = time.time()
+        _pw_prune(now)
+        if len(_pw_fails) > 10000:  # still too big after pruning: drop the oldest keys
+            for k in sorted(_pw_fails, key=lambda k: _pw_fails[k][-1])[:5000]:
+                del _pw_fails[k]
+        for key in (f"e:{email}", f"ip:{ip}"):
+            _pw_fails.setdefault(key, []).append(now)
 
 
 def pw_clear(email: str) -> None:
-    _pw_fails.pop(f"e:{email}", None)
+    with _pw_lock:
+        _pw_fails.pop(f"e:{email}", None)
 
 
 def ip_rate_limited(ip: str) -> bool:
@@ -480,11 +490,14 @@ def login_password(request: Request, email: str, password: str, next: str):
         return templates.TemplateResponse(request, "login.html", {
             "site": SITE_NAME, "sent": False, "next": next, "error": PW_ERROR, "mode": "password"})
 
-    if pw_rate_limited(email, ip):
-        log.warning("Rate limited password login for %s from %s", email, ip)
-        return fail()
     with db() as con:
-        row = passwd.get(con, email)
+        row = passwd.get(con, email)  # before the rate limit: a reset (new updated_at) lifts the e-mail lockout
+    if len(password) > 1024 or pw_rate_limited(email, ip, row["updated_at"] if row else 0):
+        if len(password) <= 1024:
+            log.warning("Rate limited password login for %s from %s", email, ip)
+        else:
+            pw_fail(email, ip)
+        return fail()
     # Always verify (against a dummy hash if no row) so timing doesn't reveal who has a password.
     ok = passwd.verify_password(password, row["hash"] if row else passwd.DUMMY_HASH)
     ok = ok and row is not None and email_allowed(email)
@@ -565,9 +578,9 @@ def logout():
     return resp
 
 
-def _password_form(request, pending: bool, next: str, error: str | None = None):
+def _password_form(request, pending: bool, next: str, error: str | None = None, no_password: bool = False):
     return templates.TemplateResponse(request, "password.html", {
-        "site": SITE_NAME, "pending": pending, "next": next, "error": error,
+        "site": SITE_NAME, "pending": pending, "next": next, "error": error, "no_password": no_password,
         "user": None if pending else current_user(request)})
 
 
@@ -578,6 +591,10 @@ def password_page(request: Request, next: str = "/"):
     pending = pending_password_user(request)
     if not pending and not current_user(request):
         return RedirectResponse("/login", status_code=302)
+    if not pending:
+        with db() as con:
+            if passwd.get(con, current_user(request)) is None:
+                return _password_form(request, False, safe_next(next), no_password=True)
     return _password_form(request, bool(pending), safe_next(next))
 
 
@@ -596,7 +613,7 @@ def password_submit(request: Request, new1: str = Form(""), new2: str = Form("")
         # A stale pending cookie (password reset again, person removed) must not work.
         if (not email_allowed(email) or row is None or row["must_change"] != 1
                 or row["updated_at"] != pw_at):
-            raise HTTPException(403, "Lenken er ikke gyldig lenger. Logg inn på nytt.")
+            raise HTTPException(403, "Innloggingen er ikke gyldig lenger. Logg inn på nytt.")
     else:
         email = current_user(request)
         if not email:
@@ -604,8 +621,8 @@ def password_submit(request: Request, new1: str = Form(""), new2: str = Form("")
         with db() as con:
             row = passwd.get(con, email)
         if row is None:
-            raise HTTPException(403, "Ingen passord er satt for denne kontoen.")
-        if pw_rate_limited(email, ip):
+            return _password_form(request, False, next, no_password=True)
+        if pw_rate_limited(email, ip, row["updated_at"]):
             return _password_form(request, False, next, "For mange forsøk. Prøv igjen senere.")
         if not passwd.verify_password(current, row["hash"]):
             pw_fail(email, ip)
@@ -639,6 +656,7 @@ NO_MONTHS = ("januar", "februar", "mars", "april", "mai", "juni", "juli", "augus
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, user: str = Depends(require_user)):
+    notice = "Passordet er byttet." if request.query_params.get("pw") == "changed" else None
     apps = list_artifacts(user)
     with db() as con:
         home.start(con, user, [a["slug"] for a in apps], admin=is_admin(user))
@@ -652,7 +670,7 @@ def index(request: Request, user: str = Depends(require_user)):
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "view": prefs["view"], "favs": favs, "top": top, "rest": rest,
+        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "top": top, "rest": rest,
          "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": f"{NO_DAYS[now.tm_wday]} {now.tm_mday}. {NO_MONTHS[now.tm_mon - 1]}"},
     )
 
@@ -1545,7 +1563,7 @@ async def people_password(request: Request, user: str = Depends(require_admin)):
         raise HTTPException(404, "Ikke i bruk")
     email, pw = await _email_and_password_in(request)
     pw = _check_temp_password(pw)
-    if not (email_allowed(email) or email in ADMIN_EMAILS):
+    if not email_allowed(email):
         raise HTTPException(404, "Ikke invitert")
     with db() as con:
         passwd.set_password(con, email, pw, must_change=True)

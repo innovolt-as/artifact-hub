@@ -40,7 +40,7 @@ def test_updated_at_is_monotonic_without_now(hub):
         assert passwd.get(con, "a@b.no")["updated_at"] == 5
 
 
-def test_cli_set_and_list(hub, monkeypatch):
+def test_cli_set_and_list(hub):
     env = {**os.environ, "DB_PATH": str(hub.DB_PATH)}
     r = subprocess.run([sys.executable, "-m", "app.passwd", "set", "cli@test.no", "--temporary"],
                        input="passord123\npassord123\n", text=True, capture_output=True, env=env)

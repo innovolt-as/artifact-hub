@@ -136,3 +136,41 @@ def test_missing_row_verifies_dummy_hash(pw_mode, hub, client, monkeypatch):
     monkeypatch.setattr(hub.passwd, "verify_password", lambda p, h: calls.append(h) or False)
     _login(client, "admin@test.no", "x")
     assert calls == [hub.passwd.DUMMY_HASH]
+
+
+def test_reset_lifts_email_lockout(pw_mode, hub, client):
+    set_pw("user@test.no", "passord123")
+    for _ in range(hub.MAX_PW_FAILS_PER_EMAIL):
+        _login(client, "user@test.no", "feil")
+    assert _login(client, "user@test.no", "passord123").status_code == 200  # locked out
+    # updated_at has second resolution: age the failures so the reset is clearly after them
+    hub._pw_fails["e:user@test.no"] = [t - 5 for t in hub._pw_fails["e:user@test.no"]]
+    set_pw("user@test.no", "passord123")  # CLI/admin reset bumps updated_at
+    assert _login(client, "user@test.no", "passord123").status_code == 302
+
+
+def test_overlong_password_is_wrong_without_hashing(pw_mode, hub, client, monkeypatch):
+    set_pw("user@test.no", "passord123")
+    calls = []
+    monkeypatch.setattr(hub.passwd, "verify_password", lambda p, h: calls.append(1) or True)
+    r = _login(client, "user@test.no", "a" * 1025)
+    assert r.status_code == 200 and "Feil e-post eller passord" in r.text and calls == []
+
+
+def test_empty_login_mode_means_default(monkeypatch):
+    import importlib
+    import app.main as m
+    monkeypatch.setenv("LOGIN_MODE", "")
+    try:
+        importlib.reload(m)
+        assert m.LOGIN_MODE == "magic-link"
+    finally:
+        monkeypatch.delenv("LOGIN_MODE")
+        importlib.reload(m)
+
+
+def test_pending_user_cannot_open_consent(pw_mode, hub, client, pending_req):
+    set_pw("user@test.no", "temp-passord", must_change=True)
+    _login(client, "user@test.no", "temp-passord")
+    r = client.get(f"/oauth/consent?req={pending_req}", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"].startswith("/login?next=")

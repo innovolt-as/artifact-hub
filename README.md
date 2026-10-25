@@ -255,4 +255,6 @@ Magisk lenke er gyldig i 15 minutter og kan brukes én gang. Innlogging varer 30
 
 Alle kan bytte sitt eget passord senere via «Bytt passord» (`/password`).
 
+Mot gjetting stenges innlogging etter 10 feil per e-post på 15 minutter, og etter 30 feil per IP på en time. Å sette et nytt passord (kommandolinjen eller «Nytt midlertidig passord») opphever sperren for den e-posten, og `docker compose restart hub` nullstiller alle tellere.
+
 Å bytte passord logger ikke ut andre enheter; de som allerede er innlogget, forblir det til innloggingen utløper. `ALLOWED_DOMAINS=*` har ingen effekt i passord-modus: bare de som har et passord (satt via invitasjon eller kommandolinjen) kan logge inn, og de må i tillegg være tillatt via `ADMIN_EMAILS`, `ALLOWED_EMAILS` / `ALLOWED_DOMAINS` eller en invitasjon.

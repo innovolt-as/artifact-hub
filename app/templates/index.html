@@ -51,6 +51,7 @@
 {% endblock %}
 
 {% block body %}
+{% if notice %}<p class="notice muted">{{ notice }}</p>{% endif %}
 {% if not favs and not top and not rest %}
   <button type="button" class="addcard" data-open-picker>
     <span class="plus" aria-hidden="true">+</span>

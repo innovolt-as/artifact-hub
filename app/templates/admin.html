@@ -294,7 +294,19 @@ $('inviteForm').addEventListener('submit', async e => {
   const body = { email: e.target.email.value };
   if (e.target.password) body.password = e.target.password.value;
   const r = await postJson('/api/people/invite', body);
-  if (r.ok) return location.reload();
+  if (r.ok) {
+    $('peopleError').textContent = '';
+    if (!e.target.password) return location.reload();
+    // password mode: keep the page so the admin can pass the password on; reload when they click OK
+    e.target.querySelectorAll('input, button').forEach(x => x.disabled = true);
+    $('peopleError').classList.remove('err');
+    $('peopleError').innerHTML = '';
+    $('peopleError').append('Personen er invitert. Gi det midlertidige passordet videre nå; det vises ikke igjen. ');
+    const ok = document.createElement('button'); ok.className = 'small'; ok.textContent = 'OK';
+    ok.onclick = () => location.reload();
+    $('peopleError').append(ok);
+    return;
+  }
   $('peopleError').textContent = await failText(r);
 });
 function genPw() {

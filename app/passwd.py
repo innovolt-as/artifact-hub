@@ -16,6 +16,7 @@ import os
 import secrets
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,9 +27,15 @@ N, R, P, DKLEN = 2**14, 8, 1, 32
 MIN_LENGTH = 10
 
 
+# Each scrypt run needs ~16 MiB (128 * n * r); cap concurrent runs so a burst of logins can't exhaust memory.
+_scrypt_slots = threading.BoundedSemaphore(4)
+
+
 def _scrypt(password: str, salt: bytes, n: int, r: int, p: int, dklen: int) -> bytes:
-    # maxmem: OpenSSL's default limit (32 MiB) is too tight for n=2**14, r=8 once overhead is counted
-    return hashlib.scrypt(password.encode(), salt=salt, n=n, r=r, p=p, dklen=dklen, maxmem=128 * 1024 * 1024)
+    # maxmem: n=2**14, r=8 needs 16 MiB, which is under OpenSSL's default; the 128 MiB override is headroom
+    # for stored hashes with higher parameters.
+    with _scrypt_slots:
+        return hashlib.scrypt(password.encode(), salt=salt, n=n, r=r, p=p, dklen=dklen, maxmem=128 * 1024 * 1024)
 
 
 def hash_password(password: str) -> str:
@@ -106,7 +113,7 @@ def _read_password(prompt: str) -> str:
     if sys.stdin.isatty():
         import getpass
         return getpass.getpass(prompt)
-    return sys.stdin.readline().rstrip("\n")
+    return sys.stdin.readline().rstrip("\r\n")
 
 
 def _cmd_set(email: str, temporary: bool) -> int:
