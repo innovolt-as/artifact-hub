@@ -25,13 +25,17 @@ secret=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 tty_flags=""
 [ -t 0 ] && tty_flags="-it"
 
-cmd=("$RUNTIME" run --rm)
+cmd=("$RUNTIME" run --rm --name "hub-rehearsal-$PORT")
 [ -n "$tty_flags" ] && cmd+=("$tty_flags")
 cmd+=(-p "127.0.0.1:$PORT:8000" -v "$tmp:/data"
   -e "ADMIN_EMAILS=$ADMIN_EMAIL" -e "BASE_URL=http://localhost:$PORT"
   -e "LOGIN_MODE=${LOGIN_MODE:-magic-link}" -e "SECRET_KEY=$secret" -e SMTP_HOST= -e "SITE_NAME=$SITE_NAME" "$IMAGE")
 
-echo "Open http://localhost:$PORT/login, enter $ADMIN_EMAIL; the login link is printed below." >&2
+if [ "${LOGIN_MODE:-magic-link}" = password ]; then
+  echo "Open http://localhost:$PORT/login and log in with e-mail + password. To set one: $RUNTIME exec -i hub-rehearsal-$PORT python -m app.passwd set $ADMIN_EMAIL" >&2
+else
+  echo "Open http://localhost:$PORT/login, enter $ADMIN_EMAIL; the login link is printed below." >&2
+fi
 
 if [ "${DRY_RUN:-}" = 1 ]; then
   echo "${cmd[*]}"

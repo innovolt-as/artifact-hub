@@ -34,6 +34,7 @@ Alt som skal overleve (artifacts + SQLite) ligger i `./data`. Sertifikatene ligg
 
 Magiske lenker sendes via SMTP. Resend, Postmark, Brevo, Gmail app-passord – alt med SMTP fungerer.
 Lar du `SMTP_HOST` stå tom, printes lenken i loggen (`docker compose logs -f hub`) – greit for testing.
+Vil du slippe SMTP helt, se «Innlogging med passord» under «Tilgang».
 
 ## Bygge og pushe image lokalt
 
@@ -250,6 +251,8 @@ Magisk lenke er gyldig i 15 minutter og kan brukes én gang. Innlogging varer 30
 2. Gi den første admin et passord på kommandolinjen: `docker compose exec hub python -m app.passwd set you@example.com`. `python -m app.passwd list` viser hvem som har passord. Hubben logger en advarsel ved oppstart hvis ingen admin har passord ennå.
 3. Logg inn som admin og inviter folk under «Personer» i `/admin`: du skriver inn e-post og et midlertidig passord, og gir det videre selv. «Nytt midlertidig passord» ved hver person lager et nytt, for eksempel hvis noen har glemt sitt.
 4. Ved første innlogging med et midlertidig passord må personen velge sitt eget passord før noe annet.
-5. Alle kan bytte sitt eget passord senere via «Bytt passord» (`/password`).
+5. Passord må ha minst 10 tegn, både midlertidige og selvvalgte. Kommandolinjen lager et midlertidig passord med `python -m app.passwd set you@example.com --temporary`.
 
-Å bytte passord logger ikke ut andre enheter; de som allerede er innlogget, forblir det til innloggingen utløper. `ALLOWED_DOMAINS=*` har ingen effekt i passord-modus: bare de som er invitert (eller står i `ADMIN_EMAILS` / `ALLOWED_EMAILS`) og har passord, kan logge inn.
+Alle kan bytte sitt eget passord senere via «Bytt passord» (`/password`).
+
+Å bytte passord logger ikke ut andre enheter; de som allerede er innlogget, forblir det til innloggingen utløper. `ALLOWED_DOMAINS=*` har ingen effekt i passord-modus: bare de som har et passord (satt via invitasjon eller kommandolinjen) kan logge inn, og de må i tillegg være tillatt via `ADMIN_EMAILS`, `ALLOWED_EMAILS` / `ALLOWED_DOMAINS` eller en invitasjon.

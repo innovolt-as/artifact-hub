@@ -65,11 +65,11 @@ Fra magisk lenke til passord:
 
 1. Sett `LOGIN_MODE=password` i `.env` og kjør `docker compose up -d`.
 2. Sett passord for admin på kommandolinjen: `docker compose exec hub python -m app.passwd set you@example.com`.
-3. Logg inn og sett midlertidige passord for de andre under «Personer» i `/admin`. De må bytte passordet ved første innlogging.
+3. Logg inn og sett midlertidige passord for de andre under «Personer» i `/admin`. De må bytte passordet ved første innlogging. Passord må ha minst 10 tegn (gjelder både midlertidige og selvvalgte). Kommandolinjen kan også lage et midlertidig passord med `--temporary`.
 
 Tilbake til magisk lenke: sett `LOGIN_MODE=magic-link` og kjør `docker compose up -d`. Passordene blir liggende i databasen og brukes igjen hvis du bytter til passord senere.
 
-`scripts/rehearse.sh` leser `LOGIN_MODE` fra miljøet. Skal du øve på en hub med passord-innlogging: `LOGIN_MODE=password ADMIN_EMAIL=you@example.com scripts/rehearse.sh <image> <backup.tar.gz>`.
+`scripts/rehearse.sh` leser `LOGIN_MODE` fra miljøet. Skal du øve på en hub med passord-innlogging: `LOGIN_MODE=password ADMIN_EMAIL=you@example.com scripts/rehearse.sh <image> <backup.tar.gz>`. Containeren heter `hub-rehearsal-<port>`. En backup fra en hub uten passord har ingen passord, så sett admin-passordet i øvingscontaineren fra et annet terminalvindu: `docker exec -i hub-rehearsal-<port> python -m app.passwd set you@example.com` (skriptet skriver kommandoen ut). En backup tatt etter at passordene ble satt, trenger ingenting ekstra.
 
 ## Gjør GHCR-pakken offentlig
 
