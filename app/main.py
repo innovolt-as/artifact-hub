@@ -76,8 +76,10 @@ MAX_LINKS_PER_EMAIL = 3           # unexpired links per address (i.e. per MAGIC_
 MAX_LINKS_PER_IP = 10             # per hour
 _ip_sends: dict[str, list[float]] = {}
 PENDING_TTL = 30 * 60             # seconds a "must change password" cookie lives
-MAX_PW_FAILS_PER_EMAIL = 10       # failed password logins per address per hour
+MAX_PW_FAILS_PER_EMAIL = 10       # failed password logins per address per 15 minutes
 MAX_PW_FAILS_PER_IP = 30          # failed password logins per IP per hour
+PW_FAIL_WINDOW_EMAIL = 15 * 60
+PW_FAIL_WINDOW_IP = 3600
 _pw_fails: dict[str, list[float]] = {}   # keys "e:<email>" and "ip:<ip>"
 
 ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin page
@@ -262,24 +264,32 @@ def set_pending(resp, email: str, pw_at: int) -> None:
     _set_cookie(resp, {"email": email, "pw_change": True, "pw_at": pw_at}, PENDING_TTL)
 
 
-def pw_rate_limited(email: str, ip: str) -> bool:
-    now = time.time()
-    for key, limit in ((f"e:{email}", MAX_PW_FAILS_PER_EMAIL), (f"ip:{ip}", MAX_PW_FAILS_PER_IP)):
-        recent = [t for t in _pw_fails.get(key, []) if now - t < 3600]
+def _pw_window(key: str) -> int:
+    return PW_FAIL_WINDOW_EMAIL if key.startswith("e:") else PW_FAIL_WINDOW_IP
+
+
+def _pw_prune(now: float) -> None:
+    """Drop expired entries from every key, and keys that end up empty."""
+    for key in list(_pw_fails):
+        recent = [t for t in _pw_fails[key] if now - t < _pw_window(key)]
         if recent:
             _pw_fails[key] = recent
         else:
-            _pw_fails.pop(key, None)
-        if len(recent) >= limit:
-            return True
-    return False
+            del _pw_fails[key]
+
+
+def pw_rate_limited(email: str, ip: str) -> bool:
+    _pw_prune(time.time())
+    return (len(_pw_fails.get(f"e:{email}", [])) >= MAX_PW_FAILS_PER_EMAIL
+            or len(_pw_fails.get(f"ip:{ip}", [])) >= MAX_PW_FAILS_PER_IP)
 
 
 def pw_fail(email: str, ip: str) -> None:
     now = time.time()
-    if len(_pw_fails) > 10000:  # keep memory bounded: drop the oldest keys
-        for k in sorted(_pw_fails, key=lambda k: _pw_fails[k][-1] if _pw_fails[k] else 0)[:5000]:
-            _pw_fails.pop(k, None)
+    _pw_prune(now)
+    if len(_pw_fails) > 10000:  # still too big after pruning: drop the oldest keys
+        for k in sorted(_pw_fails, key=lambda k: _pw_fails[k][-1])[:5000]:
+            del _pw_fails[k]
     for key in (f"e:{email}", f"ip:{ip}"):
         _pw_fails.setdefault(key, []).append(now)
 
@@ -479,7 +489,7 @@ def login_password(request: Request, email: str, password: str, next: str):
     ok = ok and row is not None and email_allowed(email)
     if not ok:
         pw_fail(email, ip)
-        log.info("Failed password login for %s from %s", email, ip)
+        log.info("Failed password login for %r from %s", email, ip)
         return fail()
     pw_clear(email)
     if row["must_change"]:
