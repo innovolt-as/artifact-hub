@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .superpowers/
 .pip-cache/
+.DS_Store

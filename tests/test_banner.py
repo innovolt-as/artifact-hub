@@ -10,9 +10,9 @@ APP = {"title": "Matboka", "emoji": "🥗", "icon_url": None, "hue": 120}
 
 # ---------------------------------------------------------------- markup
 def test_links_home_with_label():
-    out = banner.render(APP, "Innovolt apps")
+    out = banner.render(APP, "My apps")
     assert out.startswith("<hub-banner>") and 'shadowrootmode="open"' in out
-    assert 'href="/"' in out and 'aria-label="Tilbake til Innovolt apps"' in out
+    assert 'href="/"' in out and 'aria-label="Tilbake til My apps"' in out
     assert "history.back" not in out and "<script" not in out
 
 
