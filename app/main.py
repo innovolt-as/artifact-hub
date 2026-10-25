@@ -22,11 +22,9 @@ import os
 import re
 import secrets
 import shutil
-import smtplib
 import sqlite3
 import time
 import zipfile
-from email.message import EmailMessage
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
@@ -37,7 +35,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from app import access, banner, home, versions
+from app import access, banner, home, mail, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -57,13 +55,6 @@ ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").sp
 ALLOWED_EMAILS = {e.strip().lower() for e in os.environ.get("ALLOWED_EMAILS", "").split(",") if e.strip()}
 ALLOWED_DOMAINS = {d.strip().lower().lstrip("@") for d in os.environ.get("ALLOWED_DOMAINS", "").split(",") if d.strip()}
 UPLOAD_TOKEN = os.environ.get("UPLOAD_TOKEN", "")  # for scripts/push.sh
-
-SMTP_HOST = os.environ.get("SMTP_HOST", "")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASS = os.environ.get("SMTP_PASS", "")
-SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USER or "hub@localhost")
-SMTP_TLS = os.environ.get("SMTP_TLS", "starttls")  # starttls | ssl | none
 
 MAGIC_TTL = 15 * 60               # seconds a magic link is valid
 SESSION_TTL = 30 * 24 * 3600      # seconds a session cookie lives
@@ -252,27 +243,13 @@ def require_admin(request: Request) -> str:
 
 
 def send_magic_link(email: str, link: str) -> None:
-    if not SMTP_HOST:
-        log.warning("SMTP not configured — magic link for %s: %s", email, link)
-        return
-    msg = EmailMessage()
-    msg["Subject"] = f"Logg inn på {SITE_NAME}"
-    msg["From"] = SMTP_FROM
-    msg["To"] = email
-    msg.set_content(
+    subject = f"Logg inn på {SITE_NAME}"
+    body = (
         f"Hei!\n\nKlikk lenken for å logge inn på {SITE_NAME} (gyldig i 15 minutter):\n\n{link}\n\n"
         f"Hvis du ikke ba om dette kan du ignorere e-posten."
     )
-    if SMTP_TLS == "ssl":
-        server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20)
-    else:
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
-        if SMTP_TLS == "starttls":
-            server.starttls()
-    with server:
-        if SMTP_USER:
-            server.login(SMTP_USER, SMTP_PASS)
-        server.send_message(msg)
+    if not mail.send(email, subject, body):
+        log.warning("SMTP not configured — magic link for %s: %s", email, link)
 
 
 # ---------------------------------------------------------------- artifact catalogue
