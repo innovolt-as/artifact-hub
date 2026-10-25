@@ -41,7 +41,7 @@ def _clean():
         main.shutil.rmtree(main.BRANDING_DIR)
     with main.db() as con:
         for table in ("magic_tokens", "logins", "docs", "app_data",
-                      "oauth_clients", "oauth_requests", "oauth_codes", "oauth_tokens", "visits", "prefs", "invites"):
+                      "oauth_clients", "oauth_requests", "oauth_codes", "oauth_tokens", "visits", "prefs", "invites", "passwords"):
             con.execute(f"DELETE FROM {table}")
     main._ip_sends.clear()
     yield

@@ -35,7 +35,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from app import access, banner, home, mail, versions
+from app import access, banner, home, mail, passwd, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -55,6 +55,14 @@ ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").sp
 ALLOWED_EMAILS = {e.strip().lower() for e in os.environ.get("ALLOWED_EMAILS", "").split(",") if e.strip()}
 ALLOWED_DOMAINS = {d.strip().lower().lstrip("@") for d in os.environ.get("ALLOWED_DOMAINS", "").split(",") if d.strip()}
 UPLOAD_TOKEN = os.environ.get("UPLOAD_TOKEN", "")  # for scripts/push.sh
+LOGIN_MODE = os.environ.get("LOGIN_MODE", "magic-link")  # 'magic-link' (default) or 'password'
+if LOGIN_MODE not in ("magic-link", "password"):
+    raise SystemExit(f"LOGIN_MODE must be 'magic-link' or 'password', got '{LOGIN_MODE}'")
+
+
+def password_mode() -> bool:
+    return LOGIN_MODE == "password"
+
 
 MAGIC_TTL = 15 * 60               # seconds a magic link is valid
 SESSION_TTL = 30 * 24 * 3600      # seconds a session cookie lives
@@ -169,6 +177,11 @@ with db() as con:
     home.create_tables(con)
     # People the admin has invited; they may log in (app/access.py)
     access.create_tables(con)
+    # Password hashes for LOGIN_MODE=password (app/passwd.py)
+    passwd.ensure_table(con)
+    if password_mode() and not any(passwd.get(con, e) for e in ADMIN_EMAILS):
+        log.warning("LOGIN_MODE=password but no admin has a password yet — run: "
+                    "docker compose exec hub python -m app.passwd set <admin e-mail>")
 
 
 # ---------------------------------------------------------------- auth helpers
