@@ -14,6 +14,7 @@ _tmp = Path(tempfile.mkdtemp(prefix="hub-test-"))
 os.environ.update(
     ARTIFACTS_DIR=str(_tmp / "artifacts"),
     DB_PATH=str(_tmp / "hub.db"),
+    BRANDING_DIR=str(_tmp / "branding"),
     ADMIN_EMAILS="admin@test.no",
     ALLOWED_EMAILS="user@test.no",
     BASE_URL="https://hub.test",
@@ -36,6 +37,8 @@ def _clean():
             main.shutil.rmtree(p)
         else:
             p.unlink()
+    if main.BRANDING_DIR.exists():
+        main.shutil.rmtree(main.BRANDING_DIR)
     with main.db() as con:
         for table in ("magic_tokens", "logins", "docs", "app_data",
                       "oauth_clients", "oauth_requests", "oauth_codes", "oauth_tokens", "visits", "prefs", "invites"):

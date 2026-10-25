@@ -49,6 +49,9 @@ DB_PATH = Path(os.environ.get("DB_PATH", "/data/hub.db"))
 SECRET_KEY = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 SITE_NAME = os.environ.get("SITE_NAME", "Artifact Hub")
+# Optional branding: files with these names in BRANDING_DIR replace the defaults in app/static/
+BRANDING_DIR = Path(os.environ.get("BRANDING_DIR") or DB_PATH.parent / "branding")
+BRANDING_FILES = ("logo.svg", "favicon-32.png", "apple-touch-icon.png")
 
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
 ALLOWED_EMAILS = {e.strip().lower() for e in os.environ.get("ALLOWED_EMAILS", "").split(",") if e.strip()}
@@ -84,7 +87,22 @@ ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title=SITE_NAME, docs_url=None, redoc_url=None)
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+def static_file(name: str) -> Path:
+    """The file served for /static/<name>: the branded one if the operator provided it, else the default."""
+    if name in BRANDING_FILES and (BRANDING_DIR / name).is_file():
+        return BRANDING_DIR / name
+    return BASE_DIR / "static" / name
+
+
+class BrandedStatic(StaticFiles):
+    def lookup_path(self, path: str) -> tuple[str, os.stat_result | None]:
+        if path in BRANDING_FILES:
+            f = static_file(path)
+            return str(f), os.stat(f)
+        return super().lookup_path(path)
+
+
+app.mount("/static", BrandedStatic(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.filters["strftime"] = lambda ts: time.strftime("%d.%m.%Y %H:%M", time.localtime(ts))
 signer = URLSafeTimedSerializer(SECRET_KEY, salt="session")
@@ -1446,7 +1464,7 @@ def serve_icon(slug: str, user: str = Depends(require_user)):
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     # browsers ask for /favicon.ico on pages without <link rel=icon> (e.g. artifacts)
-    return FileResponse(BASE_DIR / "static" / "favicon-32.png", media_type="image/png")
+    return FileResponse(static_file("favicon-32.png"), media_type="image/png")
 
 
 @app.get("/healthz")
