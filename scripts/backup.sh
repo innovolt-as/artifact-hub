@@ -13,7 +13,10 @@ command -v python3 >/dev/null || { echo "backup.sh: python3 is required" >&2; ex
 
 mkdir -p "$OUT_DIR"
 OUT_DIR=$(cd "$OUT_DIR" && pwd)
-stage=$(mktemp -d); trap 'rm -rf "$stage"' EXIT
+archive="$OUT_DIR/hub-$(date +%Y%m%d-%H%M).tar.gz"
+stage=$(mktemp -d)
+# A failed run must leave nothing in OUT_DIR that looks like a backup.
+trap 'rm -rf "$stage" "$archive.part"' EXIT
 
 # Online-safe copy of the database, even while the hub is writing.
 python3 -c '
@@ -30,6 +33,6 @@ else
   mkdir "$stage/artifacts"
 fi
 
-archive="$OUT_DIR/hub-$(date +%Y%m%d-%H%M).tar.gz"
-tar -czf "$archive" -C "$stage" hub.db artifacts
+tar -czf "$archive.part" -C "$stage" hub.db artifacts
+mv "$archive.part" "$archive"
 echo "$archive"
