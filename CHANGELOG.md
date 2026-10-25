@@ -16,3 +16,5 @@ See `docs/UPGRADING.md` for the step-by-step procedure. It is written in Norwegi
 - `scripts/backup.sh` takes a consistent copy of `hub.db` and the artifacts; `scripts/rehearse.sh` runs a release against a backup copy before you upgrade.
 - GitHub workflows: tests on every push and pull request; multi-arch image (`amd64`, `arm64`) published to GitHub Container Registry from `v*` tags.
 - MIT license.
+- Image tags are `vX.Y.Z` and `vX.Y`; `latest` only moves on release tags (not on pre-releases such as `v1.1.0-rc1`, nor on manual workflow runs).
+- `.dockerignore` keeps `data/`, `backups/`, `.git/` and other local files out of the build context; `.gitignore` now also ignores `backups/` and `docker-compose.override.yml`.

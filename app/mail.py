@@ -2,6 +2,9 @@
 
 To add an API-based provider (Resend, Postmark, SES): implement `send()` for it here and pick it from an env var.
 This is the only place the hub sends e-mail.
+
+Contract: `send(to, subject, body) -> bool` returns False only when no provider is configured (the hub then logs
+the login link instead). When a send fails it must raise, otherwise magic links would be logged with a misleading message.
 """
 from __future__ import annotations
 

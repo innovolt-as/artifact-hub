@@ -5,3 +5,5 @@ __pycache__/
 .superpowers/
 .pip-cache/
 .DS_Store
+backups/
+docker-compose.override.yml

@@ -1,0 +1,8 @@
+data/
+backups/
+.git/
+.superpowers/
+.pip-cache/
+__pycache__/
+*.pyc
+.env
