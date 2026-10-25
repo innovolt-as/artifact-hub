@@ -30,6 +30,16 @@ def test_table_roundtrip(hub):
         assert passwd.get(con, "a@b.no") is None
 
 
+def test_updated_at_is_monotonic_without_now(hub):
+    with hub.db() as con:
+        a = passwd.set_password(con, "a@b.no", "pw-1-passord", must_change=True)
+        b = passwd.set_password(con, "a@b.no", "pw-1-passord", must_change=True)
+        assert b > a and passwd.get(con, "a@b.no")["updated_at"] == b
+        # an explicit `now` bypasses the bump and is stored as given
+        passwd.set_password(con, "a@b.no", "pw-1-passord", must_change=True, now=5)
+        assert passwd.get(con, "a@b.no")["updated_at"] == 5
+
+
 def test_cli_set_and_list(hub, monkeypatch):
     env = {**os.environ, "DB_PATH": str(hub.DB_PATH)}
     r = subprocess.run([sys.executable, "-m", "app.passwd", "set", "cli@test.no", "--temporary"],

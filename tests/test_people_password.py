@@ -6,6 +6,8 @@ def test_invite_requires_password_in_password_mode(pw_mode, hub, admin_client):
     assert r.status_code == 400 and not hub.email_allowed("ny@test.no")
     r = admin_client.post("/api/people/invite", json={"email": "ny@test.no", "password": "kort"})
     assert r.status_code == 400
+    with hub.db() as con:
+        assert hub.passwd.get(con, "ny@test.no") is None  # nothing stored after the rejected invites
     r = admin_client.post("/api/people/invite", json={"email": "ny@test.no", "password": "temp-passord"})
     assert r.status_code == 200 and hub.email_allowed("ny@test.no")
     with hub.db() as con:
@@ -53,3 +55,11 @@ def test_default_mode_admin_untouched(admin_client, hub):
     assert admin_client.post("/api/people/password", json={"email": "ny@test.no", "password": "temp-passord"}).status_code == 404
     html = admin_client.get("/admin").text
     assert "Nytt midlertidig passord" not in html and 'name="password"' not in html
+
+
+def test_people_password_validation(pw_mode, hub, admin_client):
+    for bad in ("kort", "x" * 201, 12345678901, None):
+        r = admin_client.post("/api/people/password", json={"email": "user@test.no", "password": bad})
+        assert r.status_code == 400
+    with hub.db() as con:
+        assert hub.passwd.get(con, "user@test.no") is None
