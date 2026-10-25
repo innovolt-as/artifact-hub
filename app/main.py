@@ -109,6 +109,7 @@ class BrandedStatic(StaticFiles):
 
 app.mount("/static", BrandedStatic(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+templates.env.globals["pw_mode"] = lambda: password_mode()
 templates.env.filters["strftime"] = lambda ts: time.strftime("%d.%m.%Y %H:%M", time.localtime(ts))
 signer = URLSafeTimedSerializer(SECRET_KEY, salt="session")
 
@@ -561,6 +562,72 @@ def auth(token: str, next: str = "/"):
 def logout():
     resp = RedirectResponse("/login", status_code=302)
     resp.delete_cookie(COOKIE)
+    return resp
+
+
+def _password_form(request, pending: bool, next: str, error: str | None = None):
+    return templates.TemplateResponse(request, "password.html", {
+        "site": SITE_NAME, "pending": pending, "next": next, "error": error,
+        "user": None if pending else current_user(request)})
+
+
+@app.get("/password", response_class=HTMLResponse)
+def password_page(request: Request, next: str = "/"):
+    if not password_mode():
+        raise HTTPException(404)
+    pending = pending_password_user(request)
+    if not pending and not current_user(request):
+        return RedirectResponse("/login", status_code=302)
+    return _password_form(request, bool(pending), safe_next(next))
+
+
+@app.post("/password", response_class=HTMLResponse)
+def password_submit(request: Request, new1: str = Form(""), new2: str = Form(""),
+                    current: str = Form(""), next: str = Form("/")):
+    if not password_mode():
+        raise HTTPException(404)
+    next = safe_next(next)
+    ip = request.client.host if request.client else "?"
+    pending = pending_password_user(request)
+    if pending:
+        email, pw_at = pending
+        with db() as con:
+            row = passwd.get(con, email)
+        # A stale pending cookie (password reset again, person removed) must not work.
+        if (not email_allowed(email) or row is None or row["must_change"] != 1
+                or row["updated_at"] != pw_at):
+            raise HTTPException(403, "Lenken er ikke gyldig lenger. Logg inn på nytt.")
+    else:
+        email = current_user(request)
+        if not email:
+            return RedirectResponse("/login", status_code=302)
+        with db() as con:
+            row = passwd.get(con, email)
+        if row is None:
+            raise HTTPException(403, "Ingen passord er satt for denne kontoen.")
+        if pw_rate_limited(email, ip):
+            return _password_form(request, False, next, "For mange forsøk. Prøv igjen senere.")
+        if not passwd.verify_password(current, row["hash"]):
+            pw_fail(email, ip)
+            return _password_form(request, False, next, "Feil passord")
+    error = None
+    if len(new1) < 10:
+        error = "Passordet må ha minst 10 tegn"
+    elif len(new1) > 200:
+        error = "Passordet er for langt"
+    elif new1 != new2:
+        error = "Passordene er ikke like"
+    elif passwd.verify_password(new1, row["hash"]):
+        error = "Velg et annet passord enn det gamle"
+    if error:
+        return _password_form(request, bool(pending), next, error)
+    with db() as con:
+        passwd.set_password(con, email, new1, must_change=False)
+        if pending:
+            con.execute("INSERT INTO logins(email, at) VALUES(?,?)", (email, int(time.time())))
+    pw_clear(email)
+    resp = RedirectResponse(next if pending else "/?pw=changed", status_code=302)
+    set_session(resp, email)
     return resp
 
 
