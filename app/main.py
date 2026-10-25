@@ -1340,8 +1340,16 @@ def admin_page(request: Request, user: str = Depends(require_admin)):
     with db() as con:
         invited = set(access.invited(con))
     # "Fjern" only for those an invitation lets in; ALLOWED_EMAILS are let in by the server config
-    people = [{"email": e, "invited": e in invited and e not in ALLOWED_EMAILS}
-              for e in sorted((invited | ALLOWED_EMAILS) - ADMIN_EMAILS)]
+    shown = (invited | ALLOWED_EMAILS) - ADMIN_EMAILS
+    if password_mode():
+        shown |= ADMIN_EMAILS - {access.norm(user)}  # other admins may need a password too
+    people = [{"email": e, "invited": e in invited and e not in ALLOWED_EMAILS, "admin": e in ADMIN_EMAILS}
+              for e in sorted(shown)]
+    if password_mode():
+        with db() as con:
+            for p in people:
+                row = passwd.get(con, p["email"])
+                p["pw_status"] = "missing" if row is None else ("must_change" if row["must_change"] else "set")
     return templates.TemplateResponse(
         request, "admin.html", {"site": SITE_NAME, "user": user, "admin": True, "artifacts": list_artifacts(user),
                                 "known": known_people(), "people": people}
@@ -1502,13 +1510,45 @@ async def _email_in(request: Request) -> str:
     return email
 
 
+async def _email_and_password_in(request: Request) -> tuple[str, str | None]:
+    """Like _email_in, plus the optional "password" (None unless it is a string)."""
+    email = await _email_in(request)
+    body = await request.json()
+    pw = body.get("password")
+    return email, pw if isinstance(pw, str) else None
+
+
+def _check_temp_password(pw: str | None) -> str:
+    if pw is None or not 10 <= len(pw) <= 200:
+        raise HTTPException(400, "Midlertidig passord må ha 10–200 tegn")
+    return pw
+
+
 @app.post("/api/people/invite")
 async def people_invite(request: Request, user: str = Depends(require_admin)):
-    email = await _email_in(request)
+    email, pw = await _email_and_password_in(request)
     if email in ADMIN_EMAILS:
         raise HTTPException(400, "Admin har alltid tilgang")
+    if password_mode():
+        pw = _check_temp_password(pw)  # before inviting: a 400 must leave nobody invited
     with db() as con:
         access.invite(con, email)
+        if password_mode():
+            passwd.set_password(con, email, pw, must_change=True)
+    return {"ok": True, "email": email}
+
+
+@app.post("/api/people/password")
+async def people_password(request: Request, user: str = Depends(require_admin)):
+    """Set a new temporary password for someone who may log in (password mode only)."""
+    if not password_mode():
+        raise HTTPException(404, "Ikke i bruk")
+    email, pw = await _email_and_password_in(request)
+    pw = _check_temp_password(pw)
+    if not (email_allowed(email) or email in ADMIN_EMAILS):
+        raise HTTPException(404, "Ikke invitert")
+    with db() as con:
+        passwd.set_password(con, email, pw, must_change=True)
     return {"ok": True, "email": email}
 
 
@@ -1518,7 +1558,10 @@ async def people_remove(request: Request, user: str = Depends(require_admin)):
     with db() as con:
         if not access.is_invited(con, email):
             raise HTTPException(404, "Ikke invitert")
-    return {"ok": True, "apps": remove_person(email)}
+    apps = remove_person(email)
+    with db() as con:
+        passwd.delete(con, email)
+    return {"ok": True, "apps": apps}
 
 
 def _check_url(url: str) -> str:

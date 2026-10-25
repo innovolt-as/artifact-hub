@@ -74,6 +74,11 @@ def get(con: sqlite3.Connection, email: str) -> sqlite3.Row | None:
 
 def set_password(con: sqlite3.Connection, email: str, password: str, *, must_change: bool, now: int | None = None) -> int:
     at = int(now if now is not None else time.time())
+    if now is None:
+        # updated_at invalidates pending cookies; a reset within the same second must still change it
+        old = get(con, email)
+        if old is not None and at <= old["updated_at"]:
+            at = old["updated_at"] + 1
     con.execute(
         "INSERT OR REPLACE INTO passwords(email, hash, must_change, updated_at) VALUES(?,?,?,?)",
         (norm(email), hash_password(password), int(must_change), at),

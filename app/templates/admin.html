@@ -48,14 +48,20 @@
   <p class="muted">Kan logge inn. De ser appene som står på «Alle», og appene de står på.</p>
   <form id="inviteForm" class="link-form">
     <input name="email" type="email" placeholder="navn@epost.no" required>
+    {% if pw_mode() %}
+    <input name="password" type="text" placeholder="midlertidig passord" required minlength="10" maxlength="200" autocomplete="off">
+    <button type="button" class="small" id="genPw">Generer</button>
+    {% endif %}
     <button class="small">Inviter</button>
   </form>
   <p id="peopleError" class="err small"></p>
   <ul class="plist">
     {% for p in people %}
     <li><span class="e">{{ p.email }}</span>
+      {% if pw_mode() %}<span class="muted small">passord: {{ {'set': 'satt', 'must_change': 'må byttes', 'missing': 'mangler'}[p.pw_status] }}</span>
+      <button class="small setpw" data-email="{{ p.email }}">Nytt midlertidig passord</button>{% endif %}
       {% if p.invited %}<button class="small danger unperson" data-email="{{ p.email }}">Fjern</button>
-      {% else %}<span class="muted small">fra serveroppsettet</span>{% endif %}</li>
+      {% elif not p.admin %}<span class="muted small">fra serveroppsettet</span>{% endif %}</li>
     {% else %}
     <li class="muted">Ingen er invitert ennå.</li>
     {% endfor %}
@@ -82,6 +88,23 @@
     </div>
   </form>
 </dialog>
+{% if pw_mode() %}
+<dialog id="pwDialog" class="editor">
+  <form id="pwForm" method="dialog">
+    <h1 tabindex="-1" autofocus>Nytt midlertidig passord: <span id="pwWho"></span></h1>
+    <div class="link-form">
+      <input id="pwNew" type="text" placeholder="midlertidig passord" required minlength="10" maxlength="200" autocomplete="off">
+      <button type="button" class="small" id="pwGen">Generer</button>
+    </div>
+    <p id="pwMsg" class="small"></p>
+    <p id="pwError" class="err small"></p>
+    <div class="editor-actions">
+      <button type="button" class="small" id="pwClose">Lukk</button>
+      <button type="submit" class="primary" id="pwSet">Sett</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
 <script type="application/json" id="known">{{ known|tojson }}</script>
 
 <dialog id="editor" class="editor">
@@ -268,10 +291,39 @@ acForm.addEventListener('submit', async e => {
 // --- people who may log in
 $('inviteForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const r = await postJson('/api/people/invite', { email: e.target.email.value });
+  const body = { email: e.target.email.value };
+  if (e.target.password) body.password = e.target.password.value;
+  const r = await postJson('/api/people/invite', body);
   if (r.ok) return location.reload();
   $('peopleError').textContent = await failText(r);
 });
+function genPw() {
+  const abc = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const v = crypto.getRandomValues(new Uint32Array(12));
+  return [...v].map(n => abc[n % abc.length]).join('');
+}
+if ($('genPw')) $('genPw').onclick = () => { $('inviteForm').password.value = genPw(); };
+if ($('pwDialog')) {
+  let pwEmail = '';
+  $('pwDialog').addEventListener('close', () => { if ($('pwSet').disabled) location.reload(); });
+  $('pwGen').onclick = () => { $('pwNew').value = genPw(); };
+  $('pwClose').onclick = () => $('pwDialog').close();
+  document.querySelectorAll('.setpw').forEach(b => b.onclick = () => {
+    pwEmail = b.dataset.email;
+    $('pwWho').textContent = pwEmail;
+    $('pwNew').value = ''; $('pwNew').disabled = false; $('pwSet').disabled = false;
+    $('pwMsg').textContent = ''; $('pwError').textContent = '';
+    $('pwDialog').showModal();
+  });
+  $('pwForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const r = await postJson('/api/people/password', { email: pwEmail, password: $('pwNew').value });
+    if (!r.ok) { $('pwError').textContent = await failText(r); return; }
+    $('pwError').textContent = '';
+    $('pwMsg').textContent = 'Passordet er satt. Gi det til personen nå; det vises ikke igjen.';
+    $('pwSet').disabled = true; $('pwNew').disabled = true;  // the dialog reloads the page when closed
+  });
+}
 document.querySelectorAll('.unperson').forEach(b => b.onclick = async () => {
   if (!confirm(`Fjerne ${b.dataset.email}? Personen kan ikke logge inn lenger og tas av alle appene.`)) return;
   const r = await postJson('/api/people/remove', { email: b.dataset.email });
