@@ -75,6 +75,10 @@ OPEN_SIGNUP = "*" in ALLOWED_DOMAINS  # ALLOWED_DOMAINS=* lets anyone with an e-
 MAX_LINKS_PER_EMAIL = 3           # unexpired links per address (i.e. per MAGIC_TTL)
 MAX_LINKS_PER_IP = 10             # per hour
 _ip_sends: dict[str, list[float]] = {}
+PENDING_TTL = 30 * 60             # seconds a "must change password" cookie lives
+MAX_PW_FAILS_PER_EMAIL = 10       # failed password logins per address per hour
+MAX_PW_FAILS_PER_IP = 30          # failed password logins per IP per hour
+_pw_fails: dict[str, list[float]] = {}   # keys "e:<email>" and "ip:<ip>"
 
 ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin page
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -217,9 +221,71 @@ def current_user(request: Request) -> str | None:
     if not raw:
         return None
     try:
-        return signer.loads(raw, max_age=SESSION_TTL)["email"]
+        data = signer.loads(raw, max_age=SESSION_TTL)
+        if "pw_change" in data:  # pending cookie: not logged in yet
+            return None
+        return data["email"]
     except (BadSignature, KeyError):
         return None
+
+
+def pending_password_user(request: Request) -> tuple[str, int] | None:
+    """(email, pw_at) from a pending cookie (temporary password, change required), else None."""
+    raw = request.cookies.get(COOKIE)
+    if not raw:
+        return None
+    try:
+        data = signer.loads(raw, max_age=PENDING_TTL)
+        if not data.get("pw_change"):
+            return None
+        return data["email"], int(data["pw_at"])
+    except (BadSignature, KeyError, TypeError, ValueError):
+        return None
+
+
+def _set_cookie(resp, payload: dict, max_age: int) -> None:
+    resp.set_cookie(
+        COOKIE,
+        signer.dumps(payload),
+        max_age=max_age,
+        httponly=True,
+        samesite="lax",
+        secure=BASE_URL.startswith("https://"),
+    )
+
+
+def set_session(resp, email: str) -> None:
+    _set_cookie(resp, {"email": email}, SESSION_TTL)
+
+
+def set_pending(resp, email: str, pw_at: int) -> None:
+    _set_cookie(resp, {"email": email, "pw_change": True, "pw_at": pw_at}, PENDING_TTL)
+
+
+def pw_rate_limited(email: str, ip: str) -> bool:
+    now = time.time()
+    for key, limit in ((f"e:{email}", MAX_PW_FAILS_PER_EMAIL), (f"ip:{ip}", MAX_PW_FAILS_PER_IP)):
+        recent = [t for t in _pw_fails.get(key, []) if now - t < 3600]
+        if recent:
+            _pw_fails[key] = recent
+        else:
+            _pw_fails.pop(key, None)
+        if len(recent) >= limit:
+            return True
+    return False
+
+
+def pw_fail(email: str, ip: str) -> None:
+    now = time.time()
+    if len(_pw_fails) > 10000:  # keep memory bounded: drop the oldest keys
+        for k in sorted(_pw_fails, key=lambda k: _pw_fails[k][-1] if _pw_fails[k] else 0)[:5000]:
+            _pw_fails.pop(k, None)
+    for key in (f"e:{email}", f"ip:{ip}"):
+        _pw_fails.setdefault(key, []).append(now)
+
+
+def pw_clear(email: str) -> None:
+    _pw_fails.pop(f"e:{email}", None)
 
 
 def ip_rate_limited(ip: str) -> bool:
@@ -388,13 +454,52 @@ def login_page(request: Request, next: str = "/"):
     next = safe_next(next)
     if current_user(request):
         return RedirectResponse(next, status_code=302)
-    return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": False, "next": next})
+    return templates.TemplateResponse(request, "login.html", {
+        "site": SITE_NAME, "sent": False, "next": next, "error": None,
+        "mode": "password" if password_mode() else "magic-link"})
+
+
+PW_ERROR = "Feil e-post eller passord"
+
+
+def login_password(request: Request, email: str, password: str, next: str):
+    ip = request.client.host if request.client else "?"
+
+    def fail():
+        return templates.TemplateResponse(request, "login.html", {
+            "site": SITE_NAME, "sent": False, "next": next, "error": PW_ERROR, "mode": "password"})
+
+    if pw_rate_limited(email, ip):
+        log.warning("Rate limited password login for %s from %s", email, ip)
+        return fail()
+    with db() as con:
+        row = passwd.get(con, email)
+    # Always verify (against a dummy hash if no row) so timing doesn't reveal who has a password.
+    ok = passwd.verify_password(password, row["hash"] if row else passwd.DUMMY_HASH)
+    ok = ok and row is not None and email_allowed(email)
+    if not ok:
+        pw_fail(email, ip)
+        log.info("Failed password login for %s from %s", email, ip)
+        return fail()
+    pw_clear(email)
+    if row["must_change"]:
+        loc = "/password" if next == "/" else f"/password?next={quote(next, safe='')}"
+        resp = RedirectResponse(loc, status_code=302)
+        set_pending(resp, email, row["updated_at"])
+        return resp
+    with db() as con:
+        con.execute("INSERT INTO logins(email, at) VALUES(?,?)", (email, int(time.time())))
+    resp = RedirectResponse(next, status_code=302)
+    set_session(resp, email)
+    return resp
 
 
 @app.post("/login", response_class=HTMLResponse)
-def login_submit(request: Request, email: str = Form(...), next: str = Form("/")):
+def login_submit(request: Request, email: str = Form(...), next: str = Form("/"), password: str = Form("")):
     email = email.strip().lower()
     next = safe_next(next)
+    if password_mode():
+        return login_password(request, email, password, next)
     # Always show "sent" so we don't leak who is on the allowlist.
     ip = request.client.host if request.client else "?"
     if email_allowed(email):
@@ -426,6 +531,8 @@ def login_submit(request: Request, email: str = Form(...), next: str = Form("/")
 
 @app.get("/auth")
 def auth(token: str, next: str = "/"):
+    if password_mode():
+        raise HTTPException(status_code=404)
     h = hashlib.sha256(token.encode()).hexdigest()
     now = int(time.time())
     with db() as con:
@@ -436,14 +543,7 @@ def auth(token: str, next: str = "/"):
         con.execute("DELETE FROM magic_tokens WHERE expires_at < ?", (now,))
         con.execute("INSERT INTO logins(email, at) VALUES(?,?)", (row["email"], now))
     resp = RedirectResponse(safe_next(next), status_code=302)
-    resp.set_cookie(
-        COOKIE,
-        signer.dumps({"email": row["email"]}),
-        max_age=SESSION_TTL,
-        httponly=True,
-        samesite="lax",
-        secure=BASE_URL.startswith("https://"),
-    )
+    set_session(resp, row["email"])
     return resp
 
 

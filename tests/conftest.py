@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import main  # noqa: E402
+from app import main, passwd  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -58,6 +58,19 @@ def make_client(email: str | None = None) -> TestClient:
     if email:
         c.cookies.set(main.COOKIE, main.signer.dumps({"email": email}))
     return c
+
+
+@pytest.fixture
+def pw_mode(monkeypatch):
+    """Switch the hub to LOGIN_MODE=password for one test."""
+    monkeypatch.setattr(main, "LOGIN_MODE", "password")
+    main._pw_fails.clear()
+
+
+def set_pw(email: str, password: str, must_change: bool = False) -> int:
+    """Store a password for `email`; returns updated_at."""
+    with main.db() as con:
+        return passwd.set_password(con, email, password, must_change=must_change)
 
 
 @pytest.fixture

@@ -6,6 +6,15 @@
     <h1>Sjekk e-posten din</h1>
     <p>Hvis <strong>{{ email }}</strong> har tilgang, har vi sendt en innloggingslenke dit. Den er gyldig i 15 minutter.</p>
     <p class="muted"><a href="/login">Prøv en annen adresse</a></p>
+  {% elif mode == "password" %}
+    <h1>Logg inn</h1>
+    {% if error %}<p class="err">{{ error }}</p>{% endif %}
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="{{ next }}">
+      <input type="email" name="email" placeholder="deg@eksempel.no" required autofocus autocomplete="username">
+      <input type="password" name="password" placeholder="Passord" required autocomplete="current-password">
+      <button class="primary">Logg inn</button>
+    </form>
   {% else %}
     <h1>Logg inn</h1>
     <p class="muted">Skriv inn e-posten din, så sender vi deg en magisk lenke.</p>
