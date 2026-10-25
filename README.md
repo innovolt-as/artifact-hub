@@ -241,3 +241,15 @@ Hvem som kan logge inn:
 - Alle andre får «sjekk e-posten din», men ingen e-post sendes (lekker ikke hvem som er på listen)
 
 Magisk lenke er gyldig i 15 minutter og kan brukes én gang. Innlogging varer 30 dager.
+
+### Innlogging med passord
+
+`LOGIN_MODE` i `.env` velger hvordan folk logger inn. `magic-link` (standard) sender en innloggingslenke på e-post og krever SMTP. `password` bruker e-post og passord og trenger ingen SMTP.
+
+1. Sett `LOGIN_MODE=password` i `.env` og kjør `docker compose up -d`.
+2. Gi den første admin et passord på kommandolinjen: `docker compose exec hub python -m app.passwd set you@example.com`. `python -m app.passwd list` viser hvem som har passord. Hubben logger en advarsel ved oppstart hvis ingen admin har passord ennå.
+3. Logg inn som admin og inviter folk under «Personer» i `/admin`: du skriver inn e-post og et midlertidig passord, og gir det videre selv. «Nytt midlertidig passord» ved hver person lager et nytt, for eksempel hvis noen har glemt sitt.
+4. Ved første innlogging med et midlertidig passord må personen velge sitt eget passord før noe annet.
+5. Alle kan bytte sitt eget passord senere via «Bytt passord» (`/password`).
+
+Å bytte passord logger ikke ut andre enheter; de som allerede er innlogget, forblir det til innloggingen utløper. `ALLOWED_DOMAINS=*` har ingen effekt i passord-modus: bare de som er invitert (eller står i `ADMIN_EMAILS` / `ALLOWED_EMAILS`) og har passord, kan logge inn.

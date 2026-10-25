@@ -11,6 +11,7 @@ See `docs/UPGRADING.md` for the step-by-step procedure. It is written in Norwegi
 
 ### New
 
+- `LOGIN_MODE=password`: log in with e-mail + password, no SMTP needed; admins set temporary passwords that must be changed on first login; `python -m app.passwd` CLI.
 - Branding folder: `logo.svg`, `favicon-32.png` and `apple-touch-icon.png` in `data/branding/` replace the defaults.
 - `app/mail.py`: a small e-mail contract (`configured()`, `send(to, subject, body) -> bool`) so other providers than SMTP can be added.
 - `scripts/backup.sh` takes a consistent copy of `hub.db` and the artifacts; `scripts/rehearse.sh` runs a release against a backup copy before you upgrade.

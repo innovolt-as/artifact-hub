@@ -59,6 +59,18 @@ Rekkefølgen er viktig: override-fila lages **før** repo-filene oppdateres. Nye
 
 Legg `logo.svg`, `favicon-32.png` og/eller `apple-touch-icon.png` i `data/branding/` (`BRANDING_DIR`, standard `/data/branding` i containeren). Filene du legger der erstatter standardene; de du utelater beholder standardene. Endringer virker ved neste forespørsel; last siden inn på nytt uten cache hvis nettleseren fortsatt viser det gamle ikonet (favicons caches hardt).
 
+## Bytte innloggingsmåte
+
+Fra magisk lenke til passord:
+
+1. Sett `LOGIN_MODE=password` i `.env` og kjør `docker compose up -d`.
+2. Sett passord for admin på kommandolinjen: `docker compose exec hub python -m app.passwd set you@example.com`.
+3. Logg inn og sett midlertidige passord for de andre under «Personer» i `/admin`. De må bytte passordet ved første innlogging.
+
+Tilbake til magisk lenke: sett `LOGIN_MODE=magic-link` og kjør `docker compose up -d`. Passordene blir liggende i databasen og brukes igjen hvis du bytter til passord senere.
+
+`scripts/rehearse.sh` leser `LOGIN_MODE` fra miljøet. Skal du øve på en hub med passord-innlogging: `LOGIN_MODE=password ADMIN_EMAIL=you@example.com scripts/rehearse.sh <image> <backup.tar.gz>`.
+
 ## Gjør GHCR-pakken offentlig
 
 Når repoet blir offentlig må imaget også kunne hentes uten innlogging: GitHub → Packages → `artifact-hub` → Package settings → Change visibility → Public. Test med `docker pull ghcr.io/innovolt-as/artifact-hub:v1.0.0` fra en maskin som ikke er innlogget mot ghcr.io.

@@ -19,5 +19,5 @@ def test_compose_builds_locally_and_requires_domain():
 def test_env_example_is_neutral():
     text = (ROOT / ".env.example").read_text()
     assert "innovolt" not in text.lower() and "martin" not in text.lower()
-    for key in ("SITE_NAME", "DOMAIN", "BASE_URL", "SECRET_KEY", "ADMIN_EMAILS", "UPLOAD_TOKEN", "SMTP_HOST", "SMTP_FROM"):
+    for key in ("SITE_NAME", "DOMAIN", "BASE_URL", "SECRET_KEY", "ADMIN_EMAILS", "LOGIN_MODE", "UPLOAD_TOKEN", "SMTP_HOST", "SMTP_FROM"):
         assert re.search(rf"^{key}=", text, re.M), key
