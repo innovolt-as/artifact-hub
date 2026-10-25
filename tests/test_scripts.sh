@@ -23,3 +23,12 @@ printf '#!/bin/sh\nprintf partial > "$2"\nexit 1\n' > "$tmp/faketar/tar"; chmod 
 if PATH="$tmp/faketar:$PATH" scripts/backup.sh "$tmp/data" "$tmp/failout" 2>/dev/null; then echo "should fail when tar fails"; exit 1; fi
 [[ -z $(ls -A "$tmp/failout") ]] || { echo "leftovers after failed tar: $(ls -A "$tmp/failout")"; exit 1; }
 echo "backup.sh ok"
+
+out=$(DRY_RUN=1 ADMIN_EMAIL=a@b.no PORT=8123 scripts/rehearse.sh ghcr.io/x/hub:v9 "$out")
+grep -q -- '-p 127.0.0.1:8123:8000' <<<"$out"
+grep -q -- '-e ADMIN_EMAILS=a@b.no' <<<"$out"
+grep -q -- '-e SMTP_HOST= ' <<<"$out"
+grep -q -- 'ghcr.io/x/hub:v9' <<<"$out"
+grep -q -- "$tmp/data/hub.db" <<<"$out" && { echo "must not mount the real data dir"; exit 1; } || true
+if ADMIN_EMAIL= DRY_RUN=1 scripts/rehearse.sh img x.tar.gz 2>/dev/null; then echo "should require ADMIN_EMAIL"; exit 1; fi
+echo "rehearse.sh ok"
