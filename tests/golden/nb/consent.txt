@@ -1,0 +1,11 @@
+Koble til Claude · Artifact Hub
+Artifact Hub
+Admin
+admin@test.no
+Logg ut
+Gi Claude tilgang til å publisere apper i Artifact Hub?
+Claude
+ber om tilgang på vegne av admin@test.no. Den kan da opprette og oppdatere apper i huben.
+Godkjenn bare hvis du nettopp startet tilkoblingen selv fra Claude.
+Gi tilgang
+Avbryt

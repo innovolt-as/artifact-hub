@@ -171,3 +171,12 @@ def issued_token(provider, oauth_client, approved_code):
     """A valid access token string for admin@test.no."""
     code = asyncio.run(provider.load_authorization_code(oauth_client, approved_code))
     return asyncio.run(provider.exchange_authorization_code(oauth_client, code)).access_token
+
+
+@pytest.fixture
+def frozen_monday(monkeypatch):
+    """time.localtime() without an argument gives Monday 2026-10-26 10:00 (local); calls with an argument are real."""
+    import time
+    real = time.localtime
+    fixed = time.mktime((2026, 10, 26, 10, 0, 0, 0, 0, -1))
+    monkeypatch.setattr(time, "localtime", lambda *a: real(*a) if a else real(fixed))
