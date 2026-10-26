@@ -42,7 +42,7 @@ def resolve_and_load(value: str | None) -> str:
         try:
             _load(name)
         except (OSError, ValueError) as e:
-            raise SystemExit(f"Language file {name}.json cannot be read: {e}")
+            raise SystemExit(f"Language file {name}.json cannot be read: {e}") from e
     return lang
 
 

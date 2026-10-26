@@ -122,7 +122,6 @@ def test_consent_en(admin_client, user_client, english, pending_req):
 
 
 def test_consent_escapes_client_name(admin_client, pending_req, provider):
-    import sqlite3  # noqa: F401
     from app import main
     with main.db() as con:
         row = con.execute("SELECT info FROM oauth_clients").fetchone()

@@ -14,7 +14,6 @@ Codes and tokens are stored as SHA-256 hashes only.
 from __future__ import annotations
 
 import hashlib
-import json
 import secrets
 import time
 from urllib.parse import quote

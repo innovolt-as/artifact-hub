@@ -36,7 +36,6 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
-from jinja2.utils import htmlsafe_json_dumps
 
 from app import access, banner, home, i18n, loginmail, mail, passwd, versions
 
@@ -842,7 +841,7 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
     try:
         data = json.loads(body)
     except json.JSONDecodeError:
-        raise HTTPException(400, i18n.t("store.bad_json"))
+        raise HTTPException(400, i18n.t("store.bad_json")) from None
     if not isinstance(data, dict):
         raise HTTPException(400, i18n.t("store.not_object"))
     with db() as con:
@@ -1041,7 +1040,7 @@ async def prefs_view(request: Request, user: str = Depends(api_user)):
         try:
             home.set_view(con, user, view)
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e)) from None
     return {"ok": True, "view": view}
 
 

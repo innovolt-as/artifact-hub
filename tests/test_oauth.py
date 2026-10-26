@@ -9,6 +9,7 @@ from mcp.shared.auth import OAuthClientInformationFull
 from app import oauth
 from tests.conftest import CLAUDE_CALLBACK, PKCE_CHALLENGE
 
+
 def _client(*uris, client_id="c1"):
     return OAuthClientInformationFull(client_id=client_id, client_name="Claude", redirect_uris=list(uris))
 

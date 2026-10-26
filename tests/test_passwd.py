@@ -1,5 +1,8 @@
-import subprocess, sys, os
-from app import passwd, main
+import os
+import subprocess
+import sys
+
+from app import main, passwd
 
 
 def test_hash_roundtrip_and_format():

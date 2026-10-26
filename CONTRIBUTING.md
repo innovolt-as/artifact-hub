@@ -7,9 +7,20 @@ Bug reports, ideas and pull requests are welcome. For anything larger than a sma
 ```bash
 scripts/test.sh
 tests/test_scripts.sh
+ruff check .
 ```
 
-Both must pass before you open a pull request. CI runs both the Python suite and `tests/test_scripts.sh` on every push and pull request.
+All three must pass before you open a pull request. CI runs them on every push and pull request.
+
+## Dependencies
+
+`requirements.in` lists the direct dependencies. `requirements.txt` pins them and everything they pull in, so an image built from a tag always gets the same packages. After changing `requirements.in`, regenerate it with [uv](https://docs.astral.sh/uv/) and run the tests:
+
+```bash
+uv pip compile requirements.in -o requirements.txt --universal --python-version 3.12 --annotation-style line
+```
+
+Add `--upgrade` to move every package to its newest version.
 
 ## Rules
 

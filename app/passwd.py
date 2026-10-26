@@ -42,8 +42,9 @@ def _scrypt(password: str, salt: bytes, n: int, r: int, p: int, dklen: int) -> b
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     digest = _scrypt(password, salt, N, R, P, DKLEN)
-    b64 = lambda b: base64.b64encode(b).decode()
-    return f"scrypt${N}${R}${P}${b64(salt)}${b64(digest)}"
+    salt64 = base64.b64encode(salt).decode()
+    digest64 = base64.b64encode(digest).decode()
+    return f"scrypt${N}${R}${P}${salt64}${digest64}"
 
 
 def verify_password(password: str, stored: str) -> bool:

@@ -1,5 +1,6 @@
 # tests/test_password_login.py
 import time
+
 from tests.conftest import set_pw
 
 
@@ -48,7 +49,8 @@ def test_missing_password_field_is_not_magic_link(pw_mode, hub, client):
 
 
 def test_auth_is_404_in_password_mode(pw_mode, hub, client):
-    import hashlib, secrets
+    import hashlib
+    import secrets
     tok = secrets.token_urlsafe(16)
     with hub.db() as con:
         con.execute("INSERT INTO magic_tokens(token_hash,email,expires_at) VALUES(?,?,?)",
@@ -159,6 +161,7 @@ def test_overlong_password_is_wrong_without_hashing(pw_mode, hub, client, monkey
 
 def test_empty_login_mode_means_default(monkeypatch):
     import importlib
+
     import app.main as m
     monkeypatch.setenv("LOGIN_MODE", "")
     try:

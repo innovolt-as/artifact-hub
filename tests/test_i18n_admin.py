@@ -1,6 +1,5 @@
 """Admin page, statistics, access labels and admin/upload error details, in English (and a few nb strings)."""
 import io
-import json
 
 from app import access, main
 from tests.textutil import assert_no_norwegian
@@ -114,7 +113,9 @@ def test_link_and_edit_errors_en(hub, make_page, admin_client, english):
 
 
 def test_upload_errors_en(hub, admin_client, english):
-    up = lambda name, data: admin_client.post("/api/upload", files={"file": (name, io.BytesIO(data))})
+    def up(name, data):
+        return admin_client.post("/api/upload", files={"file": (name, io.BytesIO(data))})
+
     assert _detail(up("x.txt", b"x")) == "Only .html or .zip (with index.html) is supported"
     assert _detail(up("x.zip", _zip({"readme.txt": b"x"}))) == "The zip must contain an index.html"
     assert _detail(up("x.zip", _zip({"../evil.txt": b"x"}))) == "The zip contains invalid paths"
