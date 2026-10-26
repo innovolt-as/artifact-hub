@@ -16,6 +16,7 @@ Artifacts can keep per-user data through /api/me and /api/data/{app}/... (see "p
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -43,10 +44,21 @@ log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 # ---------------------------------------------------------------- config
+def _secret(name: str) -> str:
+    """A secret from the environment. The placeholder from .env.example is public, so it stops the hub."""
+    value = os.environ.get(name, "")
+    if value.startswith("change-me"):
+        raise SystemExit(f"{name} still has the example value from .env.example; set it to a long random string")
+    return value
+
+
 BASE_DIR = Path(__file__).parent
 ARTIFACTS_DIR = Path(os.environ.get("ARTIFACTS_DIR", "/data/artifacts"))
 DB_PATH = Path(os.environ.get("DB_PATH", "/data/hub.db"))
-SECRET_KEY = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+SECRET_KEY = _secret("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_hex(32)
+    log.warning("SECRET_KEY is not set; everyone is logged out and login links stop working when the hub restarts")
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 SITE_NAME = os.environ.get("SITE_NAME", "Artifact Hub")
 # Optional branding: files with these names in BRANDING_DIR replace the defaults in app/static/
@@ -56,7 +68,7 @@ BRANDING_FILES = ("logo.svg", "favicon-32.png", "apple-touch-icon.png")
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
 ALLOWED_EMAILS = {e.strip().lower() for e in os.environ.get("ALLOWED_EMAILS", "").split(",") if e.strip()}
 ALLOWED_DOMAINS = {d.strip().lower().lstrip("@") for d in os.environ.get("ALLOWED_DOMAINS", "").split(",") if d.strip()}
-UPLOAD_TOKEN = os.environ.get("UPLOAD_TOKEN", "")  # for scripts/push.sh
+UPLOAD_TOKEN = _secret("UPLOAD_TOKEN")  # for scripts/push.sh; empty turns token uploads off
 LOGIN_MODE = os.environ.get("LOGIN_MODE") or "magic-link"  # 'magic-link' (default) or 'password'
 if LOGIN_MODE not in ("magic-link", "password"):
     raise SystemExit(f"LOGIN_MODE must be 'magic-link' or 'password', got '{LOGIN_MODE}'")
@@ -1148,7 +1160,7 @@ def data_delete(app_name: str, key: str, request: Request, user: str = Depends(a
 def _upload_authorized(request: Request) -> str:
     """Either an admin session cookie, or a bearer token (for push.sh)."""
     auth_header = request.headers.get("authorization", "")
-    if UPLOAD_TOKEN and auth_header == f"Bearer {UPLOAD_TOKEN}":
+    if UPLOAD_TOKEN and hmac.compare_digest(auth_header.encode(), f"Bearer {UPLOAD_TOKEN}".encode()):
         return "token"
     return require_admin(request)
 
