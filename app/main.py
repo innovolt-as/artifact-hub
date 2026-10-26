@@ -481,15 +481,12 @@ def login_page(request: Request, next: str = "/"):
         "mode": "password" if password_mode() else "magic-link"})
 
 
-PW_ERROR = "Feil e-post eller passord"
-
-
 def login_password(request: Request, email: str, password: str, next: str):
     ip = request.client.host if request.client else "?"
 
     def fail():
         return templates.TemplateResponse(request, "login.html", {
-            "site": SITE_NAME, "sent": False, "next": next, "error": PW_ERROR, "mode": "password"})
+            "site": SITE_NAME, "sent": False, "next": next, "error": i18n.t("login.error"), "mode": "password"})
 
     with db() as con:
         row = passwd.get(con, email)  # before the rate limit: a reset (new updated_at) lifts the e-mail lockout
@@ -535,7 +532,7 @@ def login_submit(request: Request, email: str = Form(...), next: str = Form("/")
             ).fetchone()[0]
         if pending >= MAX_LINKS_PER_EMAIL or ip_rate_limited(ip):
             log.warning("Rate limited magic link for %s from %s", email, ip)
-            return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email})
+            return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email, "minutes": MAGIC_TTL // 60})
         token = secrets.token_urlsafe(32)
         with db() as con:
             con.execute(
@@ -551,7 +548,7 @@ def login_submit(request: Request, email: str = Form(...), next: str = Form("/")
             log.exception("Could not send magic link: %s", e)
     else:
         log.info("Login attempt from non-allowed email %s", email)
-    return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email})
+    return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email, "minutes": MAGIC_TTL // 60})
 
 
 @app.get("/auth")
@@ -563,7 +560,7 @@ def auth(token: str, next: str = "/"):
     with db() as con:
         row = con.execute("SELECT email, expires_at, used FROM magic_tokens WHERE token_hash=?", (h,)).fetchone()
         if not row or row["used"] or row["expires_at"] < now:
-            raise HTTPException(status_code=400, detail="Lenken er ugyldig eller utløpt. Be om en ny.")
+            raise HTTPException(status_code=400, detail=i18n.t("auth.invalid"))
         con.execute("UPDATE magic_tokens SET used=1 WHERE token_hash=?", (h,))
         con.execute("DELETE FROM magic_tokens WHERE expires_at < ?", (now,))
         con.execute("INSERT INTO logins(email, at) VALUES(?,?)", (row["email"], now))
@@ -614,7 +611,7 @@ def password_submit(request: Request, new1: str = Form(""), new2: str = Form("")
         # A stale pending cookie (password reset again, person removed) must not work.
         if (not email_allowed(email) or row is None or row["must_change"] != 1
                 or row["updated_at"] != pw_at):
-            raise HTTPException(403, "Innloggingen er ikke gyldig lenger. Logg inn på nytt.")
+            raise HTTPException(403, i18n.t("password.invalid"))
     else:
         email = current_user(request)
         if not email:
@@ -624,19 +621,19 @@ def password_submit(request: Request, new1: str = Form(""), new2: str = Form("")
         if row is None:
             return _password_form(request, False, next, no_password=True)
         if pw_rate_limited(email, ip, row["updated_at"]):
-            return _password_form(request, False, next, "For mange forsøk. Prøv igjen senere.")
+            return _password_form(request, False, next, i18n.t("password.err.rate"))
         if not passwd.verify_password(current, row["hash"]):
             pw_fail(email, ip)
-            return _password_form(request, False, next, "Feil passord")
+            return _password_form(request, False, next, i18n.t("password.err.wrong"))
     error = None
     if len(new1) < 10:
-        error = "Passordet må ha minst 10 tegn"
+        error = i18n.t("password.err.short")
     elif len(new1) > 200:
-        error = "Passordet er for langt"
+        error = i18n.t("password.err.long")
     elif new1 != new2:
-        error = "Passordene er ikke like"
+        error = i18n.t("password.err.mismatch")
     elif passwd.verify_password(new1, row["hash"]):
-        error = "Velg et annet passord enn det gamle"
+        error = i18n.t("password.err.same")
     if error:
         return _password_form(request, bool(pending), next, error)
     with db() as con:
@@ -650,14 +647,9 @@ def password_submit(request: Request, new1: str = Form(""), new2: str = Form("")
 
 
 # ---------------------------------------------------------------- routes: gallery + serving
-NO_DAYS = ("mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag")
-NO_MONTHS = ("januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober",
-             "november", "desember")
-
-
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, user: str = Depends(require_user)):
-    notice = "Passordet er byttet." if request.query_params.get("pw") == "changed" else None
+    notice = i18n.t("home.pw_changed") if request.query_params.get("pw") == "changed" else None
     apps = list_artifacts(user)
     with db() as con:
         home.start(con, user, [a["slug"] for a in apps], admin=is_admin(user))
@@ -672,7 +664,8 @@ def index(request: Request, user: str = Depends(require_user)):
         request,
         "index.html",
         {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "top": top, "rest": rest,
-         "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": f"{NO_DAYS[now.tm_wday]} {now.tm_mday}. {NO_MONTHS[now.tm_mon - 1]}"},
+         "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
+         "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale")}},
     )
 
 

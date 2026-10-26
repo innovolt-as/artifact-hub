@@ -1,27 +1,27 @@
 {% extends "base.html" %}
-{% block title %}Logg inn · {{ site }}{% endblock %}
+{% block title %}{{ t("login.title") }} · {{ site }}{% endblock %}
 {% block body %}
 <section class="card login">
   {% if sent %}
-    <h1>Sjekk e-posten din</h1>
-    <p>Hvis <strong>{{ email }}</strong> har tilgang, har vi sendt en innloggingslenke dit. Den er gyldig i 15 minutter.</p>
-    <p class="muted"><a href="/login">Prøv en annen adresse</a></p>
+    <h1>{{ t("login.sent_title") }}</h1>
+    <p>{{ t_html("login.sent", email=email, minutes=minutes) }}</p>
+    <p class="muted"><a href="/login">{{ t("login.try_other") }}</a></p>
   {% elif mode == "password" %}
-    <h1>Logg inn</h1>
+    <h1>{{ t("login.title") }}</h1>
     {% if error %}<p class="err">{{ error }}</p>{% endif %}
     <form method="post" action="/login">
       <input type="hidden" name="next" value="{{ next }}">
-      <input type="email" name="email" placeholder="deg@eksempel.no" required autofocus autocomplete="username">
-      <input type="password" name="password" placeholder="Passord" required autocomplete="current-password">
-      <button class="primary">Logg inn</button>
+      <input type="email" name="email" placeholder="{{ t('login.email_placeholder') }}" required autofocus autocomplete="username">
+      <input type="password" name="password" placeholder="{{ t('login.password_placeholder') }}" required autocomplete="current-password">
+      <button class="primary">{{ t("login.title") }}</button>
     </form>
   {% else %}
-    <h1>Logg inn</h1>
-    <p class="muted">Skriv inn e-posten din, så sender vi deg en magisk lenke.</p>
+    <h1>{{ t("login.title") }}</h1>
+    <p class="muted">{{ t("login.intro") }}</p>
     <form method="post" action="/login">
       <input type="hidden" name="next" value="{{ next }}">
-      <input type="email" name="email" placeholder="deg@eksempel.no" required autofocus autocomplete="email">
-      <button class="primary">Send lenke</button>
+      <input type="email" name="email" placeholder="{{ t('login.email_placeholder') }}" required autofocus autocomplete="email">
+      <button class="primary">{{ t("login.send") }}</button>
     </form>
   {% endif %}
 </section>

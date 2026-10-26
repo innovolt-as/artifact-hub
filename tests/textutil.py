@@ -1,4 +1,5 @@
 """visible_text(): the text a person sees on a page, for the golden-file tests."""
+import re
 from html.parser import HTMLParser
 
 ATTRS = ("title", "placeholder", "aria-label", "alt")
@@ -34,3 +35,13 @@ def visible_text(body: str) -> str:
     p.feed(body)
     p.close()
     return "\n".join(p.lines) + "\n"
+
+
+_NORWEGIAN = re.compile(r"[æøåÆØÅ]|\b(?:Logg|Ingen|Velg|Legg|Fjern|Lagre|Bytt|passord|apper|siden|Hei)\b")
+
+
+def assert_no_norwegian(body: str) -> None:
+    """Fail if the visible text of `body` has Norwegian letters or common Norwegian words."""
+    text = visible_text(body)
+    m = _NORWEGIAN.search(text)
+    assert not m, f"Norwegian text left: {m.group()!r} in: {text[max(0, m.start() - 40):m.end() + 40]!r}"
