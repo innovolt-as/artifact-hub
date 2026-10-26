@@ -35,6 +35,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
+from jinja2.utils import htmlsafe_json_dumps
 
 from app import access, banner, home, i18n, mail, passwd, versions
 
@@ -759,7 +760,8 @@ def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool) -> H
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
     and the hub banner right after <body> unless the app has it turned off."""
     html = path.read_text("utf-8", errors="replace")
-    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
+    strings = '<script type="application/json" id="__hub_strings">{}</script>'.format(htmlsafe_json_dumps(i18n.js("js.hub.")))
+    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + strings + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0"
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
@@ -784,7 +786,7 @@ def _split_path(path: str, want_doc: bool) -> tuple[str, str]:
     """'a/b/c' -> collection 'a/b/c' (odd segments); 'a/b/c/d' -> ('a/b/c', 'd') (even segments)."""
     segs = [s for s in path.split("/") if s]
     if not segs or not all(SEG_RE.match(s) for s in segs) or (len(segs) % 2 == 0) != want_doc:
-        raise HTTPException(400, f"Ugyldig sti: {path}")
+        raise HTTPException(400, i18n.t("store.bad_path", path=path))
     return ("/".join(segs[:-1]), segs[-1]) if want_doc else ("/".join(segs), "")
 
 
@@ -825,13 +827,13 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
     collection, doc_id = _split_path(path, want_doc=True)
     body = await request.body()
     if len(body) > MAX_DOC_BYTES:
-        raise HTTPException(413, "Dokumentet er større enn 256 KB")
+        raise HTTPException(413, i18n.t("store.too_big"))
     try:
         data = json.loads(body)
     except json.JSONDecodeError:
-        raise HTTPException(400, "Ugyldig JSON")
+        raise HTTPException(400, i18n.t("store.bad_json"))
     if not isinstance(data, dict):
-        raise HTTPException(400, "Et dokument må være et JSON-objekt")
+        raise HTTPException(400, i18n.t("store.not_object"))
     with db() as con:
         row = con.execute(
             "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
@@ -839,7 +841,7 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
         ).fetchone()
         if merge:  # update() requires the document to exist
             if not row:
-                raise HTTPException(404, "Dokumentet finnes ikke")
+                raise HTTPException(404, i18n.t("store.doc_missing"))
             data = _deep_merge(json.loads(row["data"]), data)
         con.execute(
             """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
@@ -883,15 +885,14 @@ MAX_DATA_DOCS_LISTED = 500
 def _data_owner(slug: str, user: str) -> str:
     found = artifact_root(slug)
     if not found or not can_see(found[1], user):
-        raise HubError(f"Fant ingen app som heter «{slug}». Lenkekort har ikke data.")
+        raise HubError(i18n.t("data.no_app", slug=slug))
     return user.lower()
 
 
 def _data_path(path: str, want_doc: bool) -> tuple[str, str]:
     segs = [s for s in str(path).split("/") if s]
     if not segs or not all(SEG_RE.match(s) for s in segs) or (len(segs) % 2 == 0) != want_doc:
-        kind = "et dokument (partall ledd, f.eks. days/2026-10-22)" if want_doc else "en samling (oddetall ledd, f.eks. days)"
-        raise HubError(f"Ugyldig sti «{path}»: må være {kind}.")
+        raise HubError(i18n.t("data.bad_path_doc" if want_doc else "data.bad_path_col", path=path))
     return ("/".join(segs[:-1]), segs[-1]) if want_doc else ("/".join(segs), "")
 
 
@@ -931,7 +932,7 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
     owner = _data_owner(slug, user)
     col, doc_id = _data_path(path, want_doc=True)
     if not isinstance(data, dict):
-        raise HubError("Et dokument må være et JSON-objekt.")
+        raise HubError(i18n.t("data.not_object"))
     with db() as con:
         row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                           (slug, owner, col, doc_id)).fetchone()
@@ -939,7 +940,7 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
             data = _deep_merge(json.loads(row["data"]), data)
         raw = json.dumps(data, ensure_ascii=False)
         if len(raw.encode("utf-8")) > MAX_DOC_BYTES:
-            raise HubError("Dokumentet blir større enn 256 KB.")
+            raise HubError(i18n.t("data.too_big"))
         con.execute(
             """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
                ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
@@ -979,27 +980,27 @@ def api_user(request: Request) -> str:
     """Like require_user, but answers 401 JSON instead of redirecting to the login page."""
     user = current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="Ikke innlogget")
+        raise HTTPException(status_code=401, detail=i18n.t("err.not_logged_in"))
     return user
 
 
 def _check_app_key(app_name: str, key: str | None = None) -> None:
     if not SLUG_RE.match(app_name):
-        raise HTTPException(400, "Ugyldig app-navn")
+        raise HTTPException(400, i18n.t("store.bad_app"))
     if key is not None and not DATA_KEY_RE.match(key):
-        raise HTTPException(400, "Ugyldig nøkkel")
+        raise HTTPException(400, i18n.t("store.bad_key"))
 
 
 def _require_json(request: Request) -> None:
     # A JSON content type cannot be sent cross-site without a CORS preflight, which this app never allows.
     if not request.headers.get("content-type", "").lower().startswith("application/json"):
-        raise HTTPException(415, "Bruk Content-Type: application/json")
+        raise HTTPException(415, i18n.t("store.need_json"))
 
 
 def _encode_value(value) -> str:
     raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if len(raw.encode("utf-8")) > MAX_VALUE_BYTES:
-        raise HTTPException(413, "Verdien er for stor")
+        raise HTTPException(413, i18n.t("store.value_big"))
     return raw
 
 
@@ -1009,9 +1010,9 @@ def _check_quota(con: sqlite3.Connection, email: str, app_name: str, new_rows: d
     for k, v in new_rows.items():
         sizes[k] = len(v.encode("utf-8"))
     if len(sizes) > MAX_KEYS_PER_APP:
-        raise HTTPException(413, "For mange nøkler for denne appen")
+        raise HTTPException(413, i18n.t("store.too_many_keys"))
     if sum(sizes.values()) > MAX_BYTES_PER_APP:
-        raise HTTPException(413, "Lagringsplassen for denne appen er full")
+        raise HTTPException(413, i18n.t("store.full"))
 
 
 @app.get("/api/me")
@@ -1091,7 +1092,7 @@ async def data_batch(app_name: str, request: Request, user: str = Depends(api_us
     to_set = body.get("set") or {}
     to_del = body.get("delete") or []
     if not isinstance(to_set, dict) or not isinstance(to_del, list) or len(to_set) + len(to_del) > MAX_BATCH:
-        raise HTTPException(400, "Ugyldig batch")
+        raise HTTPException(400, i18n.t("store.bad_batch"))
     for k in list(to_set) + to_del:
         _check_app_key(app_name, k)
     encoded = {k: _encode_value(v) for k, v in to_set.items()}
@@ -1113,7 +1114,7 @@ def data_get(app_name: str, key: str, user: str = Depends(api_user)):
     with db() as con:
         r = con.execute("SELECT value, updated FROM app_data WHERE email=? AND app=? AND key=?", (user, app_name, key)).fetchone()
     if not r:
-        raise HTTPException(404, "Finnes ikke")
+        raise HTTPException(404, i18n.t("store.not_found"))
     return {"key": key, "value": json.loads(r["value"]), "updated": r["updated"]}
 
 
@@ -1232,7 +1233,7 @@ _HTML_HINT = re.compile(r"<html|<!doctype html|<body", re.I)
 
 
 class HubError(Exception):
-    """A problem with a write; the message is Norwegian text shown to the user."""
+    """A problem with a write; the message is text in the hub's language (HUB_LANG) shown to the user."""
 
 
 def _write_meta(path: Path, meta: dict) -> None:
@@ -1253,19 +1254,18 @@ def _apply_info(meta: dict, title: str | None, description: str | None, emoji: s
 
 def _check_html(html: str) -> None:
     if len(html.encode("utf-8")) > MAX_PAGE_BYTES:
-        raise HubError(f"Siden er for stor (maks {MAX_PAGE_BYTES // 1024} KB)")
+        raise HubError(i18n.t("page.too_big", kb=MAX_PAGE_BYTES // 1024))
     if not _HTML_HINT.search(html):
-        raise HubError("Dette ser ikke ut som HTML. Send en komplett HTML-side (med <html>, <!doctype html> eller <body>), "
-                       "ikke React/JSX eller en kodesnutt.")
+        raise HubError(i18n.t("page.not_html"))
 
 
 def _single_page(slug: str) -> Path:
     """The editable HTML of an existing app: the page itself, or index.html of a folder app. HubError otherwise."""
     meta_path = _meta_path(slug)
     if not meta_path:
-        raise HubError(f"Fant ingen side som heter «{slug}».")
+        raise HubError(i18n.t("page.not_found", slug=slug))
     if meta_path.name.endswith(".link.json"):
-        raise HubError(f"«{slug}» er et lenkekort uten HTML. Bruk update_app_info for å endre tittel, beskrivelse eller lenke-info.")
+        raise HubError(i18n.t("page.is_link", slug=slug))
     if meta_path.name == "meta.json":
         return ARTIFACTS_DIR / slug / "index.html"  # folder app: only index.html is edited, its other files stay
     return ARTIFACTS_DIR / f"{slug}.html"
@@ -1276,11 +1276,11 @@ def save_page(slug: str, html: str, *, create: bool, title: str | None = None, d
     """Create a single-file page (private unless said otherwise), or replace the HTML of an existing page or
     folder app (its index.html); returns the slug."""
     if not SLUG_RE.match(slug):
-        raise HubError(f"Ugyldig navn: «{slug}». Bruk små bokstaver, tall, punktum, bindestrek og understrek.")
+        raise HubError(i18n.t("page.bad_slug", slug=slug))
     _check_html(html)
     if create:
         if _meta_path(slug):
-            raise HubError(f"Det finnes allerede noe som heter «{slug}». Bruk update_app for å endre det.")
+            raise HubError(i18n.t("page.exists", slug=slug))
         meta: dict = {}
         if private is None:
             private = True
@@ -1307,10 +1307,9 @@ def edit_page(slug: str, edits: list[tuple[str, str]]) -> None:
     for n, (old, new) in enumerate(edits, 1):
         count = text.count(old) if old else 0
         if count == 0:
-            raise HubError(f"Endring {n}: fant ikke teksten som skulle erstattes. Ingenting er endret.")
+            raise HubError(i18n.t("page.edit_missing", n=n))
         if count > 1:
-            raise HubError(f"Endring {n}: teksten finnes {count} ganger. Ta med mer omkringliggende tekst slik at den er unik. "
-                           "Ingenting er endret.")
+            raise HubError(i18n.t("page.edit_multi", n=n, count=count))
         text = text.replace(old, new, 1)
     _check_html(text)
     versions.save(ARTIFACTS_DIR, slug)
@@ -1323,7 +1322,7 @@ def set_info(slug: str, *, title: str | None = None, description: str | None = N
     """Change gallery info for a page or link card. None = unchanged, "" = remove the field."""
     meta_path = _meta_path(slug)
     if not meta_path:
-        raise HubError(f"Fant ingen side som heter «{slug}».")
+        raise HubError(i18n.t("page.not_found", slug=slug))
     meta = _read_meta(meta_path)
     _apply_info(meta, title, description, emoji)
     if private is not None:

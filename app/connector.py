@@ -17,6 +17,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import AnyHttpUrl, BaseModel, Field
 
+from app import i18n
 from app import main as hub
 from app.oauth import HubOAuthProvider
 
@@ -33,7 +34,7 @@ connection only. Before writing, read the app's source (get_app) and existing do
 what the app expects. Write data when the user asks you to log, add or change something in an app.
 
 The hub's front page can show one line from each app on its card. An app sets it by writing the document
-hub/summary = {{"text": "<one short line, e.g. 93 treff ▼1>"}} (db.doc("hub/summary").set(...)) whenever the
+hub/summary = {{"text": "<one short line, e.g. 93 hits ▼1>"}} (db.doc("hub/summary").set(...)) whenever the
 numbers it shows change. When you build or change an app, add or keep that line if the app has a natural
 headline number."""
 
@@ -52,7 +53,7 @@ def _user() -> str:
     token = get_access_token()
     email = token.subject if token else None
     if not hub.is_admin(email):
-        raise hub.HubError("Bare administratorer kan bruke denne koblingen.")
+        raise hub.HubError(i18n.t("mcp.admin_only"))
     return email
 
 
@@ -78,8 +79,8 @@ def build_mcp() -> MCPServer:
         name="list_apps",
         title="List apps",
         description="List every app and link card on the hub, with slug, title, description, URL, who has access "
-        "('alle' = everyone who can log in, 'bare meg' = only admins, 'N personer' = specific people chosen on the "
-        "admin page), and whether it is editable (pages and folder apps are; link cards are not). Use this to find the slug of an "
+        "(a short label in the hub's language: everyone who can log in, only admins, or specific people chosen on "
+        "the admin page), and whether it is editable (pages and folder apps are; link cards are not). Use this to find the slug of an "
         "existing app before get_app, update_app, edit_app or update_app_info.",
         annotations=ToolAnnotations(readOnlyHint=True),
         structured_output=False,
@@ -145,7 +146,7 @@ def build_mcp() -> MCPServer:
                           private=private)
         except hub.HubError as e:
             return _error(str(e))
-        return f"Opprettet {'privat ' if private else ''}app: {_url(slug)}"
+        return i18n.t("mcp.created_private" if private else "mcp.created", url=_url(slug))
 
     @mcp.tool(
         name="update_app",
@@ -168,7 +169,7 @@ def build_mcp() -> MCPServer:
                           private=private)
         except hub.HubError as e:
             return _error(str(e))
-        return f"Oppdatert: {_url(slug)}"
+        return i18n.t("mcp.updated", url=_url(slug))
 
     @mcp.tool(
         name="edit_app",
@@ -185,11 +186,11 @@ def build_mcp() -> MCPServer:
         try:
             _user()
             if not edits:
-                raise hub.HubError("Ingen endringer oppgitt.")
+                raise hub.HubError(i18n.t("mcp.no_edits"))
             hub.edit_page(slug, [(e.old, e.new) for e in edits])
         except hub.HubError as e:
             return _error(str(e))
-        return f"Endret ({len(edits)} endringer): {_url(slug)}"
+        return i18n.tn("mcp.edited", len(edits), url=_url(slug))
 
     @mcp.tool(
         name="update_app_info",
@@ -209,7 +210,7 @@ def build_mcp() -> MCPServer:
             hub.set_info(slug, title=title, description=description, emoji=emoji, private=private)
         except hub.HubError as e:
             return _error(str(e))
-        return f"Oppdatert info for «{slug}»."
+        return i18n.t("mcp.info_updated", slug=slug)
 
     @mcp.tool(
         name="list_app_data",
@@ -274,7 +275,7 @@ def build_mcp() -> MCPServer:
             gone = hub.doc_delete(slug, _user(), path)
         except hub.HubError as e:
             return _error(str(e))
-        return f"Slettet {path}." if gone else f"Fant ikke {path}; ingenting slettet."
+        return i18n.t("mcp.deleted", path=path) if gone else i18n.t("mcp.not_deleted", path=path)
 
     return mcp
 

@@ -16,6 +16,11 @@
   const ADMIN = me.dataset.admin === "1";
   const API = `/api/store/${encodeURIComponent(SLUG)}`;
   const POLL_MS = 5000;
+  // Texts come from the hub's language files as a JSON block right before this script; without it the key shows.
+  let S = {};
+  try { S = JSON.parse(document.getElementById("__hub_strings").textContent); } catch (e) { /* use the keys */ }
+  const fmt = (s, vars) => s.replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? vars[k] : m));
+  const tr = (key, vars) => fmt(S[key] || key, vars);
 
   // ------------------------------------------------------------------ helpers
   const dbError = (code, message) => Object.assign(new Error(message), { code, message });
@@ -30,16 +35,16 @@
         credentials: "same-origin",
       });
     } catch (e) {
-      throw dbError("unavailable", "Nettverksfeil");
+      throw dbError("unavailable", tr("network"));
     }
     if (r.redirected && new URL(r.url).pathname === "/login") {
       location.href = "/login?next=" + encodeURIComponent(location.pathname);
-      throw dbError("unavailable", "Ikke innlogget");
+      throw dbError("unavailable", tr("not_logged_in"));
     }
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       const code = { 400: "invalid_argument", 404: "invalid_argument", 413: "invalid_argument" }[r.status] || "unavailable";
-      throw dbError(code, j.detail || `Feil ${r.status}`);
+      throw dbError(code, j.detail || tr("error_status", { status: r.status }));
     }
     return r.json();
   }
@@ -48,7 +53,7 @@
   function checkPath(path, wantEven) {
     const s = segs(path);
     if (!s.length || (s.length % 2 === 0) !== wantEven) {
-      throw new TypeError(`Ugyldig ${wantEven ? "dokument" : "samlings"}sti: ${path}`);
+      throw new TypeError(tr(wantEven ? "bad_doc_path" : "bad_col_path", { path }));
     }
     return s.join("/");
   }
@@ -113,7 +118,7 @@
     }
     return {
       where: (f, op, v) => {
-        if (!OPS[op]) throw new TypeError(`Ukjent operator: ${op}`);
+        if (!OPS[op]) throw new TypeError(tr("unknown_op", { op }));
         return makeQuery(path, [...filters, [f, op, v]], order, max);
       },
       orderBy: (f, dir = "asc") => makeQuery(path, filters, [f, dir], max),
@@ -174,7 +179,7 @@
   // ------------------------------------------------------------------ downloads
   const downloads = Object.freeze({
     async save({ filename, data }) {
-      if (!filename || data == null) throw Object.assign(new Error("filename og data må være satt"), { code: "bad_request" });
+      if (!filename || data == null) throw Object.assign(new Error(tr("save_args")), { code: "bad_request" });
       const blob = data instanceof Blob ? data : new Blob([data]);
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
