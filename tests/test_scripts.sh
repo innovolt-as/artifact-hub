@@ -41,11 +41,25 @@ many="$tmp/many"; mkdir "$many"
 for i in $(seq -w 1 20); do touch "$many/hub-202001$i-0300.tar.gz"; done
 scripts/backup.sh "$tmp/data" "$many" >/dev/null
 [[ $(ls "$many" | wc -l | tr -d ' ') == 14 ]] || { echo "default KEEP left $(ls "$many" | wc -l) archives"; exit 1; }
-KEEP=0 scripts/backup.sh "$tmp/data" "$many" >/dev/null
-[[ $(ls "$many" | wc -l | tr -d ' ') -ge 14 ]] || { echo "KEEP=0 deleted archives"; exit 1; }
+for i in $(seq -w 1 20); do touch "$many/hub-201901$i-0300.tar.gz"; done
+ls "$many" > "$tmp/before.txt"
+new0=$(KEEP=0 scripts/backup.sh "$tmp/data" "$many")
+want0=$(( $(wc -l < "$tmp/before.txt") + 1 ))
+grep -qx "$(basename "$new0")" "$tmp/before.txt" && want0=$(( want0 - 1 ))   # same minute as the last run: overwritten
+[[ $(ls "$many" | wc -l | tr -d ' ') == "$want0" ]] || { echo "KEEP=0 left $(ls "$many" | wc -l), want $want0"; exit 1; }
+KEEP=08 scripts/backup.sh "$tmp/data" "$many" >/dev/null || { echo "KEEP=08 failed"; exit 1; }
+[[ $(ls "$many" | wc -l | tr -d ' ') == 8 ]] || { echo "KEEP=08 left $(ls "$many" | wc -l) archives"; exit 1; }
 mkdir "$tmp/badkeep"
-if KEEP=abc scripts/backup.sh "$tmp/data" "$tmp/badkeep" 2>/dev/null; then echo "should fail with KEEP=abc"; exit 1; fi
-[[ -z $(ls -A "$tmp/badkeep") ]] || { echo "KEEP=abc wrote: $(ls -A "$tmp/badkeep")"; exit 1; }
+for bad in abc 1234567; do
+  if KEEP=$bad scripts/backup.sh "$tmp/data" "$tmp/badkeep" 2>/dev/null; then echo "should fail with KEEP=$bad"; exit 1; fi
+done
+[[ -z $(ls -A "$tmp/badkeep") ]] || { echo "a bad KEEP wrote: $(ls -A "$tmp/badkeep")"; exit 1; }
+
+# The archive just written is never rotated away, even when the clock is behind older names.
+future="$tmp/future"; mkdir "$future"
+touch "$future/hub-29990101-0000.tar.gz"
+fresh=$(KEEP=1 scripts/backup.sh "$tmp/data" "$future")
+[[ -f "$fresh" ]] || { echo "KEEP=1 deleted the new archive"; exit 1; }
 echo "backup.sh ok"
 
 arch=$out

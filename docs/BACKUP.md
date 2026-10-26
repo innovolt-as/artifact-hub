@@ -47,9 +47,9 @@ Decide for yourself whether that is good enough. If it isn't, keep a copy somewh
    Keep that folder on an encrypted disk (FileVault on macOS, LUKS/BitLocker elsewhere) and remember the copy holds the same plain-text data.
 2. **Encrypt before sending anywhere.** With [age](https://age-encryption.org) and a key pair whose private key is *not* on the server:
    ```bash
-   age -r age1yourpublickey... -o hub-20261026-0315.tar.gz.age hub-20261026-0315.tar.gz
+   age -r age1yourpublickey... -o backups/hub-YYYYMMDD-HHMM.tar.gz.age backups/hub-YYYYMMDD-HHMM.tar.gz
    ```
-   The `.age` file can go to any storage; only the private key can open it. `gpg --encrypt --recipient you@example.com` works the same way.
+   The `.age` file can go to any storage; only the private key can open it (`age -d -i key.txt -o hub.tar.gz hub.tar.gz.age`). With gpg instead: `gpg --encrypt --recipient you@example.com --output backups/hub-YYYYMMDD-HHMM.tar.gz.gpg backups/hub-YYYYMMDD-HHMM.tar.gz`.
 3. **Use [restic](https://restic.net)**, which encrypts on the server before anything leaves it and keeps deduplicated snapshots, to an SFTP box, Backblaze B2 or any S3 storage:
    ```bash
    restic -r sftp:user@backup-host:/hub init
@@ -60,8 +60,8 @@ Decide for yourself whether that is good enough. If it isn't, keep a copy somewh
 ## Restoring
 
 1. `docker compose stop hub`
-2. Unpack the archive into `data/` (it has `hub.db` and `artifacts/` at the top): `tar xzf backups/hub-YYYYMMDD-HHMM.tar.gz -C data`
-3. Remove `data/hub.db-wal` and `data/hub.db-shm` if they exist.
-4. `docker compose up -d`
+2. Move the current data aside, so nothing newer than the backup is mixed in: `mv data/hub.db data/hub.db.old && mv data/artifacts data/artifacts.old`, and remove `data/hub.db-wal` and `data/hub.db-shm` if they exist.
+3. Unpack the archive into `data/` (it has `hub.db` and `artifacts/` at the top): `tar xzf backups/hub-YYYYMMDD-HHMM.tar.gz -C data`
+4. `docker compose up -d`, check the hub, and delete the `.old` copies when you are happy.
 
 To try a backup without touching the running hub, use `scripts/rehearse.sh` (see `docs/UPGRADING.md`).
