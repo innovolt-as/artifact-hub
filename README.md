@@ -28,6 +28,8 @@ Caddy står foran appen og henter HTTPS-sertifikat for domenet i `DOMAIN` (i `.e
 
 Oppgradere en kjørende hub: se [docs/UPGRADING.md](docs/UPGRADING.md) (backup først, så fast tag i `docker-compose.override.yml`).
 
+Backup: se [docs/BACKUP.md](docs/BACKUP.md) (nattlig backup med cron, hva en backup inneholder, og hvorfor den bør krypteres før den flyttes et annet sted).
+
 Alt som skal overleve (artifacts + SQLite) ligger i `./data`. Sertifikatene ligger i volumet `caddy_data`.
 
 ## E-post

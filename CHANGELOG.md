@@ -6,12 +6,14 @@
 
 - The default language is now English. Set `HUB_LANG=nb` in `.env` to keep the Norwegian interface. An unknown `HUB_LANG` stops the hub at startup.
 - `mail.send` now takes `html`, `images` and `sender_name` too. A custom mail provider with the old 3-argument `send(to, subject, text)` raises `TypeError`: the user sees "check your e-mail" and nothing arrives. Update it before upgrading.
+- `scripts/backup.sh` now keeps only the newest 14 `hub-YYYYMMDD-HHMM.tar.gz` archives in its output folder and deletes older ones after each run. Move archives you want to keep, or run it with `KEEP=0`.
 
 ### New
 
 - `HUB_LANG` and `app/lang/`: all user-visible text lives in language files (`en.json`, `nb.json`). See "Adding a language" in `CONTRIBUTING.md`.
 - HTML login e-mail with the hub icon.
 - `SITE_NAME` is used as the sender name when `SMTP_FROM` is only an address.
+- `scripts/backup.sh` writes owner-only archives and keeps the newest `KEEP` (default 14). `docs/BACKUP.md` covers nightly backups with cron, what a backup contains, the weakness of keeping it on the same server, and how to keep an encrypted copy elsewhere.
 
 ### Changed
 
