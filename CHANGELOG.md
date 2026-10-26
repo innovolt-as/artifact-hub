@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Before you upgrade
+
+- The hub no longer starts while `SECRET_KEY` or `UPLOAD_TOKEN` still has the example value from `.env.example` (anything starting with `change-me`). Set both to long random strings first, for example with `python3 -c "import secrets; print(secrets.token_hex(32))"`. A new `SECRET_KEY` logs everyone out.
+
+### Changed
+
+- The upload token is compared in constant time.
+- The hub logs a warning at startup when `SECRET_KEY` is not set. It then uses a random key, so everyone is logged out at every restart.
+- `.env.example` leaves `UPLOAD_TOKEN` empty, which turns token uploads off.
+- `requirements.txt` pins every dependency, generated from `requirements.in`, so an image built from a tag always gets the same packages.
+- CI runs `ruff check .`.
+- The README and `docs/UPGRADING.md` are in English. The README describes the security model; details on apps and the Claude connector moved to `docs/APPS.md` and `docs/CONNECTOR.md`.
+
+### Removed
+
+- `scripts/build-and-push.sh`. Release images are built by the `build` workflow from `v*` tags.
+
 ## v1.1.0 (2026-10-26)
 
 ### Before you upgrade
@@ -25,8 +44,6 @@
 
 - `DOMAIN` must be set in `.env` (e.g. `DOMAIN=apps.example.com`). The Caddyfile no longer has a hard-coded hostname and `docker compose` refuses to start `caddy` without it.
 - `docker-compose.yml` now builds the image locally by default (`build: .`). If you run a published image, pin it in `docker-compose.override.yml` **before** updating the compose file, or `up` will start building instead of pulling.
-
-See `docs/UPGRADING.md` for the step-by-step procedure. It is written in Norwegian for now.
 
 ### New
 

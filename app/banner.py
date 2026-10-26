@@ -19,7 +19,7 @@ from app import i18n
 CSS_HOST = (
     "<style>hub-banner{all:initial !important;display:block !important;position:relative !important;"
     "z-index:20 !important;"
-    # full width even when the app pads <body> (e.g. Lommeomregner)
+    # full width even when the app pads <body>
     "margin:0 calc(50% - 50vw) !important;"
     "padding-top:env(safe-area-inset-top) !important;color:#f3f6fb !important;"
     "font:600 14px/1.2 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif !important;"

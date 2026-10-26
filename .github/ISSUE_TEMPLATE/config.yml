@@ -1,0 +1,4 @@
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/innovolt-as/artifact-hub/security/advisories/new
+    about: Please report security issues privately, not as a public issue. See SECURITY.md.

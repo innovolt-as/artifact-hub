@@ -13,4 +13,4 @@ We aim to reply within 7 days.
 
 In scope: everything under `app/`.
 
-Out of scope: apps hosted on the same hub can reach each other's data for the same logged-in user. This is a known limitation and is documented in the README.
+Out of scope: apps on a hub run with the visitor's login, so an app can reach that person's data in other apps, and an app opened by an admin can act as that admin. That is how the hub works, not a bug; see the [security model](README.md#security-model).

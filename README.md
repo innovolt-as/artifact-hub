@@ -1,262 +1,156 @@
 # Artifact Hub
 
-Liten FastAPI-app som hoster Claude-artifacts (HTML-sider og små apper) bak innlogging med magisk lenke.
+A small self-hosted home for the HTML pages and little apps you make with Claude. It puts them behind a login on
+your own domain, lets you open them from your phone's home screen, and lets you share some of them with a few people.
 
-- **Forside** på `/` – appene brukeren selv har valgt, blant dem de har tilgang til
-- **Artifacts** serveres på `/a/<slug>/` (bare for innloggede)
-- **Admin** på `/admin` – drag-and-drop-opplasting, slett, tilgang per app (alle, bestemte personer eller bare meg),
-  inviter og fjern personer, endre navn/adresse og ikon (bilde eller emoji)
-- **Statistikk** på `/admin/stats` – siste 7 dager: aktive brukere, åpninger, mest brukte apper (med hvem) og hva
-  hver bruker har åpnet. Admin telles ikke med. Bygger på åpningene huben logger for «Mest brukt».
-- **`scripts/push.sh`** – last opp fra terminalen uten å logge inn
-- **Claude-connector** på `/mcp` – publiser og oppdater apper rett fra en samtale i claude.ai (også i mobilappen)
-- **Lagring for artifacts** – artifacts fra claude.ai som bruker `window.claude.use("db")` fungerer uendret (se under)
-- **Lenkekort** (`*.link.json`) for apper som kjører for seg selv, på en egen adresse – legges til og redigeres i `/admin`, kan merkes `admin_only`
+Artifacts that save data with `window.claude.use("db")` keep working: the hub stores that data per user in SQLite.
+A [Claude connector](docs/CONNECTOR.md) lets you publish and edit apps from a conversation in claude.ai, including
+the mobile app.
 
-## Oppsett på serveren
+It is one FastAPI process with SQLite and plain files, behind Caddy, meant for one person or a small group.
+
+## What it does
+
+- **Login** with a magic link by e-mail, or with a password if you would rather not set up SMTP.
+- **A front page per user.** People pick the apps they want from the ones they can see; favourites and the most
+  used come first. It works as a home-screen app on iOS and Android.
+- **An admin page** (`/admin`): drag-and-drop upload of `.html` files or zipped folders, access per app, inviting
+  people, titles and icons, and who used what in the last 7 days.
+- **Uploads** from the browser, from the terminal (`scripts/push.sh`) or from Claude.
+- **Versions.** The last 10 versions of every app are kept when it is replaced.
+- **Link cards** for apps that run somewhere else, next to the hosted ones.
+- **English or Norwegian** interface (`HUB_LANG`). Another language is one JSON file.
+
+## Try it locally
+
+```bash
+docker run --rm -p 8000:8000 -e ADMIN_EMAILS=you@example.com ghcr.io/innovolt-as/artifact-hub
+```
+
+Open http://localhost:8000 and log in as `you@example.com`. Without SMTP the login link is printed in the
+container's output. Drop an `.html` file on `/admin` to publish it. Everything is gone when the container stops.
+
+## Running it on a server
+
+You need a server with Docker and Compose, a domain with an A record pointing at the server, and ports 80 and 443
+open.
 
 ```bash
 git clone https://github.com/innovolt-as/artifact-hub.git && cd artifact-hub
-cp .env.example .env            # fyll inn SECRET_KEY, e-poster, UPLOAD_TOKEN, SMTP
-mkdir -p data/artifacts         # data/ er ikke i git
+cp .env.example .env    # then fill it in, see below
 docker compose up -d
 ```
 
-Caddy står foran appen og henter HTTPS-sertifikat for domenet i `DOMAIN` (i `.env`) automatisk
-(krever A-record mot serveren og åpne porter 80/443). Valgfritt eget utseende: legg `logo.svg`,
-`favicon-32.png` og `apple-touch-icon.png` i `data/branding/`.
+Compose builds the image and runs it behind [Caddy](https://caddyserver.com), which gets and renews the HTTPS
+certificate for `DOMAIN`. Everything worth keeping is in `./data` (the SQLite database and the apps); the
+certificates are in the `caddy_data` volume.
 
-Oppgradere en kjørende hub: se [docs/UPGRADING.md](docs/UPGRADING.md) (backup først, så fast tag i `docker-compose.override.yml`).
+To run a published image instead of building it, and for upgrades, see [docs/UPGRADING.md](docs/UPGRADING.md).
+For backups, see [docs/BACKUP.md](docs/BACKUP.md).
 
-Backup: se [docs/BACKUP.md](docs/BACKUP.md) (nattlig backup med cron, hva en backup inneholder, og hvorfor den bør krypteres før den flyttes et annet sted).
+### Configuration
 
-Alt som skal overleve (artifacts + SQLite) ligger i `./data`. Sertifikatene ligger i volumet `caddy_data`.
+All settings live in `.env`. [`.env.example`](.env.example) lists them with a comment each. These you have to set:
 
-## E-post
+| Setting | |
+|---|---|
+| `DOMAIN`, `BASE_URL` | The hostname Caddy serves, and the public URL (`https://` + `DOMAIN`). |
+| `SECRET_KEY` | Signs login cookies: `python3 -c "import secrets; print(secrets.token_hex(32))"`. |
+| `ADMIN_EMAILS` | Who sees `/admin` and every app. |
+| `SMTP_*` | Sends the magic links; any SMTP service works. With `SMTP_HOST` empty the links go to the log (`docker compose logs -f hub`). |
 
-Magiske lenker sendes via SMTP. Resend, Postmark, Brevo, Gmail app-passord – alt med SMTP fungerer.
-Lar du `SMTP_HOST` stå tom, printes lenken i loggen (`docker compose logs -f hub`) – greit for testing.
-Vil du slippe SMTP helt, se «Innlogging med passord» under «Tilgang».
+`UPLOAD_TOKEN` is only needed for `scripts/push.sh`. The hub will not start while `SECRET_KEY` or `UPLOAD_TOKEN`
+still has the example value from `.env.example`.
 
-## Bygge og pushe image lokalt
+To use your own logo and icons, put `logo.svg`, `favicon-32.png` and `apple-touch-icon.png` in `data/branding/`.
+
+## Who can log in and see what
+
+These people can log in:
+
+- everyone in `ADMIN_EMAILS`;
+- people invited under *People* on the admin page;
+- addresses in `ALLOWED_EMAILS` and domains in `ALLOWED_DOMAINS`. `ALLOWED_DOMAINS=*` lets in anyone with an
+  e-mail address.
+
+Anyone else who asks for a link is told to check their e-mail, but nothing is sent, so the form does not reveal who
+is on the list. A magic link works once, within 15 minutes, and a login lasts 30 days. There can be at most 3 open
+links per address, and 10 sent per IP address per hour.
+
+Each app has an access level, set on the admin page:
+
+- **Everyone who can log in.**
+- **Specific people.** Adding someone here also invites them.
+- **Only me**, which means only admins. Apps published from Claude start here.
+
+An app you are not allowed to see does not exist for you: it is in no list, and its address gives a 404. Removing
+a person on the admin page takes them off every app.
+
+### Password login
+
+Set `LOGIN_MODE=password` to log in with e-mail and password instead. No SMTP is needed.
+
+1. Give the first admin a password: `docker compose exec hub python -m app.passwd set you@example.com`.
+2. Invite people on the admin page with a temporary password and pass it on yourself. They choose their own
+   password the first time they log in.
+
+Passwords need at least 10 characters. After 10 wrong passwords for an address within 15 minutes, or 30 from one IP
+address within an hour, further attempts are refused. Setting a new password for someone lifts their block, and
+`docker compose restart hub` clears all of them. Changing a password does not log out other devices. In password
+mode `ALLOWED_DOMAINS=*` has no effect: only people with a password can log in.
+
+## Publishing apps
+
+**From the browser:** log in as an admin, open `/admin` and drop `.html` files, or a `.zip` with an `index.html`.
+
+**From the terminal**, with `UPLOAD_TOKEN` set on the server:
 
 ```bash
-GHCR_IMAGE=ghcr.io/<brukernavn>/artifact-hub ./scripts/build-and-push.sh
-# på serveren:
-docker compose pull && docker compose up -d
-```
-
-(Det ligger også en GitHub Actions-workflow i `.github/workflows/build.yml` som bygger og publiserer imaget fra `v*`-tagger.
-Pin taggen i `docker-compose.override.yml` på serveren – se [docs/UPGRADING.md](docs/UPGRADING.md).)
-
-## Laste opp artifacts
-
-**Fra nettleseren:** logg inn som admin → `/admin` → dra inn `.html`-filer eller en `.zip` med `index.html`.
-
-**Fra terminalen:**
-
-```bash
-# én gang:
-mkdir -p ~/.config && cat > ~/.config/artifact-hub.env <<EOF
-HUB_URL=https://apps.innovolt.no
-HUB_TOKEN=<samme som UPLOAD_TOKEN i .env>
+cat > ~/.config/artifact-hub.env <<EOF
+HUB_URL=https://apps.example.com
+HUB_TOKEN=<UPLOAD_TOKEN from the server's .env>
 EOF
 
-./scripts/push.sh chart.html
-./scripts/push.sh --private hemmelig.html
-./scripts/push.sh --slug budsjett --title "Budsjett 2026" fil.html
+scripts/push.sh chart.html
+scripts/push.sh --private notes.html          # only admins see it
+scripts/push.sh --slug budget --title "Budget 2026" file.html
 ```
 
-Samme filnavn/slug erstatter det som lå der fra før. Navn, ikon og privat-innstilling beholdes.
+**From Claude:** add `https://<your domain>/mcp` as a custom connector in claude.ai, then ask Claude to put an
+artifact in the hub. See [docs/CONNECTOR.md](docs/CONNECTOR.md).
 
-Galleriet sorteres alfabetisk på navn (æ, ø, å til slutt).
+An upload with the same name replaces the app and keeps its title, icon and access. You can also copy files
+straight into `data/artifacts/`; the hub reads the folder on every request.
 
-## Publisere fra Claude
+[docs/APPS.md](docs/APPS.md) covers the file layout, the storage APIs, the summary line on front-page cards and
+what the hub adds to every page.
 
-Huben er en custom connector (ekstern MCP-server med OAuth) for claude.ai på `https://apps.innovolt.no/mcp`.
+## Security model
 
-**Legg til én gang** (claude.ai i nettleser på en PC): Innstillinger → Connectors → Add custom connector → lim inn URL-en.
-Etter det finnes connectoren i alle samtaler, også i iPhone/Android-appen.
+Every app is served from the hub's own domain and runs with the visitor's login. That keeps apps simple (`fetch`
+just works, no tokens), but it means:
 
-**Innlogging:** claude.ai åpner huben. Logg inn med e-post (den magiske lenken åpnes i en ny fane – fortsett der),
-og trykk «Gi tilgang» på godkjenningssiden. Bare e-poster i `ADMIN_EMAILS` kan koble til; andre blir avvist.
+- an app can read and change the visitor's data in **every** app on the hub, not just its own. The per-app split
+  in the storage APIs keeps well-behaved apps apart; it does not stop a hostile one;
+- an app opened by an admin can do anything that admin can, such as uploading apps, changing access and inviting
+  people.
 
-| Verktøy | Gjør |
-|---|---|
-| `list_apps` | list alle apper og lenkekort (slug, tittel, hvem som har tilgang, redigerbar) |
-| `get_app` | hent HTML-en til en enkeltfils-app |
-| `create_app` | publiser en ny enkeltfils-app (`slug`, `html`, `title`, valgfritt `description`, `emoji`, `private`) |
-| `update_app` | erstatt hele HTML-en til en eksisterende app |
-| `edit_app` | små endringer: liste av `{old, new}`-utdrag, alt eller ingenting |
-| `update_app_info` | endre tittel, beskrivelse, emoji eller `private` uten å røre HTML-en |
+So only publish apps you trust. What does hold is the split between people: an app only ever sees the data of the
+person using it.
 
-Connectoren kan ikke slette apper. `update_app`/`edit_app` virker på enkeltfils-apper og på `index.html` i mappe-apper (de andre filene i mappen, som service worker og bilder, blir liggende). Lenkekort endres bare med `update_app_info`.
+Passwords, login links and connector tokens are stored as hashes. App data is stored as plain text. To report a
+vulnerability, see [SECURITY.md](SECURITY.md).
 
-Eksempler: «legg den i huben», «oppdater timelisten i huben», «gjør Timeliste synlig for alle».
+## Development
 
-**Data i appene:** `list_app_data`, `get_app_data`, `set_app_data` og `delete_app_data` leser og skriver de samme dokumentene som appen bruker via `window.claude.use("db")`, for brukeren bak koblingen (bare din egen data). Slik kan du for eksempel si «i dag spiste jeg …» i en samtale, og Claude fører det inn i Matboka.
-
-**Nye apper fra Claude er private** (bare admin ser dem) til du deler dem: tilgangsknappen («🔒 Bare meg») i
-`/admin`, eller be Claude sette `private: false` (da ser alle som kan logge inn den). Deling med bestemte personer
-gjøres i `/admin`. `private` endrer ikke en liste med personer; den blir liggende til «Bestemte personer» velges igjen.
-
-### Versjoner
-
-Ved hver erstatning (admin, `push.sh` og connector) lagres den gamle versjonen i
-`data/artifacts/.versions/<slug>/` – de 10 siste per app. Enkeltfiler lagres som `.html`, mappe-apper som `.zip`.
-Versjonene beholdes ved endring av adresse og når appen slettes.
-
-Legge tilbake en gammel versjon: kopier fila til `data/artifacts/<slug>.html`
-(for `.zip`: pakk ut i `data/artifacts/<slug>/`).
-
-### Trekke tilbake tilgang
-
-Fjern e-posten fra `ADMIN_EMAILS` og kjør `docker compose up -d` (sjekkes ved hvert kall etter omstart). Å slette
-radene i SQLite-tabellen `oauth_tokens` i `data/hub.db` (evt. også `oauth_codes`, `oauth_requests` og
-`oauth_clients`) virker med en gang.
-Dette gjelder Claude-koblingen. Innlogging på selve huben trekkes tilbake med «Fjern» under «Personer» i `/admin`
-(se [Tilgang](#tilgang)).
-
-### Tester
-
-`./scripts/test.sh` kjører testene i en `python:3.12-slim`-container (podman eller docker).
-
-## Filer i `data/artifacts/`
-
-| Fil | Betyr |
-|---|---|
-| `navn.html` | én-fils artifact → `/a/navn/` |
-| `navn/index.html` (+ assets) | app med flere filer → `/a/navn/` |
-| `navn.meta.json` / `navn/meta.json` | valgfritt: `{"title": "...", "description": "...", "emoji": "📈", "admin_only": true}`; tilgang for bestemte personer: `"access": "people", "people": ["a@b.no"]` |
-| `navn.link.json` | eksternt kort: `{"title": "...", "url": "https://...", "admin_only": true}` |
-| `.icons/navn.png` (eller .jpg/.webp/.gif/.svg) | ikon lastet opp i admin; `"emoji": "📈"` i meta brukes ellers |
-
-Du kan også bare `scp`/`rsync` filer rett inn i `data/artifacts/` – appen leser mappen ved hver visning.
-
-## Data per bruker for apper
-
-Artifacts kan lagre data for den innloggede brukeren gjennom et lite nøkkel/verdi-API. Hver rad hører til én
-e-post og ett app-navn, så brukere ser aldri hverandres data. Kallene gjøres med vanlig `fetch` fra artifacten
-(samme domene), så innloggings-cookien følger med automatisk. Dataene ligger i `hub.db` i `./data`.
-
-| Kall | Gjør |
-|---|---|
-| `GET /api/me` | `{"email", "admin"}`, eller 401 hvis ikke innlogget |
-| `GET /api/data/<app>?prefix=logs/` | alle nøkler for appen (valgfritt filtrert på prefiks) |
-| `GET /api/data/<app>/<nøkkel>` | én verdi, 404 hvis den ikke finnes |
-| `PUT /api/data/<app>/<nøkkel>` | lagre, body `{"value": <json>}` |
-| `DELETE /api/data/<app>/<nøkkel>` | slett |
-| `POST /api/data/<app>/_batch` | `{"set": {nøkkel: verdi}, "delete": [nøkler]}` i én transaksjon (import) |
-
-Skrivekall må ha `Content-Type: application/json`. Grenser: 512 KB per verdi, 5000 nøkler og 25 MB per bruker per app.
-App-navnet bør være artifactens slug, f.eks. `trening`.
-
-## Lagring for artifacts (`hub.js`)
-
-Artifacts laget på claude.ai lagrer data via `window.claude.use("db")`, som bare finnes på claude.ai.
-Huben legger derfor automatisk `<script src="/static/hub.js">` først i `<head>` på alle HTML-sider under
-`/a/`, og den gir en kompatibel `window.claude.use(...)`:
-
-| Capability | I huben |
-|---|---|
-| `db` | Lagres i SQLite på serveren, **privat per app og per innlogget bruker**. `collection/doc`, `get/set/update/delete`, `add`, `where/orderBy/limit`, `onSnapshot` (oppdateres hvert 5. sek fra andre faner/enheter) |
-| `downloads` | `save({filename, data})` blir en vanlig nedlasting |
-| `user` | Den innloggede e-posten. `isOwner()`/`canEdit()` er sant for admin |
-| alt annet (`sample`, `room`, `mcp`, …) | `null` – krever claude.ai |
-
-- Dataene følger med når en app får ny adresse, og blir liggende hvis appen slettes (kommer tilbake ved ny opplasting).
-- `GET /api/store/<slug>` gir alt du har lagret i én app som JSON – greit som sikkerhetskopi.
-
-## Forsiden
-
-- **Hver bruker velger sine apper.** En ny bruker får et stort «Legg til apper»-kort. Det åpner listen «Velg apper»
-  med alle appene brukeren har tilgang til; huk av for å legge til, ta bort haken for å fjerne (lagres med en
-  gang). Etterpå åpner den lille knappen «＋ Legg til eller fjern apper» nederst den samme listen.
-- **Nye apper** havner ikke på forsiden av seg selv. De står øverst i listen merket «Ny», og den lille knappen
-  får en prikk, til brukeren har åpnet listen. Første gang listen åpnes er ingenting «Ny».
-- **Admin** fikk alle appene som fantes da dette kom på, og nye apper (opplasting, `push.sh`, Claude, lenkekort)
-  legges rett på admins forside. Erstatter du en app, kommer den ikke tilbake hvis du har fjernet den.
-- Tar man en app av forsiden, beholdes stjerna og besøkene; mister man tilgangen, forsvinner den til tilgangen
-  kommer tilbake. Får appen ny adresse, følger valget med.
-- **Favoritter** øverst: alle appene brukeren har lagt til i favoritter (★ i kortvisning, eller hold inne /
-  høyreklikk på ikonet), uansett antall, i den rekkefølgen de ble lagt til.
-- **Mest brukt** under: brukerens 4 mest åpnede apper siste 30 dager som ikke er favoritter (huben logger
-  åpninger av `/a/<slug>/`, og eksterne lenkekort via `/go/<slug>`). Besøk eldre enn 90 dager slettes.
-- **Ikoner eller kort**: bryteren øverst til høyre. Valget lagres på kontoen.
-- **Blå prikk**: appen er endret siden du sist åpnet den.
-- Kan legges på hjemskjermen («Legg til på Hjem-skjerm») og åpnes da uten adresselinje.
-- **Dra ned for å oppdatere** (`static/pull.js`): som hjemskjermapp mangler iOS dette, så huben legger det inn
-  på egne sider og i alle apper. Det virker bare når siden står øverst. Det virker ikke mens du skriver i et
-  felt, ikke på noe som ligger fast (ark, menyer, tab-barer) og ikke i et område som ruller for seg selv og
-  ikke står øverst. I en vanlig nettleserfane gjør det ingenting, siden nettleseren har sitt eget.
-- Forsiden laster seg selv på nytt når du kommer tilbake til den etter mer enn 5 minutter.
-
-### Sammendrag på kortene
-
-En app kan vise én linje på kortet sitt (kortvisning). Appen skriver dokumentet `hub/summary`:
-
-```js
-const db = await window.claude.use("db");
-await db.doc("hub/summary").set({ text: "4-roms oslo 93 ▼1" });
+```bash
+scripts/test.sh          # the test suite in python:3.12-slim (podman or docker)
+tests/test_scripts.sh    # the shell scripts
+ruff check .
 ```
 
-Apper som bruker `/api/data/<slug>` skriver nøkkelen `hub/summary` med `{"value": {"text": "..."}}`.
-Teksten er per bruker, kuttes til 140 tegn og vises som ren tekst. Uten sammendrag står kortet uten linje.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Banneret i appene
+## License
 
-Øverst i hver app setter huben inn en mørkeblå stripe: «‹ [logo] | 🥗 Appnavn». Hele stripa lenker til
-forsiden, og den ruller bort med siden. Den settes inn når siden serveres (`app/banner.py`), så appene
-trenger ikke å gjøre noe. Den ligger i et eget shadow DOM, slik at appens CSS ikke påvirker den og den ikke
-påvirker appen.
-Den kommer bare på sider nettleseren åpner, ikke på HTML som en app henter med `fetch()` eller viser i en
-iframe. Den vises heller ikke ved utskrift.
-
-Knappen «▭ banner» i `/admin` slår stripa av for én app. Det lagres som `"banner": false` i appens meta
-og beholdes ved ny opplasting.
-
-Et lite skript rett bak stripa flytter den ut av `<body>`, så flex- eller grid-oppsett på `body` ikke flytter
-den. Skriptet trekker den også opp over eventuell luke over seg, for eksempel safe-area-padding på `:root`. Uten
-JS står stripa der serveren satte den. Slå av stripa for apper som har **fast topplinje** (`position: fixed;
-top: 0`), for da dekker stripa topplinjen til du ruller. Det samme gjelder apper som **ikke ruller**
-(`html, body { height: 100%; overflow: hidden }`), for da blir bunnen av appen kuttet.
-
-## Tilgang
-
-Hvem som ser en app, velges med tilgangsknappen per app i `/admin` (lagres i appens meta, beholdes ved ny opplasting):
-
-- **🌍 Alle** – alle som kan logge inn
-- **👥 Bestemte personer** – e-postene du krysser av eller skriver inn. De blir samtidig invitert (kan logge inn).
-  Listen huskes om du bytter nivå, og gjelder bare så lenge «Bestemte personer» er valgt.
-- **🔒 Bare meg** – bare admin (`admin_only`)
-
-En app man ikke har tilgang til, finnes ikke for en: den står ikke i noen liste, og lenker og ikon gir 404.
-
-Hvem som kan logge inn:
-
-- `ADMIN_EMAILS` – ser admin-siden og alle apper
-- **«Personer» i `/admin`** – inviter en e-post for å slippe den inn uten å endre serveroppsettet. De ser
-  «Alle»-appene og appene de står på. «Fjern» tar bort invitasjonen og tar personen av alle app-listene; er de
-  innlogget, ser de etterpå bare «Alle»-appene. Å fjerne noen fra én app stenger dem ikke ute.
-- `ALLOWED_EMAILS` / `ALLOWED_DOMAINS` – kan logge inn som før (vises under «Personer» som «fra serveroppsettet»)
-- `ALLOWED_DOMAINS=*` – alle med en e-postadresse kan logge inn (åpen side bak innlogging)
-- Maks 3 aktive lenker per e-post og 10 utsendelser per IP per time, så skjemaet ikke kan brukes til spam
-- Alle andre får «sjekk e-posten din», men ingen e-post sendes (lekker ikke hvem som er på listen)
-
-Magisk lenke er gyldig i 15 minutter og kan brukes én gang. Innlogging varer 30 dager.
-
-### Innlogging med passord
-
-`LOGIN_MODE` i `.env` velger hvordan folk logger inn. `magic-link` (standard) sender en innloggingslenke på e-post og krever SMTP. `password` bruker e-post og passord og trenger ingen SMTP.
-
-1. Sett `LOGIN_MODE=password` i `.env` og kjør `docker compose up -d`.
-2. Gi den første admin et passord på kommandolinjen: `docker compose exec hub python -m app.passwd set you@example.com`. `python -m app.passwd list` viser hvem som har passord. Hubben logger en advarsel ved oppstart hvis ingen admin har passord ennå.
-3. Logg inn som admin og inviter folk under «Personer» i `/admin`: du skriver inn e-post og et midlertidig passord, og gir det videre selv. «Nytt midlertidig passord» ved hver person lager et nytt, for eksempel hvis noen har glemt sitt.
-4. Ved første innlogging med et midlertidig passord må personen velge sitt eget passord før noe annet.
-5. Passord må ha minst 10 tegn, både midlertidige og selvvalgte. Kommandolinjen lager et midlertidig passord med `python -m app.passwd set you@example.com --temporary`.
-
-Alle kan bytte sitt eget passord senere via «Bytt passord» (`/password`).
-
-Mot gjetting stenges innlogging etter 10 feil per e-post på 15 minutter, og etter 30 feil per IP på en time. Å sette et nytt passord (kommandolinjen eller «Nytt midlertidig passord») opphever sperren for den e-posten, og `docker compose restart hub` nullstiller alle tellere.
-
-Å bytte passord logger ikke ut andre enheter; de som allerede er innlogget, forblir det til innloggingen utløper. `ALLOWED_DOMAINS=*` har ingen effekt i passord-modus: bare de som har et passord (satt via invitasjon eller kommandolinjen) kan logge inn, og de må i tillegg være tillatt via `ADMIN_EMAILS`, `ALLOWED_EMAILS` / `ALLOWED_DOMAINS` eller en invitasjon.
+[MIT](LICENSE). Artifact Hub is an independent project and is not affiliated with Anthropic.
