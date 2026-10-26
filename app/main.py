@@ -114,7 +114,6 @@ app.mount("/static", BrandedStatic(directory=BASE_DIR / "static"), name="static"
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["pw_mode"] = lambda: password_mode()
 templates.env.globals.update(t=i18n.t, t_html=i18n.t_html, tn=i18n.tn, raw=i18n.raw, lang=lambda: i18n.LANG)
-templates.env.filters["strftime"] = lambda ts: time.strftime("%d.%m.%Y %H:%M", time.localtime(ts))
 signer = URLSafeTimedSerializer(SECRET_KEY, salt="session")
 
 
@@ -340,7 +339,7 @@ def require_user(request: Request) -> str:
 def require_admin(request: Request) -> str:
     user = require_user(request)
     if not is_admin(user):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise HTTPException(status_code=403, detail=i18n.t("err.admin_only"))
     return user
 
 
@@ -760,9 +759,9 @@ def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool) -> H
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
     and the hub banner right after <body> unless the app has it turned off."""
     html = path.read_text("utf-8", errors="replace")
-    strings = '<script type="application/json" id="__hub_strings">{}</script>'.format(htmlsafe_json_dumps(i18n.js("js.hub.")))
-    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + strings + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
-        escape(slug), escape(user), "1" if is_admin(user) else "0"
+    strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
+    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-strings="{}"></script>'.format(
+        escape(slug), escape(user), "1" if is_admin(user) else "0", strings
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
     html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)

@@ -14,7 +14,7 @@ def test_build_nb():
               "Lenken virker i 15 minutter og kan brukes én gang.", "Virker ikke knappen?", f'href="{LINK}"',
               "cid:icon", "#123566", "#2f5fd1"):
         assert s in m.html
-    assert LINK in m.text and "15 minutter" in m.text and m.images == {"icon": ICON}
+    assert LINK in m.text and "15 minutter" in m.text and "Bruk lenken under for å logge inn." in m.text and "knappen" not in m.text and m.images == {"icon": ICON}
 
 
 def test_build_en():
@@ -22,7 +22,7 @@ def test_build_en():
     assert m.subject == "Log in to Innovolt apps"
     for s in ("Hi!", ">Log in<", "15 minutes", f'href="{LINK}"'):
         assert s in m.html
-    assert "15 minutes" in m.text and LINK in m.text
+    assert "15 minutes" in m.text and LINK in m.text and "Use the link below to log in." in m.text and "button" not in m.text
     assert_no_norwegian(m.html)
     assert_no_norwegian(m.text)
 

@@ -16,9 +16,9 @@
   const ADMIN = me.dataset.admin === "1";
   const API = `/api/store/${encodeURIComponent(SLUG)}`;
   const POLL_MS = 5000;
-  // Texts come from the hub's language files as a JSON block right before this script; without it the key shows.
+  // Texts come from the hub's language files as data-strings on this script tag; without them the key shows.
   let S = {};
-  try { S = JSON.parse(document.getElementById("__hub_strings").textContent); } catch (e) { /* use the keys */ }
+  try { S = JSON.parse(me.dataset.strings); } catch (e) { /* use the keys */ }
   const fmt = (s, vars) => s.replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? vars[k] : m));
   const tr = (key, vars) => fmt(S[key] || key, vars);
 

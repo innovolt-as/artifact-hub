@@ -21,7 +21,7 @@
 </section>
 
 <section class="card">
-  <h1>Artifacts</h1>
+  <h1>{{ t('admin.artifacts_heading') }}</h1>
   <table class="list">
     <tbody>
     {% for a in artifacts %}
@@ -119,8 +119,8 @@
       <span class="prefixed"><span class="muted">/a/</span><input name="new_slug" id="edSlug" maxlength="80" pattern="[a-z0-9][a-z0-9._\-]*"></span>
       <span class="muted small">{{ t("admin.edit_old_links") }}</span>
     </label>
-    <label id="edUrlRow">URL<input name="url" id="edUrl" type="url" placeholder="https://…"></label>
-    <label>Emoji<input name="emoji" id="edEmoji" maxlength="16" placeholder="{{ t('admin.emoji_placeholder') }}"></label>
+    <label id="edUrlRow">{{ t('admin.url_label') }}<input name="url" id="edUrl" type="url" placeholder="https://…"></label>
+    <label>{{ t('admin.emoji_label') }}<input name="emoji" id="edEmoji" maxlength="16" placeholder="{{ t('admin.emoji_placeholder') }}"></label>
     <label>{{ t("admin.image") }}<input type="file" name="icon" id="edIcon" accept=".png,.jpg,.jpeg,.webp,.gif,.svg"></label>
     <label class="check" id="edRemoveRow"><input type="checkbox" name="remove_icon" id="edRemove" value="true"> {{ t("admin.remove_image") }}</label>
     <p id="edError" class="err small"></p>
@@ -139,7 +139,7 @@ const T = {
   errorStatus: {{ raw("admin.error_status")|tojson }},
   validEmail: {{ raw("admin.valid_email")|tojson }},
   invitedNote: {{ raw("admin.invited_note")|tojson }},
-  ok: "OK",
+  ok: {{ raw("admin.ok")|tojson }},
   pwSet: {{ raw("admin.pw_set_msg")|tojson }},
   confirmRemove: {{ raw("admin.confirm_remove")|tojson }},
 };

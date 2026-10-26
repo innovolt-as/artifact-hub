@@ -1,4 +1,5 @@
 """Messages to the apps (hub.js), to Claude (connector), the consent page and the password CLI."""
+import html
 import io
 import json
 import re
@@ -15,9 +16,9 @@ def _no_norwegian_text(s: str) -> None:
 
 
 def _strings_block(body: str) -> dict:
-    m = re.search(r'<script type="application/json" id="__hub_strings">(.*?)</script>', body, re.S)
-    assert m, "no __hub_strings block"
-    return json.loads(m.group(1))
+    m = re.search(r'<script src="/static/hub.js"[^>]* data-strings="([^"]*)"', body)
+    assert m, "no data-strings on the hub.js tag"
+    return json.loads(html.unescape(m.group(1)))
 
 
 def test_hub_strings_on_app_pages_are_script_safe(admin_client, make_page, monkeypatch):
@@ -25,7 +26,8 @@ def test_hub_strings_on_app_pages_are_script_safe(admin_client, make_page, monke
     monkeypatch.setattr(i18n, "js", lambda prefix: {"x": "</script><b>"})
     body = admin_client.get("/a/p/").text
     assert "</script><b>" not in body
-    assert body.index("__hub_strings") < body.index("/static/hub.js")
+    assert _strings_block(body) == {"x": "</script><b>"}
+    assert 'id="__hub_strings"' not in body
 
 
 def test_hub_js_strings_nb(admin_client, make_page):
@@ -48,7 +50,7 @@ def test_hub_js_strings_en(admin_client, make_page, english):
 
 def test_hub_js_reads_block_and_falls_back_to_key():
     src = open("app/static/hub.js", encoding="utf-8").read()
-    assert "__hub_strings" in src
+    assert "dataset.strings" in src and "__hub_strings" not in src
     assert not re.search(r"Nettverksfeil|Ikke innlogget|må være satt|Ugyldig|Ukjent|Feil \$", src)
 
 
@@ -66,7 +68,7 @@ def test_connector_messages_en(mcp, token, english, hub):
     res = call(mcp, token, "edit_app", slug="hei", edits=[{"old": "Hei", "new": "Yo"}])
     assert text(res) == "Edited (1 edit): https://hub.test/a/hei/"
     assert text(call(mcp, token, "update_app", slug="hei", html=PAGE)) == "Updated: https://hub.test/a/hei/"
-    assert text(call(mcp, token, "update_app_info", slug="hei", title="X")) == "Updated info for «hei»."
+    assert text(call(mcp, token, "update_app_info", slug="hei", title="X")) == 'Updated info for "hei".'
     for slug_call in (call(mcp, token, "update_app", slug="nope", html=PAGE),
                       call(mcp, token, "update_app", slug="hei", html="just text"),
                       call(mcp, token, "create_app", slug="Bad Slug", html=PAGE, title="x"),

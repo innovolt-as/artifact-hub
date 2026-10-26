@@ -105,7 +105,7 @@ def test_link_and_edit_errors_en(hub, make_page, admin_client, english):
     post = admin_client.post
     assert _detail(post("/api/link", data={"title": "T", "url": "nope"})) == "URL must start with https:// and be a valid address"
     assert _detail(post("/api/link", data={"title": "  ", "url": "https://x.no/"})) == "The link needs a name"
-    assert _detail(post("/api/link", data={"title": "p", "url": "https://x.no/"})) == "There is already something called «p»"
+    assert _detail(post("/api/link", data={"title": "p", "url": "https://x.no/"})) == 'There is already something called "p"'
     assert _detail(post("/api/edit", data={"slug": "p"}, files={"icon": ("a.txt", b"x")})) == "The icon must be PNG, JPG, WebP, GIF or SVG"
     big = b"x" * (main.MAX_ICON_BYTES + 1)
     assert _detail(post("/api/edit", data={"slug": "p"}, files={"icon": ("a.png", big)})) == "The icon can be 2 MB at most"

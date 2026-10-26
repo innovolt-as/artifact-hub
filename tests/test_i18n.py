@@ -22,6 +22,25 @@ def test_resolve():
         i18n.resolve("xx")
 
 
+def test_resolve_matches_file_names_with_capitals(tmp_path, monkeypatch):
+    (tmp_path / "pt-BR.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(i18n, "LANG_DIR", tmp_path)
+    assert i18n.resolve("pt-BR") == i18n.resolve("pt-br") == "pt-BR"
+
+
+def test_broken_language_file_stops_at_load(tmp_path, monkeypatch):
+    (tmp_path / "en.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "xx.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(i18n, "LANG_DIR", tmp_path)
+    i18n._load.cache_clear()
+    try:
+        with pytest.raises(SystemExit, match=r"xx\.json"):
+            i18n.resolve_and_load("xx")
+        assert i18n.resolve_and_load("en") == "en"
+    finally:
+        i18n._load.cache_clear()
+
+
 def test_nb_and_en_have_the_same_keys_and_types():
     f = _files()
     assert f["nb"].keys() == f["en"].keys()

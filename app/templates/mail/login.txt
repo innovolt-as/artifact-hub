@@ -1,6 +1,6 @@
 {{ t("mail.greeting") }}
 
-{{ t("mail.line") }}
+{{ t("mail.text_line") }}
 
 {{ link }}
 

@@ -22,19 +22,31 @@ def available() -> list[str]:
 
 
 def resolve(value: str | None) -> str:
-    lang = (value or "").strip().lower() or DEFAULT
-    lang = ALIASES.get(lang, lang)
-    if lang not in available():
+    v = (value or "").strip().lower() or DEFAULT
+    stems = {s.lower(): s for s in available()}
+    lang = stems.get(ALIASES.get(v, v))
+    if lang is None:
         raise SystemExit(f"HUB_LANG must be one of: {', '.join(available())} (got '{value}')")
     return lang
-
-
-LANG = resolve(os.environ.get("HUB_LANG"))
 
 
 @functools.cache
 def _load(lang: str) -> dict:
     return json.loads((LANG_DIR / f"{lang}.json").read_text(encoding="utf-8"))
+
+
+def resolve_and_load(value: str | None) -> str:
+    """resolve() plus a load of the chosen file and English, so a broken file stops the hub at startup."""
+    lang = resolve(value)
+    for name in (lang, DEFAULT):
+        try:
+            _load(name)
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"Language file {name}.json cannot be read: {e}")
+    return lang
+
+
+LANG = resolve_and_load(os.environ.get("HUB_LANG"))
 
 
 def _get(lang: str, key: str):

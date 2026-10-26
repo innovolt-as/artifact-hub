@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import smtplib
 from email.message import EmailMessage
-from email.utils import formataddr, parseaddr
+from email.utils import formataddr, formatdate, make_msgid, parseaddr
 
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
@@ -38,12 +38,19 @@ def sender(sender_name: str | None) -> str:
     return formataddr((sender_name, address))
 
 
+def _domain() -> str:
+    address = parseaddr(SMTP_FROM)[1]
+    return address.rpartition("@")[2] if "@" in address else "localhost"
+
+
 def build_message(to: str, subject: str, text: str, html: str | None = None,
                   images: dict[str, bytes] | None = None, sender_name: str | None = None) -> EmailMessage:
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = sender(sender_name)
     msg["To"] = to
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=_domain())
     msg.set_content(text)
     if html:
         msg.add_alternative(html, subtype="html")

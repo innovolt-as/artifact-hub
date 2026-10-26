@@ -130,3 +130,11 @@ def test_send_passes_html_and_sender(monkeypatch):
     monkeypatch.setattr(FakeSMTP, "send_message", lambda self, m: sent.append(m))
     assert mail.send("a@b.no", "s", "t", html="<p>t</p>", sender_name="Hub") is True
     assert sent[0]["From"] == "Hub <hub@x>" and sent[0].get_content_type() == "multipart/alternative"
+
+
+def test_message_has_date_and_message_id(monkeypatch):
+    monkeypatch.setattr(mail, "SMTP_FROM", "Hub <hub@example.test>")
+    m = mail.build_message("a@b.no", "s", "b")
+    assert m["Date"] and m["Message-ID"].endswith("@example.test>")
+    monkeypatch.setattr(mail, "SMTP_FROM", "nodomain")
+    assert mail.build_message("a@b.no", "s", "b")["Message-ID"].endswith("@localhost>")

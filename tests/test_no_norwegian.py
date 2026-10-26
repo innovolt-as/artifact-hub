@@ -50,5 +50,5 @@ def _text_hits(path):
 
 def test_no_norwegian_outside_lang():
     hits = [h for p in _files(".py") for h in _py_hits(p)]
-    hits += [h for p in _files(".html", ".js") for h in _text_hits(p)]
+    hits += [h for p in _files(".html", ".js", ".txt") for h in _text_hits(p)]
     assert not hits, "Norwegian text outside app/lang/:\n" + "\n".join(hits)

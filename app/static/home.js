@@ -20,7 +20,6 @@
       return r.json();
     });
   const S = JSON.parse(document.getElementById("__hub_strings").textContent);
-  const fmt = (s, vars) => s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
   const failed = () => alert(S.save_failed);
 
   const now = new Date(), h = now.getHours();

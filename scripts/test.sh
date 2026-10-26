@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 RUNTIME=$(command -v podman || command -v docker || true)
-[ -n "$RUNTIME" ] || { echo "Trenger podman eller docker" >&2; exit 1; }
+[ -n "$RUNTIME" ] || { echo "Needs podman eller docker" >&2; exit 1; }
 
 mkdir -p .pip-cache
 exec "$RUNTIME" run --rm \

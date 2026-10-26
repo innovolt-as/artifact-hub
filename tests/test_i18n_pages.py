@@ -113,3 +113,9 @@ def test_home_js_strings_nb(admin_client):
 def test_home_js_strings_en(admin_client, english):
     s = _strings(admin_client.get("/").text)
     assert s["greet"][1] == "Good morning" and s["locale"] == "en-GB"
+
+
+def test_front_page_strings_block_is_script_safe(admin_client, monkeypatch):
+    from app import i18n
+    monkeypatch.setattr(i18n, "js", lambda prefix: {"x": "</script><b>"})
+    assert "</script><b>" not in admin_client.get("/").text
