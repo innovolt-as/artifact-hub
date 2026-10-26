@@ -1,28 +1,29 @@
 {% extends "base.html" %}
 {% from "_icon.html" import icon %}
-{% block title %}Statistikk · {{ site }}{% endblock %}
+{% block title %}{{ t("admin.tab_stats") }} · {{ site }}{% endblock %}
 {% block body %}
 {% with tab = 'stats' %}{% include "_admin_tabs.html" %}{% endwith %}
 <section class="card" id="stats">
-  <h1>Siste 7 dager</h1>
-  <p class="muted small">Hvor ofte appene åpnes. Samme app åpnet igjen innen 10 minutter teller som én gang. Admin er ikke med.</p>
+  <h1>{{ t("stats.last7") }}</h1>
+  <p class="muted small">{{ t("stats.hint") }}</p>
   {% if not stats.users %}
-  <p class="muted">Ingen har brukt appene de siste 7 dagene.</p>
+  <p class="muted">{{ t("stats.none") }}</p>
   {% else %}
   <div class="kpis">
-    <div class="kpi"><span>Aktive brukere</span><b>{{ stats.users|length }}</b></div>
-    <div class="kpi"><span>Åpninger</span><b>{{ stats.opens }}</b></div>
+    <div class="kpi"><span>{{ t("stats.active_users") }}</span><b>{{ stats.users|length }}</b></div>
+    <div class="kpi"><span>{{ t("stats.opens") }}</span><b>{{ stats.opens }}</b></div>
   </div>
 
-  <h2 class="sec">Mest brukte apper</h2>
+  <h2 class="sec">{{ t("stats.top_apps") }}</h2>
   <ul class="rank">
     {% for a in stats.apps %}
     {% set people = a.users|length %}
+    {% set people_text = tn('access.people', people) %}
     <li><details>
-      <summary title="{{ a.opens }} åpninger av {{ people }} {{ 'person' if people == 1 else 'personer' }}">
+      <summary title="{{ tn('stats.app_title', a.opens, people=people_text) }}">
         {% if a.app %}{{ icon(a.app, "icon icon-xs") }}<span class="name">{{ a.app.title }}</span>
-        {% else %}<span class="name muted">{{ a.slug }} (finnes ikke lenger)</span>{% endif %}
-        <span class="meta"><span class="who">{{ people }} {{ 'person' if people == 1 else 'personer' }}</span><span class="n">{{ a.opens }}</span></span>
+        {% else %}<span class="name muted">{{ t('stats.gone', slug=a.slug) }}</span>{% endif %}
+        <span class="meta"><span class="who">{{ people_text }}</span><span class="n">{{ a.opens }}</span></span>
         <span class="bar" aria-hidden="true"><i style="width: {{ a.width }}%"></i></span>
       </summary>
       <ul class="sub">
@@ -31,13 +32,13 @@
     </details></li>
     {% endfor %}
   </ul>
-  {% if idle %}<p id="idle" class="muted small">Ikke brukt: {{ idle|map(attribute='title')|join(', ') }}</p>{% endif %}
+  {% if idle %}<p id="idle" class="muted small">{{ t('stats.idle', apps=idle|map(attribute='title')|join(', ')) }}</p>{% endif %}
 
-  <h2 class="sec">Aktive brukere</h2>
+  <h2 class="sec">{{ t("stats.active_users") }}</h2>
   <ul class="rank">
     {% for u in stats.users %}
     <li><details>
-      <summary title="{{ u.opens }} åpninger, sist {{ u.ago }}">
+      <summary title="{{ tn('stats.user_title', u.opens, ago=u.ago) }}">
         <span class="name">{{ u.email }}</span>
         <span class="meta"><span class="who">{{ u.ago }}</span><span class="n">{{ u.opens }}</span></span>
       </summary>

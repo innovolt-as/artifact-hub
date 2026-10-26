@@ -1169,7 +1169,7 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
     stem, ext = os.path.splitext(filename)
     slug = _slugify(slug or stem)
     if not SLUG_RE.match(slug):
-        raise HTTPException(400, f"Ugyldig navn: {slug}")
+        raise HTTPException(400, i18n.t("err.invalid_name", name=slug))
     # a new version keeps the old name, emoji, private flag and banner switch (stored as false) unless overridden
     old = _meta_path(slug)
     is_new = old is None
@@ -1193,7 +1193,7 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
             for member in z.infolist():
                 target = (dest / member.filename).resolve()
                 if dest.resolve() not in target.parents:
-                    raise HTTPException(400, "Zip inneholder ugyldige stier")
+                    raise HTTPException(400, i18n.t("err.zip_paths"))
                 if member.is_dir():
                     target.mkdir(parents=True, exist_ok=True)
                 else:
@@ -1209,7 +1209,7 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
                 subs[0].rmdir()
         if not (dest / "index.html").exists():
             shutil.rmtree(dest)
-            raise HTTPException(400, "Zip må inneholde en index.html")
+            raise HTTPException(400, i18n.t("err.zip_index"))
         if meta:
             (dest / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
     elif ext.lower() in (".html", ".htm"):
@@ -1219,7 +1219,7 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
         if meta:
             (ARTIFACTS_DIR / f"{slug}.meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
     else:
-        raise HTTPException(400, "Bare .html eller .zip (med index.html) støttes")
+        raise HTTPException(400, i18n.t("err.upload_type"))
     if is_new:
         _new_app(slug)
     log.info("Uploaded artifact %s", slug)
@@ -1372,10 +1372,10 @@ def _ago(ts: int, now: int) -> str:
     """How long ago, without a clock time (the server's time zone may not be the viewer's)."""
     secs = max(0, now - ts)
     if secs < 3600:
-        return f"for {max(1, secs // 60)} min siden"
+        return i18n.t("time.ago_min", n=max(1, secs // 60))
     if secs < 86400:
-        return f"for {secs // 3600} t siden"
-    return f"for {secs // 86400} d siden"
+        return i18n.t("time.ago_hours", n=secs // 3600)
+    return i18n.t("time.ago_days", n=secs // 86400)
 
 
 @app.get("/admin/stats", response_class=HTMLResponse)
@@ -1445,12 +1445,12 @@ async def api_access(request: Request, user: str = Depends(require_admin)):
     if not meta_path:
         raise HTTPException(404)
     if level not in access.LEVELS:
-        raise HTTPException(400, f"Ukjent tilgang: {level}")
+        raise HTTPException(400, i18n.t("access.unknown", level=level))
     if not isinstance(people, list) or not all(isinstance(e, str) for e in people):
-        raise HTTPException(400, "people må være en liste med e-poster")
+        raise HTTPException(400, i18n.t("err.people_list"))
     bad = [e for e in people if not EMAIL_RE.match(access.norm(e))]
     if bad:
-        raise HTTPException(400, f"Ugyldig e-post: {', '.join(bad)}")
+        raise HTTPException(400, i18n.t("err.emails_invalid", emails=", ".join(bad)))
     people = [e for e in access.people({"people": people}) if e not in ADMIN_EMAILS]
     meta = _read_meta(meta_path)
     access.set_level(meta, level, people)
@@ -1518,7 +1518,7 @@ async def _email_in(request: Request) -> str:
     body = await request.json()
     email = access.norm(body["email"]) if isinstance(body, dict) and isinstance(body.get("email"), str) else ""
     if not EMAIL_RE.match(email):
-        raise HTTPException(400, "Ugyldig e-post")
+        raise HTTPException(400, i18n.t("err.email_invalid"))
     return email
 
 
@@ -1532,7 +1532,7 @@ async def _email_and_password_in(request: Request) -> tuple[str, str | None]:
 
 def _check_temp_password(pw: str | None) -> str:
     if pw is None or not 10 <= len(pw) <= 200:
-        raise HTTPException(400, "Midlertidig passord må ha 10–200 tegn")
+        raise HTTPException(400, i18n.t("err.temp_pw"))
     return pw
 
 
@@ -1540,7 +1540,7 @@ def _check_temp_password(pw: str | None) -> str:
 async def people_invite(request: Request, user: str = Depends(require_admin)):
     email, pw = await _email_and_password_in(request)
     if email in ADMIN_EMAILS:
-        raise HTTPException(400, "Admin har alltid tilgang")
+        raise HTTPException(400, i18n.t("err.admin_always"))
     if password_mode():
         pw = _check_temp_password(pw)  # before inviting: a 400 must leave nobody invited
     with db() as con:
@@ -1554,11 +1554,11 @@ async def people_invite(request: Request, user: str = Depends(require_admin)):
 async def people_password(request: Request, user: str = Depends(require_admin)):
     """Set a new temporary password for someone who may log in (password mode only)."""
     if not password_mode():
-        raise HTTPException(404, "Ikke i bruk")
+        raise HTTPException(404, i18n.t("err.not_in_use"))
     email, pw = await _email_and_password_in(request)
     pw = _check_temp_password(pw)
     if not email_allowed(email):
-        raise HTTPException(404, "Ikke invitert")
+        raise HTTPException(404, i18n.t("err.not_invited"))
     with db() as con:
         passwd.set_password(con, email, pw, must_change=True)
     return {"ok": True, "email": email}
@@ -1569,7 +1569,7 @@ async def people_remove(request: Request, user: str = Depends(require_admin)):
     email = await _email_in(request)
     with db() as con:
         if not access.is_invited(con, email):
-            raise HTTPException(404, "Ikke invitert")
+            raise HTTPException(404, i18n.t("err.not_invited"))
     apps = remove_person(email)
     with db() as con:
         passwd.delete(con, email)
@@ -1579,7 +1579,7 @@ async def people_remove(request: Request, user: str = Depends(require_admin)):
 def _check_url(url: str) -> str:
     url = url.strip()
     if not re.match(r"^https?://[^\s/]+\.[^\s]+$", url):
-        raise HTTPException(400, "URL må starte med https:// og være en gyldig adresse")
+        raise HTTPException(400, i18n.t("err.url"))
     return url
 
 
@@ -1594,12 +1594,12 @@ def api_link(
     _upload_authorized(request)
     title, url = title.strip(), _check_url(url)
     if not title:
-        raise HTTPException(400, "Lenken må ha et navn")
+        raise HTTPException(400, i18n.t("err.link_name"))
     slug = _slugify(title)
     if not SLUG_RE.match(slug):
-        raise HTTPException(400, f"Ugyldig navn: {title}")
+        raise HTTPException(400, i18n.t("err.invalid_name", name=title))
     if _meta_path(slug):
-        raise HTTPException(409, f"Det finnes allerede noe som heter «{slug}»")
+        raise HTTPException(409, i18n.t("err.exists", slug=slug))
     meta = {"title": title, "url": url}
     if admin_only:
         meta["admin_only"] = True
@@ -1627,18 +1627,18 @@ async def api_edit(
         raise HTTPException(404)
     new_slug = _slugify(new_slug) if new_slug.strip() else slug
     if not SLUG_RE.match(new_slug):
-        raise HTTPException(400, f"Ugyldig adresse: {new_slug}")
+        raise HTTPException(400, i18n.t("err.address_invalid", slug=new_slug))
     if new_slug != slug and _meta_path(new_slug):
-        raise HTTPException(409, f"Adressen /a/{new_slug}/ er allerede i bruk")
+        raise HTTPException(409, i18n.t("err.address_taken", slug=new_slug))
 
     icon_data, icon_ext = None, ""
     if icon and icon.filename:
         icon_ext = os.path.splitext(icon.filename)[1].lower()
         if icon_ext not in ICON_TYPES:
-            raise HTTPException(400, "Ikonet må være PNG, JPG, WebP, GIF eller SVG")
+            raise HTTPException(400, i18n.t("err.icon_type"))
         icon_data = await icon.read(MAX_ICON_BYTES + 1)
         if len(icon_data) > MAX_ICON_BYTES:
-            raise HTTPException(400, "Ikonet kan være maks 2 MB")
+            raise HTTPException(400, i18n.t("err.icon_size"))
 
     is_link = meta_path.name.endswith(".link.json")
     if is_link and url.strip():
