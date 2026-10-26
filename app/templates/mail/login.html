@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>{{ subject }}</title>
+</head>
+<body style="margin:0;padding:0;background:#f6f5f1;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#f6f5f1;font-size:1px;line-height:1px;">{{ t("mail.preheader", minutes=minutes) }}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f6f5f1;">
+<tr><td align="center" style="padding:24px 16px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;background:#ffffff;border:1px solid #e4e1da;border-radius:12px;">
+<tr><td bgcolor="#123566" style="background:#123566;background-image:linear-gradient(160deg,#0b1a33,#123566);border-radius:12px 12px 0 0;padding:20px 24px;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+{% if has_icon %}<td style="padding-right:12px;vertical-align:middle;"><img src="cid:icon" width="32" height="32" alt="" style="display:block;width:32px;height:32px;border-radius:8px;border:0;"></td>{% endif %}
+<td style="vertical-align:middle;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-weight:700;font-size:18px;line-height:24px;color:#ffffff;">{{ site }}</td>
+</tr></table>
+</td></tr>
+<tr><td style="padding:24px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:23px;color:#1d1c1a;">
+<p style="margin:0 0 6px;">{{ t("mail.greeting") }}</p>
+<p style="margin:0 0 20px;">{{ t("mail.line") }}</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 22px;"><tr><td bgcolor="#2f5fd1" style="background:#2f5fd1;border-radius:8px;"><a href="{{ link }}" style="display:inline-block;padding:12px 22px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">{{ t("mail.button") }}</a></td></tr></table>
+<p style="margin:0 0 14px;font-size:13px;line-height:20px;color:#6e6a62;">{{ t("mail.fine", minutes=minutes) }}</p>
+<p style="margin:0;font-size:12px;line-height:18px;color:#6e6a62;word-break:break-all;">{{ t("mail.fallback") }}<br><a href="{{ link }}" style="color:#6e6a62;">{{ link }}</a></p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>

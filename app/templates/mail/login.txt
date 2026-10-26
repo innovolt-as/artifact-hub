@@ -1,0 +1,7 @@
+{{ t("mail.greeting") }}
+
+{{ t("mail.line") }}
+
+{{ link }}
+
+{{ t("mail.fine", minutes=minutes) }}

@@ -37,7 +37,7 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from jinja2.utils import htmlsafe_json_dumps
 
-from app import access, banner, home, i18n, mail, passwd, versions
+from app import access, banner, home, i18n, loginmail, mail, passwd, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -345,12 +345,12 @@ def require_admin(request: Request) -> str:
 
 
 def send_magic_link(email: str, link: str) -> None:
-    subject = f"Logg inn på {SITE_NAME}"
-    body = (
-        f"Hei!\n\nKlikk lenken for å logge inn på {SITE_NAME} (gyldig i 15 minutter):\n\n{link}\n\n"
-        f"Hvis du ikke ba om dette kan du ignorere e-posten."
-    )
-    if not mail.send(email, subject, body):
+    try:
+        icon = static_file("apple-touch-icon.png").read_bytes()
+    except OSError:
+        icon = None
+    m = loginmail.build(link, SITE_NAME, MAGIC_TTL // 60, icon)
+    if not mail.send(email, m.subject, m.text, html=m.html, images=m.images, sender_name=SITE_NAME):
         log.warning("SMTP not configured — magic link for %s: %s", email, link)
 
 
