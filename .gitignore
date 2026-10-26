@@ -3,6 +3,7 @@ data/
 __pycache__/
 *.pyc
 .superpowers/
+docs/superpowers/
 .pip-cache/
 .DS_Store
 backups/
