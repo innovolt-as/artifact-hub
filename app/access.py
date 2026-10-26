@@ -13,6 +13,8 @@ from __future__ import annotations
 import sqlite3
 import time
 
+from app.i18n import t, tn
+
 LEVELS = ("all", "people", "admin")
 _ICONS = {"all": "🌍", "people": "👥", "admin": "🔒"}
 
@@ -52,7 +54,7 @@ def can_see(meta: dict, email: str | None, admin: bool) -> bool:
 def set_level(meta: dict, level: str, people: list[str] | None = None) -> None:
     """Change `meta` in place. people=None leaves the list alone; an empty list removes it."""
     if level not in LEVELS:
-        raise ValueError(f"Ukjent tilgang: {level}")
+        raise ValueError(t("access.unknown", level=level))
     if people is not None:
         cleaned = _clean(people)
         if cleaned:
@@ -73,11 +75,11 @@ def set_level(meta: dict, level: str, people: list[str] | None = None) -> None:
 def describe(meta: dict) -> str:
     lvl = level(meta)
     if lvl == "all":
-        return "alle"
+        return t("access.all")
     if lvl == "admin":
-        return "bare meg"
+        return t("access.admin")
     n = len(people(meta))
-    return "1 person" if n == 1 else f"{n} personer"
+    return tn("access.people", n)
 
 
 def label(meta: dict) -> str:

@@ -11,6 +11,8 @@ import json
 import sqlite3
 import time
 
+from app import i18n
+
 DAY = 86400
 MOST_USED_DAYS = 30    # what counts towards "Mest brukt"
 KEEP_DAYS = 90         # visits older than this are deleted
@@ -118,7 +120,7 @@ def get_prefs(con: sqlite3.Connection, email: str) -> dict:
 
 def set_view(con: sqlite3.Connection, email: str, view: str) -> None:
     if view not in VIEWS:
-        raise ValueError(f"Ukjent visning: {view}")
+        raise ValueError(i18n.t("err.unknown_view", view=view))
     _put(con, email, "view", view)
 
 

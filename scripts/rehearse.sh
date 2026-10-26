@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run a release image against a copy of a backup, on a local port, to click through before upgrading.
 # Usage: ADMIN_EMAIL=you@example.com [PORT=8001] [SITE_NAME=Rehearsal] scripts/rehearse.sh IMAGE BACKUP.tar.gz
-# LOGIN_MODE (magic-link|password) is passed through from the environment.
+# LOGIN_MODE (magic-link|password) and HUB_LANG (en|nb) are passed through from the environment.
 # DRY_RUN=1 prints the container command instead of running it. Never touches ./data.
 set -euo pipefail
 
@@ -29,7 +29,7 @@ cmd=("$RUNTIME" run --rm --name "hub-rehearsal-$PORT")
 [ -n "$tty_flags" ] && cmd+=("$tty_flags")
 cmd+=(-p "127.0.0.1:$PORT:8000" -v "$tmp:/data"
   -e "ADMIN_EMAILS=$ADMIN_EMAIL" -e "BASE_URL=http://localhost:$PORT"
-  -e "LOGIN_MODE=${LOGIN_MODE:-magic-link}" -e "SECRET_KEY=$secret" -e SMTP_HOST= -e "SITE_NAME=$SITE_NAME" "$IMAGE")
+  -e "LOGIN_MODE=${LOGIN_MODE:-magic-link}" -e "HUB_LANG=${HUB_LANG:-}" -e "SECRET_KEY=$secret" -e SMTP_HOST= -e "SITE_NAME=$SITE_NAME" "$IMAGE")
 
 if [ "${LOGIN_MODE:-magic-link}" = password ]; then
   echo "Open http://localhost:$PORT/login and log in with e-mail + password. To set one: $RUNTIME exec -it hub-rehearsal-$PORT python -m app.passwd set $ADMIN_EMAIL" >&2

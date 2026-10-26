@@ -249,7 +249,7 @@ def test_favorite_labels(hub, user_client):
         hub.home.set_pin(con, "user@test.no", "b", True)
     html = user_client.get("/").text
     assert 'aria-label="Fjern fra favoritter: Beta"' in html and 'aria-label="Legg til i favoritter: Alfa"' in html
-    js = user_client.get("/static/home.js").text
+    js = user_client.get("/static/home.js").text + html  # the texts now reach home.js as JSON in the page
     assert "Legg til i favoritter" in js and "Fjern fra favoritter" in js and "Fest øverst" not in js
 
 

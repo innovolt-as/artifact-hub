@@ -1,0 +1,44 @@
+Artifact Hub
+Artifact Hub
+Admin
+admin@test.no
+Logg ut
+Hei
+mandag 26. oktober
+@aria-label: Visning
+@title: Ikoner
+@title: Kort
+Favoritter
+F
+Fast app
+@aria-label: Fjern fra favoritter: Fast app
+★
+Alle apper
+@title: Ekstern app
+↗
+E
+Ekstern lenke
+@aria-label: Legg til i favoritter: Ekstern lenke
+☆
+@title: Kun admin
+🔒
+H
+Hemmelig app
+@aria-label: Legg til i favoritter: Hemmelig app
+☆
+＋ Legg til eller fjern apper
+@title: Nye apper
+Velg apper
+Huk av det du vil ha på forsiden
+N
+Ny app
+Ny
+E
+Ekstern lenke
+F
+Fast app
+H
+Hemmelig app
+@title: Kun admin
+🔒
+Ferdig

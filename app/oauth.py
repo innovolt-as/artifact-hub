@@ -33,6 +33,7 @@ from mcp.server.auth.provider import (
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
+from app import i18n
 from app import main as hub
 
 REDIRECT_ALLOWLIST = {"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"}
@@ -89,7 +90,7 @@ class HubOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         uris = [str(u) for u in client_info.redirect_uris or []]
         if not uris or any(u not in REDIRECT_ALLOWLIST for u in uris):
-            raise RegistrationError("invalid_redirect_uri", "Bare Claude (claude.ai/claude.com) kan kobles til denne huben.")
+            raise RegistrationError("invalid_redirect_uri", i18n.t("oauth.only_claude"))
         with hub.db() as con:
             con.execute("INSERT INTO oauth_clients(client_id, info) VALUES(?,?)",
                         (client_info.client_id, client_info.model_dump_json()))
@@ -120,7 +121,7 @@ class HubOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
     async def exchange_authorization_code(self, client: OAuthClientInformationFull,
                                           authorization_code: AuthorizationCode) -> OAuthToken:
         row = _spend("oauth_codes", "code_hash", authorization_code.code)
-        _check_grant(row, client, "Koden er ugyldig, utløpt eller allerede brukt.")
+        _check_grant(row, client, i18n.t("oauth.code_invalid"))
         with hub.db() as con:
             return _issue(con, client.client_id, row["email"], authorization_code.scopes, authorization_code.resource)
 
@@ -135,7 +136,7 @@ class HubOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
                                      scopes: list[str]) -> OAuthToken:
         # rotation: the old refresh token is gone the moment it is used
         row = _spend("oauth_tokens", "token_hash", refresh_token.token, "AND kind='refresh'")
-        _check_grant(row, client, "Refresh-tokenet er ugyldig, utløpt eller allerede brukt.")
+        _check_grant(row, client, i18n.t("oauth.refresh_invalid"))
         with hub.db() as con:
             return _issue(con, client.client_id, row["email"], scopes, row["resource"],
                           refresh_scopes=_scopes(row["scopes"]))
@@ -171,7 +172,7 @@ def _check_grant(row, client: OAuthClientInformationFull, message: str) -> None:
     if not row or row["client_id"] != client.client_id or row["expires_at"] < time.time():
         raise TokenError("invalid_grant", message)
     if not hub.is_admin(row["email"]):
-        raise TokenError("invalid_grant", "Bare administratorer kan bruke connectoren.")
+        raise TokenError("invalid_grant", i18n.t("oauth.admin_only"))
 
 
 def _load_token(token: str, kind: str):
@@ -231,11 +232,8 @@ def _gate(request: Request, req: str):
         target = f"/oauth/consent?req={quote(req, safe='')}"
         return RedirectResponse(f"/login?next={quote(target, safe='')}", status_code=302)
     if not hub.is_admin(user):
-        return _page(request, user, 403, error="Bare administratorer kan koble Claude til denne huben.")
+        return _page(request, user, 403, error=i18n.t("oauth.admin_only_consent"))
     return None
-
-
-EXPIRED = "Forespørselen er ugyldig eller utløpt. Start tilkoblingen på nytt fra Claude."
 
 
 @router.get("/oauth/consent", response_class=HTMLResponse)
@@ -245,7 +243,7 @@ def consent_page(request: Request, req: str = ""):
     user = hub.current_user(request)
     client = _pending_client(req)
     if not client:
-        return _page(request, user, 400, error=EXPIRED)
+        return _page(request, user, 400, error=i18n.t("oauth.expired"))
     return _page(request, user, req=req, client_name=client.client_name or client.client_id)
 
 
@@ -255,11 +253,11 @@ def consent_submit(request: Request, req: str = Form(""), decision: str = Form("
         return refused
     user = hub.current_user(request)
     if decision not in ("allow", "deny"):
-        return _page(request, user, 400, error="Ugyldig valg.")
+        return _page(request, user, 400, error=i18n.t("oauth.bad_choice"))
     taken = _take(req)
     # registration already restricts redirect_uris to the allowlist; check again before redirecting
     if not taken or str(taken[1].redirect_uri) not in REDIRECT_ALLOWLIST:
-        return _page(request, user, 400, error=EXPIRED)
+        return _page(request, user, 400, error=i18n.t("oauth.expired"))
     client_id, params = taken
     if decision == "allow":
         loc = construct_redirect_uri(str(params.redirect_uri), code=_new_code(client_id, user, params), state=params.state)

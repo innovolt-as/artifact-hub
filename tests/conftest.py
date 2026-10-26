@@ -19,6 +19,7 @@ os.environ.update(
     ALLOWED_EMAILS="user@test.no",
     BASE_URL="https://hub.test",
     SECRET_KEY="test",
+    HUB_LANG="nb",
 )
 os.environ.pop("UPLOAD_TOKEN", None)
 os.environ.pop("ALLOWED_DOMAINS", None)
@@ -171,3 +172,19 @@ def issued_token(provider, oauth_client, approved_code):
     """A valid access token string for admin@test.no."""
     code = asyncio.run(provider.load_authorization_code(oauth_client, approved_code))
     return asyncio.run(provider.exchange_authorization_code(oauth_client, code)).access_token
+
+
+@pytest.fixture
+def frozen_monday(monkeypatch):
+    """time.localtime() without an argument gives Monday 2026-10-26 10:00 (local); calls with an argument are real."""
+    import time
+    real = time.localtime
+    fixed = time.mktime((2026, 10, 26, 10, 0, 0, 0, 0, -1))
+    monkeypatch.setattr(time, "localtime", lambda *a: real(*a) if a else real(fixed))
+
+
+@pytest.fixture
+def english(monkeypatch):
+    """Switch the interface language to English for one test."""
+    from app import i18n
+    monkeypatch.setattr(i18n, "LANG", "en")

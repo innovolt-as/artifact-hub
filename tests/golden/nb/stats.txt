@@ -1,0 +1,30 @@
+Statistikk · Artifact Hub
+Artifact Hub
+Admin
+admin@test.no
+Logg ut
+@aria-label: Admin
+Apper
+Statistikk
+Siste 7 dager
+Hvor ofte appene åpnes. Samme app åpnet igjen innen 10 minutter teller som én gang. Admin er ikke med.
+Aktive brukere
+1
+Åpninger
+1
+Mest brukte apper
+@title: 1 åpninger av 1 person
+A
+App A
+1 person
+1
+user@test.no
+1
+Ikke brukt: Ubrukt
+Aktive brukere
+@title: 1 åpninger, sist for 5 min siden
+user@test.no
+for 5 min siden
+1
+App A
+1

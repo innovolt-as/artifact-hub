@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # Consistent backup of the hub's data: hub.db (via the SQLite backup API, never cp)
 # plus the artifacts tree. Prints the archive path on stdout.
-# Usage: scripts/backup.sh [DATA_DIR] [OUT_DIR]   (defaults: ./data and ./backups)
+# Usage: [KEEP=14] scripts/backup.sh [DATA_DIR] [OUT_DIR]   (defaults: ./data and ./backups)
+# Archives are owner-only; only the newest KEEP hub-*.tar.gz are kept (KEEP=0 keeps all). See docs/BACKUP.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DATA_DIR="${1:-./data}"
 OUT_DIR="${2:-./backups}"
+KEEP="${KEEP:-14}"  # newest hub-*.tar.gz archives to keep in OUT_DIR; 0 keeps all
+umask 077  # archives hold all app data in plain text: owner only
 
+[[ "$KEEP" =~ ^[0-9]{1,6}$ ]] || { echo "backup.sh: KEEP must be a whole number up to 999999, got '$KEEP'" >&2; exit 1; }
+KEEP=$((10#$KEEP))  # "08" is 8, not an invalid octal number
 command -v python3 >/dev/null || { echo "backup.sh: python3 is required" >&2; exit 1; }
 [ -f "$DATA_DIR/hub.db" ] || { echo "backup.sh: $DATA_DIR/hub.db not found" >&2; exit 1; }
 
@@ -35,4 +40,15 @@ fi
 
 tar -czf "$archive.part" -C "$stage" hub.db artifacts
 mv "$archive.part" "$archive"
+
+# Rotation: only archives this script names (hub-YYYYMMDD-HHMM.tar.gz), oldest first by name.
+# The archive just written always stays and counts towards KEEP, even if the clock is behind older names.
+shopt -s nullglob
+older=()
+for f in "$OUT_DIR"/hub-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].tar.gz; do
+  [[ "$f" == "$archive" ]] || older+=("$f")
+done
+if (( KEEP > 0 && ${#older[@]} >= KEEP )); then
+  rm -f -- "${older[@]:0:${#older[@]}-KEEP+1}"
+fi
 echo "$archive"

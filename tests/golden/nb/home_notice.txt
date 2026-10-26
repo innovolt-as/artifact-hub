@@ -1,0 +1,17 @@
+Artifact Hub
+Artifact Hub
+user@test.no
+Logg ut
+Hei
+mandag 26. oktober
+@aria-label: Visning
+@title: Ikoner
+@title: Kort
+Passordet er byttet.
++
+Legg til apper
+Velg hvilke apper du vil ha på forsiden din
+Velg apper
+Huk av det du vil ha på forsiden
+Det finnes ingen apper ennå.
+Ferdig

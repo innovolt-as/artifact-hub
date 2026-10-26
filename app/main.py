@@ -6,7 +6,7 @@ Layout of the data dir (ARTIFACTS_DIR, default /data/artifacts):
     my-app/index.html (+ assets)   -> served at /a/my-app/
     my-chart.meta.json             -> optional: {"title": "...", "description": "...", "admin_only": true}
     my-app/meta.json               -> same, for folder artifacts
-    recall.link.json               -> external link card: {"title": "...", "url": "...", "admin_only": true}
+    my-tool.link.json              -> external link card: {"title": "...", "url": "...", "admin_only": true}
 
 Who sees an app (app/access.py): "admin_only": true = only admins; "access": "people" with "people": [e-mails]
 = those people; neither = everyone who can log in.
@@ -35,8 +35,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
+from jinja2.utils import htmlsafe_json_dumps
 
-from app import access, banner, home, mail, passwd, versions
+from app import access, banner, home, i18n, loginmail, mail, passwd, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -112,7 +113,7 @@ class BrandedStatic(StaticFiles):
 app.mount("/static", BrandedStatic(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["pw_mode"] = lambda: password_mode()
-templates.env.filters["strftime"] = lambda ts: time.strftime("%d.%m.%Y %H:%M", time.localtime(ts))
+templates.env.globals.update(t=i18n.t, t_html=i18n.t_html, tn=i18n.tn, raw=i18n.raw, lang=lambda: i18n.LANG)
 signer = URLSafeTimedSerializer(SECRET_KEY, salt="session")
 
 
@@ -338,17 +339,17 @@ def require_user(request: Request) -> str:
 def require_admin(request: Request) -> str:
     user = require_user(request)
     if not is_admin(user):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise HTTPException(status_code=403, detail=i18n.t("err.admin_only"))
     return user
 
 
 def send_magic_link(email: str, link: str) -> None:
-    subject = f"Logg inn på {SITE_NAME}"
-    body = (
-        f"Hei!\n\nKlikk lenken for å logge inn på {SITE_NAME} (gyldig i 15 minutter):\n\n{link}\n\n"
-        f"Hvis du ikke ba om dette kan du ignorere e-posten."
-    )
-    if not mail.send(email, subject, body):
+    try:
+        icon = static_file("apple-touch-icon.png").read_bytes()
+    except OSError:
+        icon = None
+    m = loginmail.build(link, SITE_NAME, MAGIC_TTL // 60, icon)
+    if not mail.send(email, m.subject, m.text, html=m.html, images=m.images, sender_name=SITE_NAME):
         log.warning("SMTP not configured — magic link for %s: %s", email, link)
 
 
@@ -398,7 +399,7 @@ def _remove_icon(slug: str) -> None:
         (ICONS_DIR / f"{slug}{ext}").unlink(missing_ok=True)
 
 
-_NO_ORDER = str.maketrans({"æ": "z{", "ø": "z|", "å": "z}"})  # æ ø å after z, in that order
+_NO_ORDER = str.maketrans({"æ": "z{", "ø": "z|", "å": "z}"})  # i18n-ok: æ ø å after z, in that order
 
 
 def _sort_key(title: str) -> str:
@@ -480,15 +481,12 @@ def login_page(request: Request, next: str = "/"):
         "mode": "password" if password_mode() else "magic-link"})
 
 
-PW_ERROR = "Feil e-post eller passord"
-
-
 def login_password(request: Request, email: str, password: str, next: str):
     ip = request.client.host if request.client else "?"
 
     def fail():
         return templates.TemplateResponse(request, "login.html", {
-            "site": SITE_NAME, "sent": False, "next": next, "error": PW_ERROR, "mode": "password"})
+            "site": SITE_NAME, "sent": False, "next": next, "error": i18n.t("login.error"), "mode": "password"})
 
     with db() as con:
         row = passwd.get(con, email)  # before the rate limit: a reset (new updated_at) lifts the e-mail lockout
@@ -534,7 +532,7 @@ def login_submit(request: Request, email: str = Form(...), next: str = Form("/")
             ).fetchone()[0]
         if pending >= MAX_LINKS_PER_EMAIL or ip_rate_limited(ip):
             log.warning("Rate limited magic link for %s from %s", email, ip)
-            return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email})
+            return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email, "minutes": MAGIC_TTL // 60})
         token = secrets.token_urlsafe(32)
         with db() as con:
             con.execute(
@@ -550,7 +548,7 @@ def login_submit(request: Request, email: str = Form(...), next: str = Form("/")
             log.exception("Could not send magic link: %s", e)
     else:
         log.info("Login attempt from non-allowed email %s", email)
-    return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email})
+    return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email, "minutes": MAGIC_TTL // 60})
 
 
 @app.get("/auth")
@@ -562,7 +560,7 @@ def auth(token: str, next: str = "/"):
     with db() as con:
         row = con.execute("SELECT email, expires_at, used FROM magic_tokens WHERE token_hash=?", (h,)).fetchone()
         if not row or row["used"] or row["expires_at"] < now:
-            raise HTTPException(status_code=400, detail="Lenken er ugyldig eller utløpt. Be om en ny.")
+            raise HTTPException(status_code=400, detail=i18n.t("auth.invalid"))
         con.execute("UPDATE magic_tokens SET used=1 WHERE token_hash=?", (h,))
         con.execute("DELETE FROM magic_tokens WHERE expires_at < ?", (now,))
         con.execute("INSERT INTO logins(email, at) VALUES(?,?)", (row["email"], now))
@@ -613,7 +611,7 @@ def password_submit(request: Request, new1: str = Form(""), new2: str = Form("")
         # A stale pending cookie (password reset again, person removed) must not work.
         if (not email_allowed(email) or row is None or row["must_change"] != 1
                 or row["updated_at"] != pw_at):
-            raise HTTPException(403, "Innloggingen er ikke gyldig lenger. Logg inn på nytt.")
+            raise HTTPException(403, i18n.t("password.invalid"))
     else:
         email = current_user(request)
         if not email:
@@ -623,19 +621,19 @@ def password_submit(request: Request, new1: str = Form(""), new2: str = Form("")
         if row is None:
             return _password_form(request, False, next, no_password=True)
         if pw_rate_limited(email, ip, row["updated_at"]):
-            return _password_form(request, False, next, "For mange forsøk. Prøv igjen senere.")
+            return _password_form(request, False, next, i18n.t("password.err.rate"))
         if not passwd.verify_password(current, row["hash"]):
             pw_fail(email, ip)
-            return _password_form(request, False, next, "Feil passord")
+            return _password_form(request, False, next, i18n.t("password.err.wrong"))
     error = None
     if len(new1) < 10:
-        error = "Passordet må ha minst 10 tegn"
+        error = i18n.t("password.err.short")
     elif len(new1) > 200:
-        error = "Passordet er for langt"
+        error = i18n.t("password.err.long")
     elif new1 != new2:
-        error = "Passordene er ikke like"
+        error = i18n.t("password.err.mismatch")
     elif passwd.verify_password(new1, row["hash"]):
-        error = "Velg et annet passord enn det gamle"
+        error = i18n.t("password.err.same")
     if error:
         return _password_form(request, bool(pending), next, error)
     with db() as con:
@@ -649,14 +647,9 @@ def password_submit(request: Request, new1: str = Form(""), new2: str = Form("")
 
 
 # ---------------------------------------------------------------- routes: gallery + serving
-NO_DAYS = ("mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag")
-NO_MONTHS = ("januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober",
-             "november", "desember")
-
-
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, user: str = Depends(require_user)):
-    notice = "Passordet er byttet." if request.query_params.get("pw") == "changed" else None
+    notice = i18n.t("home.pw_changed") if request.query_params.get("pw") == "changed" else None
     apps = list_artifacts(user)
     with db() as con:
         home.start(con, user, [a["slug"] for a in apps], admin=is_admin(user))
@@ -671,7 +664,8 @@ def index(request: Request, user: str = Depends(require_user)):
         request,
         "index.html",
         {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "top": top, "rest": rest,
-         "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": f"{NO_DAYS[now.tm_wday]} {now.tm_mday}. {NO_MONTHS[now.tm_mon - 1]}"},
+         "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
+         "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale")}},
     )
 
 
@@ -765,8 +759,9 @@ def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool) -> H
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
     and the hub banner right after <body> unless the app has it turned off."""
     html = path.read_text("utf-8", errors="replace")
-    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}"></script>'.format(
-        escape(slug), escape(user), "1" if is_admin(user) else "0"
+    strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
+    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-strings="{}"></script>'.format(
+        escape(slug), escape(user), "1" if is_admin(user) else "0", strings
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
     html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
@@ -790,7 +785,7 @@ def _split_path(path: str, want_doc: bool) -> tuple[str, str]:
     """'a/b/c' -> collection 'a/b/c' (odd segments); 'a/b/c/d' -> ('a/b/c', 'd') (even segments)."""
     segs = [s for s in path.split("/") if s]
     if not segs or not all(SEG_RE.match(s) for s in segs) or (len(segs) % 2 == 0) != want_doc:
-        raise HTTPException(400, f"Ugyldig sti: {path}")
+        raise HTTPException(400, i18n.t("store.bad_path", path=path))
     return ("/".join(segs[:-1]), segs[-1]) if want_doc else ("/".join(segs), "")
 
 
@@ -831,13 +826,13 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
     collection, doc_id = _split_path(path, want_doc=True)
     body = await request.body()
     if len(body) > MAX_DOC_BYTES:
-        raise HTTPException(413, "Dokumentet er større enn 256 KB")
+        raise HTTPException(413, i18n.t("store.too_big"))
     try:
         data = json.loads(body)
     except json.JSONDecodeError:
-        raise HTTPException(400, "Ugyldig JSON")
+        raise HTTPException(400, i18n.t("store.bad_json"))
     if not isinstance(data, dict):
-        raise HTTPException(400, "Et dokument må være et JSON-objekt")
+        raise HTTPException(400, i18n.t("store.not_object"))
     with db() as con:
         row = con.execute(
             "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
@@ -845,7 +840,7 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
         ).fetchone()
         if merge:  # update() requires the document to exist
             if not row:
-                raise HTTPException(404, "Dokumentet finnes ikke")
+                raise HTTPException(404, i18n.t("store.doc_missing"))
             data = _deep_merge(json.loads(row["data"]), data)
         con.execute(
             """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
@@ -889,15 +884,14 @@ MAX_DATA_DOCS_LISTED = 500
 def _data_owner(slug: str, user: str) -> str:
     found = artifact_root(slug)
     if not found or not can_see(found[1], user):
-        raise HubError(f"Fant ingen app som heter «{slug}». Lenkekort har ikke data.")
+        raise HubError(i18n.t("data.no_app", slug=slug))
     return user.lower()
 
 
 def _data_path(path: str, want_doc: bool) -> tuple[str, str]:
     segs = [s for s in str(path).split("/") if s]
     if not segs or not all(SEG_RE.match(s) for s in segs) or (len(segs) % 2 == 0) != want_doc:
-        kind = "et dokument (partall ledd, f.eks. days/2026-10-22)" if want_doc else "en samling (oddetall ledd, f.eks. days)"
-        raise HubError(f"Ugyldig sti «{path}»: må være {kind}.")
+        raise HubError(i18n.t("data.bad_path_doc" if want_doc else "data.bad_path_col", path=path))
     return ("/".join(segs[:-1]), segs[-1]) if want_doc else ("/".join(segs), "")
 
 
@@ -937,7 +931,7 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
     owner = _data_owner(slug, user)
     col, doc_id = _data_path(path, want_doc=True)
     if not isinstance(data, dict):
-        raise HubError("Et dokument må være et JSON-objekt.")
+        raise HubError(i18n.t("data.not_object"))
     with db() as con:
         row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                           (slug, owner, col, doc_id)).fetchone()
@@ -945,7 +939,7 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
             data = _deep_merge(json.loads(row["data"]), data)
         raw = json.dumps(data, ensure_ascii=False)
         if len(raw.encode("utf-8")) > MAX_DOC_BYTES:
-            raise HubError("Dokumentet blir større enn 256 KB.")
+            raise HubError(i18n.t("data.too_big"))
         con.execute(
             """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
                ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
@@ -985,27 +979,27 @@ def api_user(request: Request) -> str:
     """Like require_user, but answers 401 JSON instead of redirecting to the login page."""
     user = current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="Ikke innlogget")
+        raise HTTPException(status_code=401, detail=i18n.t("err.not_logged_in"))
     return user
 
 
 def _check_app_key(app_name: str, key: str | None = None) -> None:
     if not SLUG_RE.match(app_name):
-        raise HTTPException(400, "Ugyldig app-navn")
+        raise HTTPException(400, i18n.t("store.bad_app"))
     if key is not None and not DATA_KEY_RE.match(key):
-        raise HTTPException(400, "Ugyldig nøkkel")
+        raise HTTPException(400, i18n.t("store.bad_key"))
 
 
 def _require_json(request: Request) -> None:
     # A JSON content type cannot be sent cross-site without a CORS preflight, which this app never allows.
     if not request.headers.get("content-type", "").lower().startswith("application/json"):
-        raise HTTPException(415, "Bruk Content-Type: application/json")
+        raise HTTPException(415, i18n.t("store.need_json"))
 
 
 def _encode_value(value) -> str:
     raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if len(raw.encode("utf-8")) > MAX_VALUE_BYTES:
-        raise HTTPException(413, "Verdien er for stor")
+        raise HTTPException(413, i18n.t("store.value_big"))
     return raw
 
 
@@ -1015,9 +1009,9 @@ def _check_quota(con: sqlite3.Connection, email: str, app_name: str, new_rows: d
     for k, v in new_rows.items():
         sizes[k] = len(v.encode("utf-8"))
     if len(sizes) > MAX_KEYS_PER_APP:
-        raise HTTPException(413, "For mange nøkler for denne appen")
+        raise HTTPException(413, i18n.t("store.too_many_keys"))
     if sum(sizes.values()) > MAX_BYTES_PER_APP:
-        raise HTTPException(413, "Lagringsplassen for denne appen er full")
+        raise HTTPException(413, i18n.t("store.full"))
 
 
 @app.get("/api/me")
@@ -1097,7 +1091,7 @@ async def data_batch(app_name: str, request: Request, user: str = Depends(api_us
     to_set = body.get("set") or {}
     to_del = body.get("delete") or []
     if not isinstance(to_set, dict) or not isinstance(to_del, list) or len(to_set) + len(to_del) > MAX_BATCH:
-        raise HTTPException(400, "Ugyldig batch")
+        raise HTTPException(400, i18n.t("store.bad_batch"))
     for k in list(to_set) + to_del:
         _check_app_key(app_name, k)
     encoded = {k: _encode_value(v) for k, v in to_set.items()}
@@ -1119,7 +1113,7 @@ def data_get(app_name: str, key: str, user: str = Depends(api_user)):
     with db() as con:
         r = con.execute("SELECT value, updated FROM app_data WHERE email=? AND app=? AND key=?", (user, app_name, key)).fetchone()
     if not r:
-        raise HTTPException(404, "Finnes ikke")
+        raise HTTPException(404, i18n.t("store.not_found"))
     return {"key": key, "value": json.loads(r["value"]), "updated": r["updated"]}
 
 
@@ -1175,7 +1169,7 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
     stem, ext = os.path.splitext(filename)
     slug = _slugify(slug or stem)
     if not SLUG_RE.match(slug):
-        raise HTTPException(400, f"Ugyldig navn: {slug}")
+        raise HTTPException(400, i18n.t("err.invalid_name", name=slug))
     # a new version keeps the old name, emoji, private flag and banner switch (stored as false) unless overridden
     old = _meta_path(slug)
     is_new = old is None
@@ -1199,7 +1193,7 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
             for member in z.infolist():
                 target = (dest / member.filename).resolve()
                 if dest.resolve() not in target.parents:
-                    raise HTTPException(400, "Zip inneholder ugyldige stier")
+                    raise HTTPException(400, i18n.t("err.zip_paths"))
                 if member.is_dir():
                     target.mkdir(parents=True, exist_ok=True)
                 else:
@@ -1215,7 +1209,7 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
                 subs[0].rmdir()
         if not (dest / "index.html").exists():
             shutil.rmtree(dest)
-            raise HTTPException(400, "Zip må inneholde en index.html")
+            raise HTTPException(400, i18n.t("err.zip_index"))
         if meta:
             (dest / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
     elif ext.lower() in (".html", ".htm"):
@@ -1225,7 +1219,7 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
         if meta:
             (ARTIFACTS_DIR / f"{slug}.meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
     else:
-        raise HTTPException(400, "Bare .html eller .zip (med index.html) støttes")
+        raise HTTPException(400, i18n.t("err.upload_type"))
     if is_new:
         _new_app(slug)
     log.info("Uploaded artifact %s", slug)
@@ -1238,7 +1232,7 @@ _HTML_HINT = re.compile(r"<html|<!doctype html|<body", re.I)
 
 
 class HubError(Exception):
-    """A problem with a write; the message is Norwegian text shown to the user."""
+    """A problem with a write; the message is text in the hub's language (HUB_LANG) shown to the user."""
 
 
 def _write_meta(path: Path, meta: dict) -> None:
@@ -1259,19 +1253,18 @@ def _apply_info(meta: dict, title: str | None, description: str | None, emoji: s
 
 def _check_html(html: str) -> None:
     if len(html.encode("utf-8")) > MAX_PAGE_BYTES:
-        raise HubError(f"Siden er for stor (maks {MAX_PAGE_BYTES // 1024} KB)")
+        raise HubError(i18n.t("page.too_big", kb=MAX_PAGE_BYTES // 1024))
     if not _HTML_HINT.search(html):
-        raise HubError("Dette ser ikke ut som HTML. Send en komplett HTML-side (med <html>, <!doctype html> eller <body>), "
-                       "ikke React/JSX eller en kodesnutt.")
+        raise HubError(i18n.t("page.not_html"))
 
 
 def _single_page(slug: str) -> Path:
     """The editable HTML of an existing app: the page itself, or index.html of a folder app. HubError otherwise."""
     meta_path = _meta_path(slug)
     if not meta_path:
-        raise HubError(f"Fant ingen side som heter «{slug}».")
+        raise HubError(i18n.t("page.not_found", slug=slug))
     if meta_path.name.endswith(".link.json"):
-        raise HubError(f"«{slug}» er et lenkekort uten HTML. Bruk update_app_info for å endre tittel, beskrivelse eller lenke-info.")
+        raise HubError(i18n.t("page.is_link", slug=slug))
     if meta_path.name == "meta.json":
         return ARTIFACTS_DIR / slug / "index.html"  # folder app: only index.html is edited, its other files stay
     return ARTIFACTS_DIR / f"{slug}.html"
@@ -1282,11 +1275,11 @@ def save_page(slug: str, html: str, *, create: bool, title: str | None = None, d
     """Create a single-file page (private unless said otherwise), or replace the HTML of an existing page or
     folder app (its index.html); returns the slug."""
     if not SLUG_RE.match(slug):
-        raise HubError(f"Ugyldig navn: «{slug}». Bruk små bokstaver, tall, punktum, bindestrek og understrek.")
+        raise HubError(i18n.t("page.bad_slug", slug=slug))
     _check_html(html)
     if create:
         if _meta_path(slug):
-            raise HubError(f"Det finnes allerede noe som heter «{slug}». Bruk update_app for å endre det.")
+            raise HubError(i18n.t("page.exists", slug=slug))
         meta: dict = {}
         if private is None:
             private = True
@@ -1313,10 +1306,9 @@ def edit_page(slug: str, edits: list[tuple[str, str]]) -> None:
     for n, (old, new) in enumerate(edits, 1):
         count = text.count(old) if old else 0
         if count == 0:
-            raise HubError(f"Endring {n}: fant ikke teksten som skulle erstattes. Ingenting er endret.")
+            raise HubError(i18n.t("page.edit_missing", n=n))
         if count > 1:
-            raise HubError(f"Endring {n}: teksten finnes {count} ganger. Ta med mer omkringliggende tekst slik at den er unik. "
-                           "Ingenting er endret.")
+            raise HubError(i18n.t("page.edit_multi", n=n, count=count))
         text = text.replace(old, new, 1)
     _check_html(text)
     versions.save(ARTIFACTS_DIR, slug)
@@ -1329,7 +1321,7 @@ def set_info(slug: str, *, title: str | None = None, description: str | None = N
     """Change gallery info for a page or link card. None = unchanged, "" = remove the field."""
     meta_path = _meta_path(slug)
     if not meta_path:
-        raise HubError(f"Fant ingen side som heter «{slug}».")
+        raise HubError(i18n.t("page.not_found", slug=slug))
     meta = _read_meta(meta_path)
     _apply_info(meta, title, description, emoji)
     if private is not None:
@@ -1378,10 +1370,10 @@ def _ago(ts: int, now: int) -> str:
     """How long ago, without a clock time (the server's time zone may not be the viewer's)."""
     secs = max(0, now - ts)
     if secs < 3600:
-        return f"for {max(1, secs // 60)} min siden"
+        return i18n.t("time.ago_min", n=max(1, secs // 60))
     if secs < 86400:
-        return f"for {secs // 3600} t siden"
-    return f"for {secs // 86400} d siden"
+        return i18n.t("time.ago_hours", n=secs // 3600)
+    return i18n.t("time.ago_days", n=secs // 86400)
 
 
 @app.get("/admin/stats", response_class=HTMLResponse)
@@ -1451,12 +1443,12 @@ async def api_access(request: Request, user: str = Depends(require_admin)):
     if not meta_path:
         raise HTTPException(404)
     if level not in access.LEVELS:
-        raise HTTPException(400, f"Ukjent tilgang: {level}")
+        raise HTTPException(400, i18n.t("access.unknown", level=level))
     if not isinstance(people, list) or not all(isinstance(e, str) for e in people):
-        raise HTTPException(400, "people må være en liste med e-poster")
+        raise HTTPException(400, i18n.t("err.people_list"))
     bad = [e for e in people if not EMAIL_RE.match(access.norm(e))]
     if bad:
-        raise HTTPException(400, f"Ugyldig e-post: {', '.join(bad)}")
+        raise HTTPException(400, i18n.t("err.emails_invalid", emails=", ".join(bad)))
     people = [e for e in access.people({"people": people}) if e not in ADMIN_EMAILS]
     meta = _read_meta(meta_path)
     access.set_level(meta, level, people)
@@ -1524,7 +1516,7 @@ async def _email_in(request: Request) -> str:
     body = await request.json()
     email = access.norm(body["email"]) if isinstance(body, dict) and isinstance(body.get("email"), str) else ""
     if not EMAIL_RE.match(email):
-        raise HTTPException(400, "Ugyldig e-post")
+        raise HTTPException(400, i18n.t("err.email_invalid"))
     return email
 
 
@@ -1538,7 +1530,7 @@ async def _email_and_password_in(request: Request) -> tuple[str, str | None]:
 
 def _check_temp_password(pw: str | None) -> str:
     if pw is None or not 10 <= len(pw) <= 200:
-        raise HTTPException(400, "Midlertidig passord må ha 10–200 tegn")
+        raise HTTPException(400, i18n.t("err.temp_pw"))
     return pw
 
 
@@ -1546,7 +1538,7 @@ def _check_temp_password(pw: str | None) -> str:
 async def people_invite(request: Request, user: str = Depends(require_admin)):
     email, pw = await _email_and_password_in(request)
     if email in ADMIN_EMAILS:
-        raise HTTPException(400, "Admin har alltid tilgang")
+        raise HTTPException(400, i18n.t("err.admin_always"))
     if password_mode():
         pw = _check_temp_password(pw)  # before inviting: a 400 must leave nobody invited
     with db() as con:
@@ -1560,11 +1552,11 @@ async def people_invite(request: Request, user: str = Depends(require_admin)):
 async def people_password(request: Request, user: str = Depends(require_admin)):
     """Set a new temporary password for someone who may log in (password mode only)."""
     if not password_mode():
-        raise HTTPException(404, "Ikke i bruk")
+        raise HTTPException(404, i18n.t("err.not_in_use"))
     email, pw = await _email_and_password_in(request)
     pw = _check_temp_password(pw)
     if not email_allowed(email):
-        raise HTTPException(404, "Ikke invitert")
+        raise HTTPException(404, i18n.t("err.not_invited"))
     with db() as con:
         passwd.set_password(con, email, pw, must_change=True)
     return {"ok": True, "email": email}
@@ -1575,7 +1567,7 @@ async def people_remove(request: Request, user: str = Depends(require_admin)):
     email = await _email_in(request)
     with db() as con:
         if not access.is_invited(con, email):
-            raise HTTPException(404, "Ikke invitert")
+            raise HTTPException(404, i18n.t("err.not_invited"))
     apps = remove_person(email)
     with db() as con:
         passwd.delete(con, email)
@@ -1585,7 +1577,7 @@ async def people_remove(request: Request, user: str = Depends(require_admin)):
 def _check_url(url: str) -> str:
     url = url.strip()
     if not re.match(r"^https?://[^\s/]+\.[^\s]+$", url):
-        raise HTTPException(400, "URL må starte med https:// og være en gyldig adresse")
+        raise HTTPException(400, i18n.t("err.url"))
     return url
 
 
@@ -1596,16 +1588,16 @@ def api_link(
     url: str = Form(...),
     admin_only: bool = Form(False),
 ):
-    """Add an external link card (like recall.link.json) to the gallery."""
+    """Add an external link card (like my-tool.link.json) to the gallery."""
     _upload_authorized(request)
     title, url = title.strip(), _check_url(url)
     if not title:
-        raise HTTPException(400, "Lenken må ha et navn")
+        raise HTTPException(400, i18n.t("err.link_name"))
     slug = _slugify(title)
     if not SLUG_RE.match(slug):
-        raise HTTPException(400, f"Ugyldig navn: {title}")
+        raise HTTPException(400, i18n.t("err.invalid_name", name=title))
     if _meta_path(slug):
-        raise HTTPException(409, f"Det finnes allerede noe som heter «{slug}»")
+        raise HTTPException(409, i18n.t("err.exists", slug=slug))
     meta = {"title": title, "url": url}
     if admin_only:
         meta["admin_only"] = True
@@ -1633,18 +1625,18 @@ async def api_edit(
         raise HTTPException(404)
     new_slug = _slugify(new_slug) if new_slug.strip() else slug
     if not SLUG_RE.match(new_slug):
-        raise HTTPException(400, f"Ugyldig adresse: {new_slug}")
+        raise HTTPException(400, i18n.t("err.address_invalid", slug=new_slug))
     if new_slug != slug and _meta_path(new_slug):
-        raise HTTPException(409, f"Adressen /a/{new_slug}/ er allerede i bruk")
+        raise HTTPException(409, i18n.t("err.address_taken", slug=new_slug))
 
     icon_data, icon_ext = None, ""
     if icon and icon.filename:
         icon_ext = os.path.splitext(icon.filename)[1].lower()
         if icon_ext not in ICON_TYPES:
-            raise HTTPException(400, "Ikonet må være PNG, JPG, WebP, GIF eller SVG")
+            raise HTTPException(400, i18n.t("err.icon_type"))
         icon_data = await icon.read(MAX_ICON_BYTES + 1)
         if len(icon_data) > MAX_ICON_BYTES:
-            raise HTTPException(400, "Ikonet kan være maks 2 MB")
+            raise HTTPException(400, i18n.t("err.icon_size"))
 
     is_link = meta_path.name.endswith(".link.json")
     if is_link and url.strip():

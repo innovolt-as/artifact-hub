@@ -21,6 +21,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app import i18n
 from app.access import norm
 
 N, R, P, DKLEN = 2**14, 8, 1, 32
@@ -117,20 +118,20 @@ def _read_password(prompt: str) -> str:
 
 
 def _cmd_set(email: str, temporary: bool) -> int:
-    first = _read_password("Passord: ")
-    second = _read_password("Gjenta passord: ")
+    first = _read_password(i18n.t("cli.password"))
+    second = _read_password(i18n.t("cli.repeat"))
     if first != second:
-        print("Passordene er ulike", file=sys.stderr)
+        print(i18n.t("cli.mismatch"), file=sys.stderr)
         return 2
     if len(first) < MIN_LENGTH:
-        print(f"Passordet må være minst {MIN_LENGTH} tegn", file=sys.stderr)
+        print(i18n.t("cli.short", min=MIN_LENGTH), file=sys.stderr)
         return 2
     with _connect() as con:
         set_password(con, email, first, must_change=temporary)
-    print(f"Passord satt for {norm(email)}" + (" (må byttes ved første innlogging)" if temporary else ""))
+    print(i18n.t("cli.set_temp" if temporary else "cli.set", email=norm(email)))
     from app import main  # lazily: main imports this module
     if not main.email_allowed(norm(email)):
-        print(f"Merk: {norm(email)} er ikke tillatt å logge inn (ADMIN_EMAILS/ALLOWED_*/invitert)", file=sys.stderr)
+        print(i18n.t("cli.not_allowed", email=norm(email)), file=sys.stderr)
     return 0
 
 
@@ -138,7 +139,7 @@ def _cmd_list() -> int:
     with _connect() as con:
         for row in list_all(con):
             when = datetime.fromtimestamp(row["updated_at"], timezone.utc).isoformat()
-            print(f"{row['email']}  {'må byttes' if row['must_change'] else 'satt'}  {when}")
+            print(f"{row['email']}  {i18n.t('cli.must_change') if row['must_change'] else i18n.t('cli.is_set')}  {when}")
     return 0
 
 

@@ -19,13 +19,14 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     });
-  const failed = () => alert("Kunne ikke lagre. Prøv igjen.");
+  const S = JSON.parse(document.getElementById("__hub_strings").textContent);
+  const failed = () => alert(S.save_failed);
 
   const now = new Date(), h = now.getHours();
   document.getElementById("hello").textContent =
-    h < 5 ? "God natt" : h < 10 ? "God morgen" : h < 12 ? "God formiddag" : h < 18 ? "God ettermiddag" : "God kveld";
+    S.greet[h < 5 ? 0 : h < 10 ? 1 : h < 12 ? 2 : h < 18 ? 3 : 4];
   document.getElementById("today").textContent =
-    now.toLocaleDateString("no-NO", { weekday: "long", day: "numeric", month: "long" });
+    now.toLocaleDateString(S.locale, { weekday: "long", day: "numeric", month: "long" });
 
   document.querySelectorAll("[data-set-view]").forEach((b) => {
     b.onclick = () => {
@@ -75,7 +76,7 @@
     menu.className = "pinmenu";
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = li.dataset.pinned === "true" ? "Fjern fra favoritter" : "Legg til i favoritter";
+    b.textContent = li.dataset.pinned === "true" ? S.unpin : S.pin;
     b.onclick = () => { closeMenu(); togglePin(li); };
     menu.append(b);
     document.body.append(menu);

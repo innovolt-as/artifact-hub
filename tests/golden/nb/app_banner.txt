@@ -1,0 +1,7 @@
+bannerapp
+@aria-label: Tilbake til Artifact Hub
+@title: Tilbake til Artifact Hub
+‹
+B
+Bannerapp
+bannerapp

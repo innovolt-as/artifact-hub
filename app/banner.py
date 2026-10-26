@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from html import escape
 
+from app import i18n
+
 CSS_HOST = (
     "<style>hub-banner{all:initial !important;display:block !important;position:relative !important;"
     "z-index:20 !important;"
@@ -80,7 +82,7 @@ def inject(html: str, head: str, banner: str | None) -> str:
 
 def render(app: dict, site: str) -> str:
     """The banner for one app (an entry from list_artifacts), linking to the front page of `site`."""
-    label = escape(f"Tilbake til {site}")
+    label = escape(i18n.t("banner.back", site=site))
     return (
         f'<hub-banner><template shadowrootmode="open">{_STYLE}'
         f'<a href="/" aria-label="{label}" title="{label}">'

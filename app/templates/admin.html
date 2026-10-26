@@ -1,41 +1,41 @@
 {% extends "base.html" %}
 {% from "_icon.html" import icon %}
-{% block title %}Admin · {{ site }}{% endblock %}
+{% block title %}{{ t("nav.admin") }} · {{ site }}{% endblock %}
 {% block body %}
 {% with tab = 'apps' %}{% include "_admin_tabs.html" %}{% endwith %}
 <section class="card">
-  <h1>Last opp</h1>
-  <p class="muted">Dra inn <code>.html</code>-filer eller en <code>.zip</code> med <code>index.html</code>. Samme filnavn erstatter eksisterende.</p>
+  <h1>{{ t("admin.upload") }}</h1>
+  <p class="muted">{{ t_html("admin.upload_hint") }}</p>
   <div id="drop" class="drop">
-    <p>Slipp filer her, eller <label for="file" class="link-like">velg filer</label></p>
+    <p>{{ t("admin.drop") }} <label for="file" class="link-like">{{ t("admin.drop_pick") }}</label></p>
     <input id="file" type="file" accept=".html,.htm,.zip" multiple hidden>
   </div>
   <form id="linkForm" class="link-form">
-    <span class="muted small">…eller legg til en lenke til en ekstern app:</span>
-    <input name="title" placeholder="Navn" required maxlength="120">
+    <span class="muted small">{{ t("admin.link_or") }}</span>
+    <input name="title" placeholder="{{ t('admin.name') }}" required maxlength="120">
     <input name="url" type="url" placeholder="https://…" required>
-    <button class="small">Legg til lenke</button>
+    <button class="small">{{ t("admin.add_link") }}</button>
   </form>
-  <label class="check"><input type="checkbox" id="adminOnly"> Kun synlig for meg</label>
+  <label class="check"><input type="checkbox" id="adminOnly"> {{ t("admin.only_me") }}</label>
   <ul id="log" class="log"></ul>
 </section>
 
 <section class="card">
-  <h1>Artifacts</h1>
+  <h1>{{ t('admin.artifacts_heading') }}</h1>
   <table class="list">
     <tbody>
     {% for a in artifacts %}
     <tr data-slug="{{ a.slug }}">
       <td class="icon-cell">{{ icon(a, "icon icon-sm") }}</td>
       <td><a href="{{ a.url }}" {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>{{ a.title }}</a>
-          <span class="muted small">{{ a.slug }} · {{ {'page':'side','app':'app','link':'ekstern'}[a.kind] }}</span></td>
+          <span class="muted small">{{ a.slug }} · {{ t('admin.kind_' + a.kind) }}</span></td>
       <td class="right">
         <button class="small edit" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}"
-                data-kind="{{ a.kind }}" data-url="{{ a.url if a.kind == 'link' else '' }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}">Rediger</button>
-        {% if a.kind != 'link' %}<button class="small banner" data-slug="{{ a.slug }}" title="Hub-stripa øverst i appen">{{ '▭ banner' if a.banner else '▭ uten banner' }}</button>{% endif %}
+                data-kind="{{ a.kind }}" data-url="{{ a.url if a.kind == 'link' else '' }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}">{{ t("admin.edit") }}</button>
+        {% if a.kind != 'link' %}<button class="small banner" data-slug="{{ a.slug }}" title="{{ t('admin.banner_title') }}">{{ t('admin.banner_on') if a.banner else t('admin.banner_off') }}</button>{% endif %}
         <button class="small access" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-level="{{ a.access }}"
-                data-people='{{ a.people|tojson }}' title="Hvem som har tilgang">{{ a.access_label }}</button>
-        <button class="small danger del" data-slug="{{ a.slug }}">Slett</button>
+                data-people='{{ a.people|tojson }}' title="{{ t('admin.access_title') }}">{{ a.access_label }}</button>
+        <button class="small danger del" data-slug="{{ a.slug }}">{{ t("admin.delete") }}</button>
       </td>
     </tr>
     {% endfor %}
@@ -44,63 +44,63 @@
 </section>
 
 <section class="card" id="people">
-  <h1>Personer</h1>
-  <p class="muted">Kan logge inn. De ser appene som står på «Alle», og appene de står på.</p>
+  <h1>{{ t("admin.people") }}</h1>
+  <p class="muted">{{ t("admin.people_hint") }}</p>
   <form id="inviteForm" class="link-form">
-    <input name="email" type="email" placeholder="navn@epost.no" required>
+    <input name="email" type="email" placeholder="{{ t('admin.email_placeholder') }}" required>
     {% if pw_mode() %}
-    <input name="password" type="text" placeholder="midlertidig passord" required minlength="10" maxlength="200" autocomplete="off">
-    <button type="button" class="small" id="genPw">Generer</button>
+    <input name="password" type="text" placeholder="{{ t('admin.pw_placeholder') }}" required minlength="10" maxlength="200" autocomplete="off">
+    <button type="button" class="small" id="genPw">{{ t("admin.generate") }}</button>
     {% endif %}
-    <button class="small">Inviter</button>
+    <button class="small">{{ t("admin.invite") }}</button>
   </form>
   <p id="peopleError" class="err small"></p>
   <ul class="plist">
     {% for p in people %}
     <li><span class="e">{{ p.email }}</span>
-      {% if pw_mode() %}<span class="muted small">passord: {{ {'set': 'satt', 'must_change': 'må byttes', 'missing': 'mangler'}[p.pw_status] }}</span>
-      <button class="small setpw" data-email="{{ p.email }}">Nytt midlertidig passord</button>{% endif %}
-      {% if p.invited %}<button class="small danger unperson" data-email="{{ p.email }}">Fjern</button>
-      {% elif not p.admin %}<span class="muted small">fra serveroppsettet</span>{% endif %}</li>
+      {% if pw_mode() %}<span class="muted small">{{ t('admin.pw_status', status=t('admin.pw_' + p.pw_status)) }}</span>
+      <button class="small setpw" data-email="{{ p.email }}">{{ t("admin.new_temp_pw") }}</button>{% endif %}
+      {% if p.invited %}<button class="small danger unperson" data-email="{{ p.email }}">{{ t("admin.remove") }}</button>
+      {% elif not p.admin %}<span class="muted small">{{ t("admin.from_config") }}</span>{% endif %}</li>
     {% else %}
-    <li class="muted">Ingen er invitert ennå.</li>
+    <li class="muted">{{ t("admin.nobody") }}</li>
     {% endfor %}
   </ul>
 </section>
 
 <dialog id="accessDlg" class="editor">
   <form id="accessForm" method="dialog">
-    <h1 tabindex="-1" autofocus>Tilgang: <span id="acTitle"></span></h1>
-    <label class="check"><input type="radio" name="level" value="all"> Alle som kan logge inn</label>
-    <label class="check"><input type="radio" name="level" value="people"> Bestemte personer</label>
-    <label class="check"><input type="radio" name="level" value="admin"> Bare meg</label>
+    <h1 tabindex="-1" autofocus>{{ t("admin.access") }}: <span id="acTitle"></span></h1>
+    <label class="check"><input type="radio" name="level" value="all"> {{ t("admin.level_all") }}</label>
+    <label class="check"><input type="radio" name="level" value="people"> {{ t("admin.level_people") }}</label>
+    <label class="check"><input type="radio" name="level" value="admin"> {{ t("admin.level_admin") }}</label>
     <div id="acPeople" class="ac-people">
       <ul id="acList" class="ac-list"></ul>
       <div class="link-form">
-        <input type="email" id="acNew" placeholder="ny@epost.no">
-        <button type="button" class="small" id="acAdd">Legg til</button>
+        <input type="email" id="acNew" placeholder="{{ t('admin.new_email_placeholder') }}">
+        <button type="button" class="small" id="acAdd">{{ t("admin.add") }}</button>
       </div>
     </div>
     <p id="acError" class="err small"></p>
     <div class="editor-actions">
-      <button type="button" class="small" id="acCancel">Avbryt</button>
-      <button type="submit" class="primary">Lagre</button>
+      <button type="button" class="small" id="acCancel">{{ t("admin.cancel") }}</button>
+      <button type="submit" class="primary">{{ t("admin.save") }}</button>
     </div>
   </form>
 </dialog>
 {% if pw_mode() %}
 <dialog id="pwDialog" class="editor">
   <form id="pwForm" method="dialog">
-    <h1 tabindex="-1" autofocus>Nytt midlertidig passord: <span id="pwWho"></span></h1>
+    <h1 tabindex="-1" autofocus>{{ t("admin.new_temp_pw") }}: <span id="pwWho"></span></h1>
     <div class="link-form">
-      <input id="pwNew" type="text" placeholder="midlertidig passord" required minlength="10" maxlength="200" autocomplete="off">
-      <button type="button" class="small" id="pwGen">Generer</button>
+      <input id="pwNew" type="text" placeholder="{{ t('admin.pw_placeholder') }}" required minlength="10" maxlength="200" autocomplete="off">
+      <button type="button" class="small" id="pwGen">{{ t("admin.generate") }}</button>
     </div>
     <p id="pwMsg" class="small"></p>
     <p id="pwError" class="err small"></p>
     <div class="editor-actions">
-      <button type="button" class="small" id="pwClose">Lukk</button>
-      <button type="submit" class="primary" id="pwSet">Sett</button>
+      <button type="button" class="small" id="pwClose">{{ t("admin.close") }}</button>
+      <button type="submit" class="primary" id="pwSet">{{ t("admin.set") }}</button>
     </div>
   </form>
 </dialog>
@@ -109,29 +109,42 @@
 
 <dialog id="editor" class="editor">
   <form id="editForm" method="dialog">
-    <h1 tabindex="-1" autofocus>Rediger</h1>
+    <h1 tabindex="-1" autofocus>{{ t("admin.edit") }}</h1>
     <div class="editor-preview">
       <span id="pvIcon" class="icon"></span>
-      <span class="muted small">Bilde brukes hvis det finnes, ellers emoji, ellers forbokstaven.</span>
+      <span class="muted small">{{ t("admin.edit_preview") }}</span>
     </div>
-    <label>Navn<input name="title" id="edTitle" maxlength="120"></label>
-    <label id="edSlugRow">Adresse
+    <label>{{ t("admin.name") }}<input name="title" id="edTitle" maxlength="120"></label>
+    <label id="edSlugRow">{{ t("admin.address") }}
       <span class="prefixed"><span class="muted">/a/</span><input name="new_slug" id="edSlug" maxlength="80" pattern="[a-z0-9][a-z0-9._\-]*"></span>
-      <span class="muted small">Gamle lenker til denne adressen slutter å virke.</span>
+      <span class="muted small">{{ t("admin.edit_old_links") }}</span>
     </label>
-    <label id="edUrlRow">URL<input name="url" id="edUrl" type="url" placeholder="https://…"></label>
-    <label>Emoji<input name="emoji" id="edEmoji" maxlength="16" placeholder="f.eks. 📈"></label>
-    <label>Bilde<input type="file" name="icon" id="edIcon" accept=".png,.jpg,.jpeg,.webp,.gif,.svg"></label>
-    <label class="check" id="edRemoveRow"><input type="checkbox" name="remove_icon" id="edRemove" value="true"> Fjern bildet</label>
+    <label id="edUrlRow">{{ t('admin.url_label') }}<input name="url" id="edUrl" type="url" placeholder="https://…"></label>
+    <label>{{ t('admin.emoji_label') }}<input name="emoji" id="edEmoji" maxlength="16" placeholder="{{ t('admin.emoji_placeholder') }}"></label>
+    <label>{{ t("admin.image") }}<input type="file" name="icon" id="edIcon" accept=".png,.jpg,.jpeg,.webp,.gif,.svg"></label>
+    <label class="check" id="edRemoveRow"><input type="checkbox" name="remove_icon" id="edRemove" value="true"> {{ t("admin.remove_image") }}</label>
     <p id="edError" class="err small"></p>
     <div class="editor-actions">
-      <button type="button" class="small" id="edCancel">Avbryt</button>
-      <button type="submit" class="primary">Lagre</button>
+      <button type="button" class="small" id="edCancel">{{ t("admin.cancel") }}</button>
+      <button type="submit" class="primary">{{ t("admin.save") }}</button>
     </div>
   </form>
 </dialog>
 
 <script>
+const T = {
+  uploading: {{ raw("admin.uploading")|tojson }},
+  linkAdded: {{ raw("admin.link_added")|tojson }},
+  confirmDelete: {{ raw("admin.confirm_delete")|tojson }},
+  errorStatus: {{ raw("admin.error_status")|tojson }},
+  validEmail: {{ raw("admin.valid_email")|tojson }},
+  invitedNote: {{ raw("admin.invited_note")|tojson }},
+  ok: {{ raw("admin.ok")|tojson }},
+  pwSet: {{ raw("admin.pw_set_msg")|tojson }},
+  confirmRemove: {{ raw("admin.confirm_remove")|tojson }},
+};
+const fmt = (s, vars) => s.replace(/\{(\w+)\}/g, (m, k) => k in vars ? vars[k] : m);
+
 const drop = document.getElementById('drop');
 const input = document.getElementById('file');
 const log = document.getElementById('log');
@@ -146,7 +159,7 @@ async function upload(file) {
   const fd = new FormData();
   fd.append('file', file);
   fd.append('admin_only', document.getElementById('adminOnly').checked ? 'true' : 'false');
-  note(`Laster opp ${file.name}…`);
+  note(fmt(T.uploading, { name: file.name }));
   const r = await fetch('/api/upload', { method: 'POST', body: fd });
   const j = await r.json().catch(() => ({}));
   if (r.ok) { note(`✓ ${file.name} → ${j.url}`); setTimeout(() => location.reload(), 800); }
@@ -164,7 +177,7 @@ document.getElementById('linkForm').addEventListener('submit', async e => {
   fd.append('admin_only', document.getElementById('adminOnly').checked ? 'true' : 'false');
   const r = await fetch('/api/link', { method: 'POST', body: fd });
   const j = await r.json().catch(() => ({}));
-  if (r.ok) { note(`✓ Lenke lagt til: ${fd.get('title')}`); setTimeout(() => location.reload(), 600); }
+  if (r.ok) { note(fmt(T.linkAdded, { title: fd.get('title') })); setTimeout(() => location.reload(), 600); }
   else note(`✗ ${j.detail || r.status}`, false);
 });
 
@@ -175,7 +188,7 @@ async function post(url, slug) {
   return true;
 }
 document.querySelectorAll('.del').forEach(b => b.onclick = async () => {
-  if (!confirm(`Slette "${b.dataset.slug}"?`)) return;
+  if (!confirm(fmt(T.confirmDelete, { slug: b.dataset.slug }))) return;
   if (await post('/api/delete', b.dataset.slug)) b.closest('tr').remove();
 });
 document.querySelectorAll('.banner').forEach(b => b.onclick = async () => {
@@ -227,12 +240,12 @@ f.addEventListener('submit', async e => {
   const r = await fetch('/api/edit', { method: 'POST', body: fd });
   if (r.ok) return location.reload();
   const j = await r.json().catch(() => ({}));
-  $('edError').textContent = j.detail || `Feil (${r.status})`;
+  $('edError').textContent = j.detail || fmt(T.errorStatus, { status: r.status });
 });
 
 const postJson = (url, body) =>
   fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-const failText = async r => (await r.json().catch(() => ({}))).detail || `Feil (${r.status})`;
+const failText = async r => (await r.json().catch(() => ({}))).detail || fmt(T.errorStatus, { status: r.status });
 
 // --- access dialog: everyone, the checked people, or only me (the list is kept whatever is chosen)
 const acDlg = $('accessDlg'), acForm = $('accessForm');
@@ -267,7 +280,7 @@ acForm.querySelectorAll('input[name=level]').forEach(r => r.onchange = showPeopl
 function addPerson() {
   const input = $('acNew'), email = input.value.trim().toLowerCase();
   if (!email) return true;
-  if (!input.checkValidity()) { $('acError').textContent = 'Skriv en gyldig e-post'; return false; }
+  if (!input.checkValidity()) { $('acError').textContent = T.validEmail; return false; }
   const row = [...$('acList').querySelectorAll('input')].find(cb => cb.value === email);
   if (row) row.checked = true;
   else $('acList').prepend(personRow(email, true));
@@ -301,8 +314,8 @@ $('inviteForm').addEventListener('submit', async e => {
     e.target.querySelectorAll('input, button').forEach(x => x.disabled = true);
     $('peopleError').classList.remove('err');
     $('peopleError').innerHTML = '';
-    $('peopleError').append('Personen er invitert. Gi det midlertidige passordet videre nå; det vises ikke igjen. ');
-    const ok = document.createElement('button'); ok.className = 'small'; ok.textContent = 'OK';
+    $('peopleError').append(T.invitedNote);
+    const ok = document.createElement('button'); ok.className = 'small'; ok.textContent = T.ok;
     ok.onclick = () => location.reload();
     $('peopleError').append(ok);
     return;
@@ -332,12 +345,12 @@ if ($('pwDialog')) {
     const r = await postJson('/api/people/password', { email: pwEmail, password: $('pwNew').value });
     if (!r.ok) { $('pwError').textContent = await failText(r); return; }
     $('pwError').textContent = '';
-    $('pwMsg').textContent = 'Passordet er satt. Gi det til personen nå; det vises ikke igjen.';
+    $('pwMsg').textContent = T.pwSet;
     $('pwSet').disabled = true; $('pwNew').disabled = true;  // the dialog reloads the page when closed
   });
 }
 document.querySelectorAll('.unperson').forEach(b => b.onclick = async () => {
-  if (!confirm(`Fjerne ${b.dataset.email}? Personen kan ikke logge inn lenger og tas av alle appene.`)) return;
+  if (!confirm(fmt(T.confirmRemove, { email: b.dataset.email }))) return;
   const r = await postJson('/api/people/remove', { email: b.dataset.email });
   if (r.ok) return location.reload();
   $('peopleError').textContent = await failText(r);

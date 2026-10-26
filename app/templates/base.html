@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="no">
+<html lang="{{ lang() }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -20,10 +20,10 @@
   <a class="brand" href="/"><img src="/static/logo.svg" alt="" width="26" height="26">{{ site }}</a>
   {% if user %}
   <nav>
-    {% if admin %}<a href="/admin" class="{% if request.url.path == '/admin' %}active{% endif %}">Admin</a>{% endif %}
+    {% if admin %}<a href="/admin" class="{% if request.url.path == '/admin' %}active{% endif %}">{{ t("nav.admin") }}</a>{% endif %}
     <span class="who">{{ user }}</span>
-    {% if pw_mode() and user %}<a href="/password">Bytt passord</a>{% endif %}
-    <form method="post" action="/logout"><button class="link">Logg ut</button></form>
+    {% if pw_mode() and user %}<a href="/password">{{ t("nav.change_password") }}</a>{% endif %}
+    <form method="post" action="/logout"><button class="link">{{ t("nav.logout") }}</button></form>
   </nav>
   {% endif %}
 </header>

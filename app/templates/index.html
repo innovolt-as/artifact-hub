@@ -4,9 +4,9 @@
 {% macro app_item(a, view, summary) -%}
 <li class="app{% if a.pinned %} pinned{% endif %}" data-slug="{{ a.slug }}" data-pinned="{{ 'true' if a.pinned else 'false' }}">
   <a href="{{ a.open_url }}" {% if a.description %}title="{{ a.description }}"{% endif %} {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>
-    {% if a.new %}<span class="dot" title="Endret siden du sist åpnet den"></span>{% endif %}
-    {% if a.admin_only %}<span class="lock" title="Kun admin">🔒</span>{% endif %}
-    {% if a.kind == 'link' %}<span class="ext" title="Ekstern app">↗</span>{% endif %}
+    {% if a.new %}<span class="dot" title="{{ t('home.changed') }}"></span>{% endif %}
+    {% if a.admin_only %}<span class="lock" title="{{ t('home.admin_only') }}">🔒</span>{% endif %}
+    {% if a.kind == 'link' %}<span class="ext" title="{{ t('home.external') }}">↗</span>{% endif %}
     {{ icon(a) }}
     <span class="txt">
       <h2>{{ a.title }}</h2>
@@ -15,7 +15,7 @@
   </a>
   {% if view == 'cards' %}
   <button class="pin" type="button" aria-pressed="{{ 'true' if a.pinned else 'false' }}"
-          aria-label="{{ 'Fjern fra favoritter' if a.pinned else 'Legg til i favoritter' }}: {{ a.title }}">{{ '★' if a.pinned else '☆' }}</button>
+          aria-label="{{ t('js.home.unpin') if a.pinned else t('js.home.pin') }}: {{ a.title }}">{{ '★' if a.pinned else '☆' }}</button>
   {% endif %}
 </li>
 {%- endmacro %}
@@ -26,22 +26,22 @@
     <div class="hero-row">
       <a class="brand" href="/"><img src="/static/logo.svg" alt="" width="26" height="26">{{ site }}</a>
       <nav>
-        {% if admin %}<a href="/admin">Admin</a>{% endif %}
+        {% if admin %}<a href="/admin">{{ t("nav.admin") }}</a>{% endif %}
         <span class="who">{{ user }}</span>
-        {% if pw_mode() and user %}<a href="/password">Bytt passord</a>{% endif %}
-        <form method="post" action="/logout"><button class="link">Logg ut</button></form>
+        {% if pw_mode() and user %}<a href="/password">{{ t("nav.change_password") }}</a>{% endif %}
+        <form method="post" action="/logout"><button class="link">{{ t("nav.logout") }}</button></form>
       </nav>
     </div>
     <div class="hero-row hero-main">
       <div>
-        <h1 id="hello">Hei</h1>
+        <h1 id="hello">{{ t("home.hello") }}</h1>
         <p class="today" id="today">{{ today }}</p>
       </div>
-      <div class="viewtog" role="group" aria-label="Visning">
-        <button type="button" data-set-view="icons" aria-pressed="{{ 'true' if view == 'icons' else 'false' }}" title="Ikoner">
+      <div class="viewtog" role="group" aria-label="{{ t('home.view') }}">
+        <button type="button" data-set-view="icons" aria-pressed="{{ 'true' if view == 'icons' else 'false' }}" title="{{ t('home.icons') }}">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
         </button>
-        <button type="button" data-set-view="cards" aria-pressed="{{ 'true' if view == 'cards' else 'false' }}" title="Kort">
+        <button type="button" data-set-view="cards" aria-pressed="{{ 'true' if view == 'cards' else 'false' }}" title="{{ t('home.cards') }}">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><rect x="3" y="4" width="18" height="6.5" rx="2"/><rect x="3" y="13.5" width="18" height="6.5" rx="2"/></svg>
         </button>
       </div>
@@ -55,14 +55,14 @@
 {% if not favs and not top and not rest %}
   <button type="button" class="addcard" data-open-picker>
     <span class="plus" aria-hidden="true">+</span>
-    <b>Legg til apper</b>
-    <span>Velg hvilke apper du vil ha på forsiden din</span>
+    <b>{{ t("home.add_apps") }}</b>
+    <span>{{ t("home.add_hint") }}</span>
   </button>
 {% else %}
 <div class="apps" data-view="{{ view }}">
   {% if favs %}
   <section id="fav">
-    <h3 class="sec">Favoritter</h3>
+    <h3 class="sec">{{ t("home.favorites") }}</h3>
     <ul class="{{ 'grid top4' if view == 'icons' else 'cards' }}">
       {% for a in favs %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
@@ -70,27 +70,27 @@
   {% endif %}
   {% if top %}
   <section id="top">
-    <h3 class="sec">Mest brukt <span>for deg</span></h3>
+    <h3 class="sec">{{ t("home.top") }} <span>{{ t("home.top_for_you") }}</span></h3>
     <ul class="{{ 'grid top4' if view == 'icons' else 'cards' }}">
       {% for a in top %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
   </section>
   {% endif %}
   <section id="rest">
-    {% if favs or top %}<h3 class="sec">Alle apper</h3>{% endif %}
+    {% if favs or top %}<h3 class="sec">{{ t("home.all") }}</h3>{% endif %}
     <ul class="{{ 'grid' if view == 'icons' else 'cards' }}">
       {% for a in rest %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
   </section>
-  <button type="button" class="more" data-open-picker>＋ Legg til eller fjern apper{% if has_new %}<span class="dot" title="Nye apper"></span>{% endif %}</button>
+  <button type="button" class="more" data-open-picker>{{ t("home.edit") }}{% if has_new %}<span class="dot" title="{{ t('home.new_apps') }}"></span>{% endif %}</button>
 </div>
 {% endif %}
 
 <dialog id="picker" class="sheet" aria-labelledby="pickerTitle">
   <div class="sheet-in">
     <header>
-      <h1 id="pickerTitle" tabindex="-1" autofocus>Velg apper</h1>
-      <p>Huk av det du vil ha på forsiden</p>
+      <h1 id="pickerTitle" tabindex="-1" autofocus>{{ t("home.picker_title") }}</h1>
+      <p>{{ t("home.picker_hint") }}</p>
     </header>
     {% if available %}
     <ul>
@@ -99,7 +99,7 @@
         <input type="checkbox" data-slug="{{ a.slug }}"{% if a.added %} checked{% endif %}>
         {{ icon(a) }}
         <span class="txt">
-          <b>{{ a.title }}{% if a.unseen %} <span class="new">Ny</span>{% endif %}{% if a.admin_only %} <span class="lockmark" title="Kun admin">🔒</span>{% endif %}</b>
+          <b>{{ a.title }}{% if a.unseen %} <span class="new">{{ t("home.new") }}</span>{% endif %}{% if a.admin_only %} <span class="lockmark" title="{{ t('home.admin_only') }}">🔒</span>{% endif %}</b>
           {% if a.description %}<small>{{ a.description }}</small>{% endif %}
         </span>
         <span class="tick" aria-hidden="true"></span>
@@ -107,10 +107,11 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="none">Det finnes ingen apper ennå.</p>
+    <p class="none">{{ t("home.none") }}</p>
     {% endif %}
-    <footer><button type="button" class="primary" data-close>Ferdig</button></footer>
+    <footer><button type="button" class="primary" data-close>{{ t("home.done") }}</button></footer>
   </div>
 </dialog>
+<script type="application/json" id="__hub_strings">{{ js_strings|tojson }}</script>
 <script src="/static/home.js" defer></script>
 {% endblock %}
