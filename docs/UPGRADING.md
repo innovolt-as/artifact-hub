@@ -18,9 +18,9 @@ Huben kjører som et Docker-image. Dataene (`./data`: artifacts og `hub.db`) lig
 **Tilbakerulling:** sett forrige tag (ved første oppgradering: image-referansen du noterte i steg 4 under «Fra `latest` til v1.0.0») i `docker-compose.override.yml` og kjør de samme to kommandoene (`docker compose pull && docker compose up -d`). Normalt rulles bare image-taggen tilbake, og dataene i `data/` røres ikke. Gjenopprett data fra backupen bare hvis den nye versjonen har endret dem:
 
 1. `docker compose stop hub`
-2. Pakk arkivet ut i `data/` (arkivet har `hub.db` og `artifacts/` på toppnivå): `tar xzf backups/hub-ÅÅÅÅMMDD-TTMM.tar.gz -C data`
-3. Fjern `data/hub.db-wal` og `data/hub.db-shm` hvis de finnes.
-4. `docker compose up -d`
+2. Flytt dagens data til side, så ingenting nyere enn backupen blandes inn: `mv data/hub.db data/hub.db.old && mv data/artifacts data/artifacts.old`. Fjern `data/hub.db-wal` og `data/hub.db-shm` hvis de finnes.
+3. Pakk arkivet ut i `data/` (arkivet har `hub.db` og `artifacts/` på toppnivå): `tar xzf backups/hub-ÅÅÅÅMMDD-TTMM.tar.gz -C data`
+4. `docker compose up -d`. Sjekk huben, og slett `.old`-kopiene når alt ser riktig ut.
 
 Caddy, `.env` og compose-filene beholdes som de er.
 
