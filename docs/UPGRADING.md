@@ -36,7 +36,7 @@ Rekkefølgen er viktig: override-fila lages **før** repo-filene oppdateres. Nye
    ```bash
    docker compose stop hub && tar czf ../hub-manual-backup.tar.gz -C data hub.db artifacts && docker compose start hub
    ```
-4. Noter hvilket image som kjører nå, slik at du kan rulle tilbake (det finnes ingen forrige tag, og `latest` flyttes av v1.0.0-bygget): `docker inspect artifact-hub --format '{{.Image}}'` gir image-ID-en, og `docker compose images hub` viser taggen (gamle `main`-bygg pushet `ghcr.io/innovolt-as/artifact-hub:<sha>`). Skriv den ned. Tilbakerulling ved første oppgradering = denne referansen på `image:`-linjen i override-fila.
+4. Noter hvilket image som kjører nå, slik at du kan rulle tilbake (det finnes ingen forrige tag, og `latest` flyttes av v1.0.0-bygget): `docker image inspect $(docker inspect artifact-hub --format '{{.Image}}') --format '{{join .RepoDigests "\n"}}'` gir en referanse som `ghcr.io/innovolt-as/artifact-hub@sha256:…`. Skriv den ned. Tilbakerulling ved første oppgradering = denne referansen på `image:`-linjen i override-fila (bruk digesten, ikke image-ID-en: med `pull_policy: always` må referansen kunne hentes fra registeret).
 5. Legg `DOMAIN` i `.env`, f.eks. `DOMAIN=apps.example.com` (samme vertsnavn som Caddy allerede serverer). Compose krever `.env` (den er `env_file` for `hub`), og `caddy` nekter å starte uten `DOMAIN`.
 6. Lag `docker-compose.override.yml` ved siden av `docker-compose.yml`:
    ```yaml
