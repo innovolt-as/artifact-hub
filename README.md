@@ -11,14 +11,14 @@ Liten FastAPI-app som hoster Claude-artifacts (HTML-sider og små apper) bak inn
 - **`scripts/push.sh`** – last opp fra terminalen uten å logge inn
 - **Claude-connector** på `/mcp` – publiser og oppdater apper rett fra en samtale i claude.ai (også i mobilappen)
 - **Lagring for artifacts** – artifacts fra claude.ai som bruker `window.claude.use("db")` fungerer uendret (se under)
-- **Lenkekort** (`*.link.json`) for apper som kjører for seg selv, f.eks. Recall og Modi – legges til og redigeres i `/admin`, kan merkes `admin_only`
+- **Lenkekort** (`*.link.json`) for apper som kjører for seg selv, på en egen adresse – legges til og redigeres i `/admin`, kan merkes `admin_only`
 
 ## Oppsett på serveren
 
 ```bash
 git clone https://github.com/innovolt-as/artifact-hub.git && cd artifact-hub
 cp .env.example .env            # fyll inn SECRET_KEY, e-poster, UPLOAD_TOKEN, SMTP
-mkdir -p data/artifacts         # + kopier inn recall.link.json (data/ er ikke i git)
+mkdir -p data/artifacts         # data/ er ikke i git
 docker compose up -d
 ```
 

@@ -6,7 +6,7 @@ Layout of the data dir (ARTIFACTS_DIR, default /data/artifacts):
     my-app/index.html (+ assets)   -> served at /a/my-app/
     my-chart.meta.json             -> optional: {"title": "...", "description": "...", "admin_only": true}
     my-app/meta.json               -> same, for folder artifacts
-    recall.link.json               -> external link card: {"title": "...", "url": "...", "admin_only": true}
+    my-tool.link.json              -> external link card: {"title": "...", "url": "...", "admin_only": true}
 
 Who sees an app (app/access.py): "admin_only": true = only admins; "access": "people" with "people": [e-mails]
 = those people; neither = everyone who can log in.
@@ -1588,7 +1588,7 @@ def api_link(
     url: str = Form(...),
     admin_only: bool = Form(False),
 ):
-    """Add an external link card (like recall.link.json) to the gallery."""
+    """Add an external link card (like my-tool.link.json) to the gallery."""
     _upload_authorized(request)
     title, url = title.strip(), _check_url(url)
     if not title:
