@@ -400,7 +400,7 @@ def _remove_icon(slug: str) -> None:
         (ICONS_DIR / f"{slug}{ext}").unlink(missing_ok=True)
 
 
-_NO_ORDER = str.maketrans({"æ": "z{", "ø": "z|", "å": "z}"})  # æ ø å after z, in that order
+_NO_ORDER = str.maketrans({"æ": "z{", "ø": "z|", "å": "z}"})  # i18n-ok: æ ø å after z, in that order
 
 
 def _sort_key(title: str) -> str:

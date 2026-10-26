@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.0 (unreleased)
+
+### Before you upgrade
+
+- The default language is now English. Set `HUB_LANG=nb` in `.env` to keep the Norwegian interface. An unknown `HUB_LANG` stops the hub at startup.
+
+### New
+
+- `HUB_LANG` and `app/lang/`: all user-visible text lives in language files (`en.json`, `nb.json`). See "Adding a language" in `CONTRIBUTING.md`.
+- HTML login e-mail with the hub icon.
+- `SITE_NAME` is used as the sender name when `SMTP_FROM` is only an address.
+
+### Changed
+
+- `mail.send(to, subject, text, html=None, images=None, sender_name=None)`. Custom providers must accept the new arguments.
+
 ## v1.0.0 (2026-10-26)
 
 ### Before you upgrade
