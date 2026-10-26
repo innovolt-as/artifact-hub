@@ -1,0 +1,5 @@
+{
+  "banner.back": "Tilbake til {site}",
+  "locale": "no-NO",
+  "login.sent": "Hvis <strong>{email}</strong> har tilgang, har vi sendt en innloggingslenke dit. Den er gyldig i {minutes} minutter."
+}

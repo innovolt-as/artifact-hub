@@ -1,0 +1,5 @@
+{
+  "banner.back": "Back to {site}",
+  "locale": "en-GB",
+  "login.sent": "If <strong>{email}</strong> has access, we have sent a login link there. It is valid for {minutes} minutes."
+}

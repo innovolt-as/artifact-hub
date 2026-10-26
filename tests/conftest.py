@@ -19,6 +19,7 @@ os.environ.update(
     ALLOWED_EMAILS="user@test.no",
     BASE_URL="https://hub.test",
     SECRET_KEY="test",
+    HUB_LANG="nb",
 )
 os.environ.pop("UPLOAD_TOKEN", None)
 os.environ.pop("ALLOWED_DOMAINS", None)
@@ -180,3 +181,10 @@ def frozen_monday(monkeypatch):
     real = time.localtime
     fixed = time.mktime((2026, 10, 26, 10, 0, 0, 0, 0, -1))
     monkeypatch.setattr(time, "localtime", lambda *a: real(*a) if a else real(fixed))
+
+
+@pytest.fixture
+def english(monkeypatch):
+    """Switch the interface language to English for one test."""
+    from app import i18n
+    monkeypatch.setattr(i18n, "LANG", "en")

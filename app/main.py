@@ -36,7 +36,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from app import access, banner, home, mail, passwd, versions
+from app import access, banner, home, i18n, mail, passwd, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -112,6 +112,7 @@ class BrandedStatic(StaticFiles):
 app.mount("/static", BrandedStatic(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["pw_mode"] = lambda: password_mode()
+templates.env.globals.update(t=i18n.t, t_html=i18n.t_html, tn=i18n.tn, raw=i18n.raw, lang=lambda: i18n.LANG)
 templates.env.filters["strftime"] = lambda ts: time.strftime("%d.%m.%Y %H:%M", time.localtime(ts))
 signer = URLSafeTimedSerializer(SECRET_KEY, salt="session")
 
