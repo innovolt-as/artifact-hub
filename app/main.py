@@ -669,7 +669,8 @@ def index(request: Request, user: str = Depends(require_user)):
         prefs = home.get_prefs(con, user)
         mine = [a for a in apps if a["slug"] in prefs["apps"]]  # only the apps this user has chosen
         stats = home.visit_stats(con, user)
-        summaries = home.summaries(con, user, [a["slug"] for a in mine]) if prefs["view"] == "cards" else {}
+        common = {a["slug"] for a in mine if a["data"] == "shared"}
+        summaries = home.summaries(con, user, [a["slug"] for a in mine], common) if prefs["view"] == "cards" else {}
     favs, top, rest = home.build_sections(mine, stats, prefs["pins"])
     available = home.picker(apps, prefs["apps"], prefs["seen"])
     now = time.localtime()  # fallback only; the page rewrites the date and greeting with the viewer's clock
