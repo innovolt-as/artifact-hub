@@ -3,7 +3,7 @@
 app can leave for its card.
 
 Everything takes an open connection from main.db() (rows as sqlite3.Row) and an e-mail; nothing here
-is shared between users.
+is shared between users, except the summary line of apps with shared data (app/shared.py).
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import sqlite3
 import time
 
 from app import i18n
+from app.shared import SHARED
 
 DAY = 86400
 MOST_USED_DAYS = 30    # what counts towards "Mest brukt"
@@ -191,20 +192,24 @@ def _text(raw: str) -> str | None:
     return text.strip()[:SUMMARY_MAX] if isinstance(text, str) and text.strip() else None
 
 
-def summaries(con: sqlite3.Connection, email: str, slugs: list[str]) -> dict[str, str]:
-    """The newest non-empty summary per app, from the document store or the data API."""
+def summaries(con: sqlite3.Connection, email: str, slugs: list[str], shared: set[str] = frozenset()) -> dict[str, str]:
+    """The newest non-empty summary per app, from the document store or the data API. Apps in `shared` have
+    shared data (app/shared.py): their line is the shared document's, the same for everyone."""
     if not slugs:
         return {}
     email = email.lower()
-    marks = ",".join("?" * len(slugs))
+    own = [s for s in slugs if s not in shared]
+    common = [s for s in slugs if s in shared]
+    own_marks, common_marks = ",".join("?" * len(own)), ",".join("?" * len(common))
     rows = con.execute(
         f"""SELECT slug, data AS raw, updated_at AS at FROM docs
-              WHERE owner=? AND collection=? AND doc_id=? AND slug IN ({marks})
+              WHERE collection=? AND doc_id=?
+                AND ((owner=? AND slug IN ({own_marks})) OR (owner=? AND slug IN ({common_marks})))
             UNION ALL
             SELECT app AS slug, value AS raw, updated AS at FROM app_data
-              WHERE email=? AND key=? AND app IN ({marks})
+              WHERE email=? AND key=? AND app IN ({own_marks})
             ORDER BY at""",
-        (email, *SUMMARY_DOC, *slugs, email, SUMMARY_KEY, *slugs),
+        (*SUMMARY_DOC, email, *own, SHARED, *common, email, SUMMARY_KEY, *own),
     ).fetchall()
     out: dict[str, str] = {}
     for r in rows:  # oldest first, so the newest valid one is left standing

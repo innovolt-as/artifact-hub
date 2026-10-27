@@ -3,7 +3,9 @@
  *
  * Artifacts built on claude.ai reach storage etc. through window.claude.use(name). That runtime
  * only exists inside claude.ai, so this file provides a compatible subset here:
- *   db        -> documents stored on the hub, private per artifact AND per logged-in user
+ *   db        -> documents stored on the hub, per artifact and per logged-in user; in an app with shared
+ *                data (data-shared="1") shared by everyone who can see it, written by admins only, except each
+ *                user's own data/users/<e-mail>/ branch, which stays private (as on claude.ai)
  *   downloads -> save({filename, data}) as a plain browser download
  *   user      -> who is viewing (the logged-in e-mail)
  * Other capabilities (sample, room, mcp, ...) resolve null, which artifacts must handle anyway.
@@ -14,6 +16,7 @@
   const SLUG = me.dataset.slug;
   const EMAIL = me.dataset.user;
   const ADMIN = me.dataset.admin === "1";
+  const SHARED = me.dataset.shared === "1";
   const API = `/api/store/${encodeURIComponent(SLUG)}`;
   const POLL_MS = 5000;
   // Texts come from the hub's language files as data-strings on this script tag; without them the key shows.
@@ -43,7 +46,8 @@
     }
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      const code = { 400: "invalid_argument", 404: "invalid_argument", 413: "invalid_argument" }[r.status] || "unavailable";
+      // claude.ai has no permission code; a refused write (403) cannot succeed on retry either
+      const code = { 400: "invalid_argument", 403: "invalid_argument", 404: "invalid_argument", 413: "invalid_argument" }[r.status] || "unavailable";
       throw dbError(code, j.detail || tr("error_status", { status: r.status }));
     }
     return r.json();
@@ -196,7 +200,7 @@
   const user = Object.freeze({
     isOwner: async () => ADMIN,
     canEdit: async () => ADMIN,
-    can: async () => true,
+    can: async (name) => (name === "data.write" ? !SHARED || ADMIN : true),
     id: async () => EMAIL,
     me: async () => ({ id: EMAIL, name: profile.name, avatarUrl: "", color: profile.color, email: EMAIL, isOwner: ADMIN, canEdit: ADMIN }),
     profiles: async (ids) => Object.fromEntries([].concat(ids).map((i) => [i, i === EMAIL ? profile : { id: i, name: "", avatarUrl: "", color: "", email: null, isMe: false, guest: false }])),

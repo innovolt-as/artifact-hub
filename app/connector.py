@@ -28,10 +28,20 @@ Use list_apps to find an app's slug. Use create_app only for a brand-new app; ne
 unless the app's current source is already in the conversation. Prefer edit_app for small changes.
 Only publish or change apps when the user explicitly asks you to.
 
-Apps also keep data for each logged-in user (what they read and write through window.claude.use("db")).
-list_app_data, get_app_data, set_app_data and delete_app_data reach that data for the user behind this
-connection only. Before writing, read the app's source (get_app) and existing documents so the format matches
-what the app expects. Write data when the user asks you to log, add or change something in an app.
+Apps also keep data (what they read and write through window.claude.use("db")). By default an app's data is
+personal: list_app_data, get_app_data, set_app_data and delete_app_data reach the data of the user behind this
+connection only. An app can have shared data instead (list_apps shows "data": "shared"): then every document is
+shared by everyone who can see the app and only admins change it, except each user's own branch
+data/users/<their e-mail>/..., which stays private to that user. The data tools pick shared or private from the
+path. Before writing, read the app's source (get_app) and existing documents so the format matches what the app
+expects. Write data when the user asks you to log, add or change something in an app.
+
+When you build an app whose content Claude or a scheduled agent will write, ask the user before create_app
+whether that content is the same for everyone who can open the app (shared_data=true) or personal to each user,
+and pass shared_data accordingly. In a shared app, put anything personal under data/users/<the user's e-mail>/,
+and say in the app's guide (meta/guide) what is shared and what is personal. update_app_info(shared_data=...)
+switches an existing app; copy_my_data=true also copies the user's current documents into the shared data, where
+everyone with access sees them, so check them for personal content first.
 
 The hub's front page can show one line from each app on its card. An app sets it by writing the document
 hub/summary = {{"text": "<one short line, e.g. 93 hits ▼1>"}} (db.doc("hub/summary").set(...)) whenever the
@@ -80,7 +90,8 @@ def build_mcp() -> MCPServer:
         title="List apps",
         description="List every app and link card on the hub, with slug, title, description, URL, who has access "
         "(a short label in the hub's language: everyone who can log in, only admins, or specific people chosen on "
-        "the admin page), and whether it is editable (pages and folder apps are; link cards are not). Use this to find the slug of an "
+        "the admin page), whether its data is personal or shared, and whether it is editable (pages and folder apps are; "
+        "link cards are not). Use this to find the slug of an "
         "existing app before get_app, update_app, edit_app or update_app_info.",
         annotations=ToolAnnotations(readOnlyHint=True),
         structured_output=False,
@@ -99,6 +110,7 @@ def build_mcp() -> MCPServer:
                 "kind": a["kind"],
                 "url": a["url"] if a["kind"] == "link" else _url(a["slug"]),
                 "access": a["access_text"],
+                "data": a["data"],
                 "editable": a["kind"] in ("page", "app"),
                 "updated": datetime.fromtimestamp(a["updated"], timezone.utc).isoformat(timespec="seconds"),
             }
@@ -134,16 +146,20 @@ def build_mcp() -> MCPServer:
         "unless private=false (everyone who can log in); leave them private until the user explicitly asks to share them. "
         "Sharing with specific people is done on the hub's admin page. "
         "Only call this when the user explicitly asks to publish. "
+        "If Claude or a scheduled agent will write the app's content, first ask the user whether it is the same for "
+        "everyone who can open the app (shared_data=true) or personal to each user (the default). "
         "slug: lowercase letters, digits, '.', '-', '_'. emoji: one emoji used as the gallery icon.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
         structured_output=False,
     )
     def create_app(slug: str, html: str, title: str, description: str | None = None, emoji: str | None = None,
-                   private: bool = True) -> str:
+                   private: bool = True, shared_data: bool | None = None) -> str:
         try:
             _user()
             hub.save_page(slug, html, create=True, title=title, description=description, emoji=emoji,
                           private=private)
+            if shared_data:
+                hub.set_data_mode(slug, True)
         except hub.HubError as e:
             return _error(str(e))
         return i18n.t("mcp.created_private" if private else "mcp.created", url=_url(slug))
@@ -199,24 +215,40 @@ def build_mcp() -> MCPServer:
         "description, emoji, or private. Fields left out stay as they are; an empty string removes the field. "
         "private=true makes it visible to admins only; private=false shares the app with everyone who can log in: "
         "only do that when the user explicitly asks. Sharing with specific people is done on the hub's admin page "
-        "(a list of people is kept when private changes). Use list_apps to find the slug.",
+        "(a list of people is kept when private changes). "
+        "shared_data=true gives the app shared data (everyone who can see it reads it, only admins change it, and "
+        "data/users/<e-mail>/ stays private to each user); false makes it personal again. Nothing is deleted either "
+        "way. copy_my_data=true also copies the user's documents into the shared data when it has none yet: check "
+        "them for personal content first. Use list_apps to find the slug.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
         structured_output=False,
     )
     def update_app_info(slug: str, title: str | None = None, description: str | None = None,
-                        emoji: str | None = None, private: bool | None = None) -> str:
+                        emoji: str | None = None, private: bool | None = None, shared_data: bool | None = None,
+                        copy_my_data: bool = False) -> str:
         try:
-            _user()
+            user = _user()
             hub.set_info(slug, title=title, description=description, emoji=emoji, private=private)
+            said = [i18n.t("mcp.info_updated", slug=slug)]
+            if shared_data is not None:
+                existed = shared_data and copy_my_data and hub.share_preview(slug, user)["shared_exists"]
+                copied = hub.set_data_mode(slug, shared_data, copy_from=user if copy_my_data else None)
+                if existed:  # nothing is copied over shared data the app already has
+                    said.append(i18n.t("mcp.data_shared_exists"))
+                else:
+                    said.append(i18n.tn("mcp.data_shared", copied) if shared_data else i18n.t("mcp.data_personal"))
+            if private is False and slug in hub.claude_warned(hub.list_artifacts(user)):
+                said.append(i18n.t("mcp.claude_warning"))
         except hub.HubError as e:
             return _error(str(e))
-        return i18n.t("mcp.info_updated", slug=slug)
+        return " ".join(said)
 
     @mcp.tool(
         name="list_app_data",
         title="List app data",
         description="Show what the user has stored in an app (the documents the app reads and writes through "
-        "window.claude.use('db')). Without collection: an overview {collection: [document ids]}. With a collection "
+        "window.claude.use('db')); in an app with shared data, the shared documents and the user's own "
+        "data/users/<e-mail>/ branch. Without collection: an overview {collection: [document ids]}. With a collection "
         "path (odd number of segments, e.g. 'days'): {document id: data} for that collection (at most 500).",
         annotations=ToolAnnotations(readOnlyHint=True),
         structured_output=False,
@@ -251,7 +283,9 @@ def build_mcp() -> MCPServer:
         "polls. path has an even number of segments, e.g. 'days/2026-10-22'. data is a JSON object. "
         "merge=false replaces the document; merge=true deep-merges objects into an existing one (lists are "
         "replaced, so to add to a list: get_app_data, append, and write the whole list). Match the format the app "
-        "uses: read its source with get_app and existing documents first. Only write when the user asks.",
+        "uses: read its source with get_app and existing documents first. In an app with shared data, paths under "
+        "data/users/<the user's e-mail>/ are the user's private data and every other path is shared. "
+        "Only write when the user asks.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True),
         structured_output=False,
     )

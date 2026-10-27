@@ -129,6 +129,27 @@ def _data_summary(con, app, email, data, at):
     )
 
 
+def test_summaries_shared_apps_read_the_shared_line(hub):
+    with hub.db() as con:
+        _doc_summary(con, "radar", "*", {"text": "felles"}, 100)
+        _doc_summary(con, "radar", "x@t.no", {"text": "gammel personlig"}, 200)
+        _doc_summary(con, "mat", "*", {"text": "ikke en felles app"}, 100)
+        _doc_summary(con, "mat", "x@t.no", {"text": "min"}, 100)
+        got = hub.home.summaries(con, "x@t.no", ["radar", "mat"], shared={"radar"})
+    assert got == {"radar": "felles", "mat": "min"}
+
+
+def test_index_cards_show_shared_line_to_someone_who_never_opened_the_app(hub, make_page, user_client):
+    make_page("radar")
+    path = hub._meta_path("radar")
+    hub._write_meta(path, {**hub._read_meta(path), "data": "shared"})
+    with hub.db() as con:
+        hub.home.set_view(con, "user@test.no", "cards")
+        hub.home.set_added(con, "user@test.no", "radar", True)
+        _doc_summary(con, "radar", "*", {"text": "3 må-vite-saker"}, 100)
+    assert "3 må-vite-saker" in user_client.get("/").text
+
+
 def test_summaries_both_sources_newest_wins_and_cut(hub):
     with hub.db() as con:
         _doc_summary(con, "a", "x@t.no", {"text": "A"}, 100)

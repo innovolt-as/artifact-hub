@@ -28,13 +28,15 @@
     <tr data-slug="{{ a.slug }}">
       <td class="icon-cell">{{ icon(a, "icon icon-sm") }}</td>
       <td><a href="{{ a.url }}" {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>{{ a.title }}</a>
-          <span class="muted small">{{ a.slug }} · {{ t('admin.kind_' + a.kind) }}</span></td>
+          <span class="muted small">{{ a.slug }} · {{ t('admin.kind_' + a.kind) }}</span>
+          {% if a.slug in warned %}<p class="claude-warn err small">⚠ {{ t('admin.claude_warning') }} {{ t('admin.claude_warning_fix') }}</p>{% endif %}</td>
       <td class="right">
         <button class="small edit" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}"
                 data-kind="{{ a.kind }}" data-url="{{ a.url if a.kind == 'link' else '' }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}">{{ t("admin.edit") }}</button>
-        {% if a.kind != 'link' %}<button class="small banner" data-slug="{{ a.slug }}" title="{{ t('admin.banner_title') }}">{{ t('admin.banner_on') if a.banner else t('admin.banner_off') }}</button>{% endif %}
+        {% if a.kind != 'link' %}<button class="small banner" data-slug="{{ a.slug }}" title="{{ t('admin.banner_title') }}">{{ t('admin.banner_on') if a.banner else t('admin.banner_off') }}</button>
+        <button class="small datamode" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-shared="{{ '1' if a.data == 'shared' else '0' }}" title="{{ t('admin.data_title') }}">{{ t('admin.data_shared') if a.data == 'shared' else t('admin.data_personal') }}</button>{% endif %}
         <button class="small access" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-level="{{ a.access }}"
-                data-people='{{ a.people|tojson }}' title="{{ t('admin.access_title') }}">{{ a.access_label }}</button>
+                data-people='{{ a.people|tojson }}'{% if a.slug in filled %} data-claude="1"{% endif %} title="{{ t('admin.access_title') }}">{{ a.access_label }}</button>
         <button class="small danger del" data-slug="{{ a.slug }}">{{ t("admin.delete") }}</button>
       </td>
     </tr>
@@ -81,6 +83,7 @@
         <button type="button" class="small" id="acAdd">{{ t("admin.add") }}</button>
       </div>
     </div>
+    <p id="acWarn" class="err small" hidden>⚠ {{ t('admin.claude_warning') }} {{ t('admin.claude_warning_fix') }}</p>
     <p id="acError" class="err small"></p>
     <div class="editor-actions">
       <button type="button" class="small" id="acCancel">{{ t("admin.cancel") }}</button>
@@ -105,6 +108,20 @@
   </form>
 </dialog>
 {% endif %}
+<dialog id="shareDlg" class="editor">
+  <form method="dialog">
+    <h1 tabindex="-1" autofocus>{{ t("admin.share_heading") }}: <span id="shTitle"></span></h1>
+    <p class="small">{{ t("admin.share_intro") }}</p>
+    <p id="shMine" class="small"></p>
+    <p id="shOthers" class="small"></p>
+    <p id="shExists" class="small">{{ t("admin.share_exists") }}</p>
+    <div class="editor-actions">
+      <button type="button" class="small" id="shCancel">{{ t("admin.cancel") }}</button>
+      <button type="button" class="small" id="shEmpty"></button>
+      <button type="button" class="primary" id="shCopy">{{ t("admin.share_copy") }}</button>
+    </div>
+  </form>
+</dialog>
 <script type="application/json" id="known">{{ known|tojson }}</script>
 
 <dialog id="editor" class="editor">
@@ -142,6 +159,10 @@ const T = {
   ok: {{ raw("admin.ok")|tojson }},
   pwSet: {{ raw("admin.pw_set_msg")|tojson }},
   confirmRemove: {{ raw("admin.confirm_remove")|tojson }},
+  shareMine: {{ raw("admin.share_mine")|tojson }},
+  shareOthers: {{ raw("admin.share_others")|tojson }},
+  shareEmpty: {{ raw("admin.share_empty")|tojson }},
+  shareOn: {{ raw("admin.share_on")|tojson }},
 };
 const fmt = (s, vars) => s.replace(/\{(\w+)\}/g, (m, k) => k in vars ? vars[k] : m);
 
@@ -250,7 +271,7 @@ const failText = async r => (await r.json().catch(() => ({}))).detail || fmt(T.e
 // --- access dialog: everyone, the checked people, or only me (the list is kept whatever is chosen)
 const acDlg = $('accessDlg'), acForm = $('accessForm');
 const known = JSON.parse($('known').textContent);
-let acSlug = null;
+let acSlug = null, acClaude = false;
 
 function personRow(email, checked) {
   const li = document.createElement('li');
@@ -262,10 +283,18 @@ function personRow(email, checked) {
   li.append(label);
   return li;
 }
-const showPeople = () => { $('acPeople').hidden = acForm.level.value !== 'people'; };
+// Claude fills the app with an admin's personal data: warn as soon as others than admins would see it
+function showWarn() {
+  const level = acForm.level.value;
+  const someone = $('acList').querySelector('input:checked') !== null;
+  $('acWarn').hidden = !(acClaude && (level === 'all' || (level === 'people' && someone)));
+}
+const showPeople = () => { $('acPeople').hidden = acForm.level.value !== 'people'; showWarn(); };
+$('acList').addEventListener('change', showWarn);
 
 document.querySelectorAll('.access').forEach(b => b.onclick = () => {
   acSlug = b.dataset.slug;
+  acClaude = b.dataset.claude === '1';
   const mine = JSON.parse(b.dataset.people);
   $('acTitle').textContent = b.dataset.title;
   acForm.level.value = b.dataset.level;
@@ -284,6 +313,7 @@ function addPerson() {
   const row = [...$('acList').querySelectorAll('input')].find(cb => cb.value === email);
   if (row) row.checked = true;
   else $('acList').prepend(personRow(email, true));
+  showWarn();
   input.value = '';
   $('acError').textContent = '';
   return true;
@@ -355,5 +385,35 @@ document.querySelectorAll('.unperson').forEach(b => b.onclick = async () => {
   if (r.ok) return location.reload();
   $('peopleError').textContent = await failText(r);
 });
+
+// --- shared data: everyone who can see the app reads it, only admins change it (app/shared.py)
+const shDlg = $('shareDlg');
+let shSlug = null;
+async function setData(slug, shared, copy) {
+  const r = await postJson('/api/data-mode', { slug, shared, copy });
+  if (r.ok) return location.reload();
+  shDlg.close();
+  note(`✗ ${await failText(r)}`, false);
+}
+document.querySelectorAll('.datamode').forEach(b => b.onclick = async () => {
+  if (b.dataset.shared === '1') return setData(b.dataset.slug, false, false);
+  const r = await fetch('/api/data-mode?slug=' + encodeURIComponent(b.dataset.slug));
+  if (!r.ok) return note(`✗ ${await failText(r)}`, false);
+  const p = await r.json();
+  const canCopy = p.docs > 0 && !p.shared_exists;
+  shSlug = b.dataset.slug;
+  $('shTitle').textContent = b.dataset.title;
+  $('shMine').textContent = fmt(T.shareMine, { collections: Object.entries(p.collections).map(([c, n]) => `${c} (${n})`).join(', ') });
+  $('shMine').hidden = !canCopy;
+  $('shOthers').textContent = fmt(T.shareOthers, { n: p.others });
+  $('shOthers').hidden = !p.others;
+  $('shExists').hidden = !p.shared_exists;
+  $('shCopy').hidden = !canCopy;
+  $('shEmpty').textContent = canCopy ? T.shareEmpty : T.shareOn;
+  shDlg.showModal();
+});
+$('shCancel').onclick = () => shDlg.close();
+$('shCopy').onclick = () => setData(shSlug, true, true);
+$('shEmpty').onclick = () => setData(shSlug, true, false);
 </script>
 {% endblock %}

@@ -70,6 +70,8 @@ def test_lists_all_tools(mcp, token):
     assert tools["edit_app"]["annotations"]["destructiveHint"] is True
     assert "list_apps" in tools["update_app"]["description"]
     assert "get_app" in tools["edit_app"]["description"]
+    assert "shared_data" in tools["create_app"]["inputSchema"]["properties"]
+    assert {"shared_data", "copy_my_data"} <= set(tools["update_app_info"]["inputSchema"]["properties"])
 
 
 def test_create_then_list_then_get(mcp, token, hub):
@@ -225,3 +227,64 @@ def test_list_apps_shows_people_level(mcp, token, hub, make_page):
     make_page("p", "people", ["a@x.no", "b@x.no"])
     apps = json.loads(text(call(mcp, token, "list_apps")))
     assert next(a for a in apps if a["slug"] == "p")["access"] == "2 personer"
+
+
+def test_create_app_with_shared_data(mcp, token, hub):
+    res = call(mcp, token, "create_app", slug="radar", html=PAGE, title="Radar", shared_data=True)
+    assert not res.get("isError"), res
+    assert hub._read_meta(hub.ARTIFACTS_DIR / "radar.meta.json")["data"] == "shared"
+    apps = json.loads(text(call(mcp, token, "list_apps")))
+    assert next(a for a in apps if a["slug"] == "radar")["data"] == "shared"
+
+
+def test_update_app_info_copies_only_when_asked(mcp, token, hub, user_client):
+    _page(hub, "radar")
+    call(mcp, token, "set_app_data", slug="radar", path="briefs/a", data={"n": 1})
+    call(mcp, token, "update_app_info", slug="radar", shared_data=True)
+    assert user_client.get("/api/store/radar/d", params={"path": "briefs/a"}).json()["data"] is None
+    call(mcp, token, "update_app_info", slug="radar", shared_data=False)
+    res = call(mcp, token, "update_app_info", slug="radar", shared_data=True, copy_my_data=True)
+    assert not res.get("isError"), res
+    assert user_client.get("/api/store/radar/d", params={"path": "briefs/a"}).json()["data"] == {"n": 1}
+
+
+def test_shared_app_data_through_the_connector(mcp, token, hub, user_client):
+    _page(hub, "radar")
+    call(mcp, token, "update_app_info", slug="radar", shared_data=True)
+    call(mcp, token, "set_app_data", slug="radar", path="briefs/a", data={"n": 1})
+    call(mcp, token, "set_app_data", slug="radar", path="data/users/admin@test.no/p", data={"me": 1})
+    assert json.loads(text(call(mcp, token, "list_app_data", slug="radar"))) == {
+        "briefs": ["a"], "data/users/admin@test.no": ["p"]}
+    assert user_client.get("/api/store/radar/d", params={"path": "briefs/a"}).json()["data"] == {"n": 1}
+
+
+def test_instructions_explain_shared_data_and_ask_first():
+    from app import connector
+    assert "shared_data" in connector.INSTRUCTIONS and "data/users/" in connector.INSTRUCTIONS
+    assert "ask" in connector.INSTRUCTIONS.lower()
+
+
+def test_connector_writes_are_recorded(mcp, token, hub):
+    _page(hub)
+    call(mcp, token, "set_app_data", slug="mat", path="days/d", data={})
+    with hub.db() as con:
+        row = con.execute("SELECT slug, email, at FROM claude_writes").fetchone()
+    assert (row["slug"], row["email"]) == ("mat", "admin@test.no") and row["at"] > 0
+
+
+def test_sharing_a_claude_filled_app_warns(mcp, token, hub):
+    _page(hub)
+    hub._write_meta(hub.ARTIFACTS_DIR / "mat.meta.json", {"admin_only": True})
+    call(mcp, token, "set_app_data", slug="mat", path="days/d", data={})
+    res = call(mcp, token, "update_app_info", slug="mat", private=False)
+    assert "Claude fyller denne appen" in text(res)
+
+
+def test_copy_my_data_says_when_shared_data_exists(mcp, token, hub):
+    _page(hub, "radar")
+    call(mcp, token, "update_app_info", slug="radar", shared_data=True)
+    call(mcp, token, "set_app_data", slug="radar", path="briefs/a", data={"n": 1})  # a shared document
+    call(mcp, token, "update_app_info", slug="radar", shared_data=False)
+    res = call(mcp, token, "update_app_info", slug="radar", shared_data=True, copy_my_data=True)
+    assert not res.get("isError"), res
+    assert "fra før" in text(res) and "Kopierte" not in text(res)

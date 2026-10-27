@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.2.0 (unreleased)
+
+### New
+
+- Shared data in apps (`"data": "shared"` in an app's meta, the *data* button on the admin page): everyone who can
+  see the app reads its documents, only admins change them, and each user's `data/users/<e-mail>/` branch stays
+  private, as with artifacts on claude.ai. Turning it on can copy your current documents into the shared data.
+  See "Shared data" in `docs/APPS.md`.
+- The front-page line of an app with shared data comes from the shared `hub/summary` document.
+- The connector: `create_app` and `update_app_info` take `shared_data`, `update_app_info` also `copy_my_data`,
+  and `list_apps` shows each app's data setting. Claude asks whether an app's content is shared or personal before
+  it creates an app that it or a scheduled agent will fill.
+- The admin page warns about an app that is shared with others but has personal data Claude wrote in the last 30
+  days, since only the admin sees that content. The access dialog and the connector give the same warning when
+  such an app is shared.
+
+Existing apps keep personal data and behave as before.
+
 ## v1.1.1 (2026-10-26)
 
 ### Before you upgrade

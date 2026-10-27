@@ -3,7 +3,8 @@
 A small self-hosted home for the HTML pages and little apps you make with Claude. It puts them behind a login on
 your own domain, lets you open them from your phone's home screen, and lets you share some of them with a few people.
 
-Artifacts that save data with `window.claude.use("db")` keep working: the hub stores that data per user in SQLite.
+Artifacts that save data with `window.claude.use("db")` keep working: the hub stores that data in SQLite, per user
+or shared by everyone who can see the app.
 A [Claude connector](docs/CONNECTOR.md) lets you publish and edit apps from a conversation in claude.ai, including
 the mobile app.
 
@@ -18,6 +19,8 @@ It is one FastAPI process with SQLite and plain files, behind Caddy, meant for o
   people, titles and icons, and who used what in the last 7 days.
 - **Uploads** from the browser, from the terminal (`scripts/push.sh`) or from Claude.
 - **Versions.** The last 10 versions of every app are kept when it is replaced.
+- **Shared data** for apps whose content is the same for everyone, such as a digest a scheduled Claude agent
+  writes every morning. Each user still gets a private corner in it.
 - **Link cards** for apps that run somewhere else, next to the hosted ones.
 - **English or Norwegian** interface (`HUB_LANG`). Another language is one JSON file.
 
@@ -136,7 +139,7 @@ just works, no tokens), but it means:
   people.
 
 So only publish apps you trust. What does hold is the split between people: an app only ever sees the data of the
-person using it.
+person using it, plus the [shared data](docs/APPS.md#shared-data) of apps that have it, which only admins can change.
 
 Passwords, login links and connector tokens are stored as hashes. App data is stored as plain text. To report a
 vulnerability, see [SECURITY.md](SECURITY.md).
