@@ -3,7 +3,8 @@
 A small self-hosted home for the HTML pages and little apps you make with Claude. It puts them behind a login on
 your own domain, lets you open them from your phone's home screen, and lets you share some of them with a few people.
 
-Artifacts that save data with `window.claude.use("db")` keep working: the hub stores that data per user in SQLite.
+Artifacts that save data with `window.claude.use("db")` keep working: the hub stores that data in SQLite, per user
+or shared by everyone who can see the app.
 A [Claude connector](docs/CONNECTOR.md) lets you publish and edit apps from a conversation in claude.ai, including
 the mobile app.
 
@@ -138,7 +139,7 @@ just works, no tokens), but it means:
   people.
 
 So only publish apps you trust. What does hold is the split between people: an app only ever sees the data of the
-person using it.
+person using it, plus the [shared data](docs/APPS.md#shared-data) of apps that have it, which only admins can change.
 
 Passwords, login links and connector tokens are stored as hashes. App data is stored as plain text. To report a
 vulnerability, see [SECURITY.md](SECURITY.md).

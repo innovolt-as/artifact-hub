@@ -19,7 +19,7 @@ everyone".
 
 | Tool | |
 |---|---|
-| `list_apps` | All apps and link cards: slug, title, who has access, whether it can be edited. |
+| `list_apps` | All apps and link cards: slug, title, who has access, whether the data is personal or shared, whether it can be edited. |
 | `get_app` | The HTML of an app. |
 | `create_app` | Publishes a new single-file app (`slug`, `html`, `title`, optional `description`, `emoji`, `private`, `shared_data`). |
 | `update_app` | Replaces the whole HTML of an app. |
