@@ -1536,6 +1536,80 @@ def api_toggle_banner(request: Request, slug: str = Form(...)):
     return JSONResponse({"ok": True, "banner": meta.get("banner") is not False})
 
 
+# ---------------------------------------------------------------- shared data on and off (app/shared.py)
+def _data_meta_path(slug: str) -> Path:
+    """The meta file of a page or folder app; HubError for an unknown slug or a link card (no data)."""
+    meta_path = _meta_path(slug)
+    if not meta_path:
+        raise HubError(i18n.t("page.not_found", slug=slug))
+    if meta_path.name.endswith(".link.json"):
+        raise HubError(i18n.t("page.is_link", slug=slug))
+    return meta_path
+
+
+def share_preview(slug: str, user: str) -> dict:
+    """What turning shared data on would do: the user's own documents a copy would show to everyone (their
+    data/users/ branch left out), how many other users have documents that get hidden, and whether the app has
+    shared documents from before (then nothing is copied)."""
+    meta = _read_meta(_data_meta_path(slug))
+    user = user.lower()
+    with db() as con:
+        mine = con.execute(
+            """SELECT collection, COUNT(*) AS n FROM docs WHERE slug=? AND owner=? AND substr(collection, 1, 11) != 'data/users/'
+               GROUP BY collection ORDER BY collection""", (slug, user)).fetchall()
+        others = con.execute("SELECT COUNT(DISTINCT owner) FROM docs WHERE slug=? AND owner NOT IN (?, ?)",
+                             (slug, user, shared.SHARED)).fetchone()[0]
+        exists = con.execute("SELECT 1 FROM docs WHERE slug=? AND owner=? LIMIT 1", (slug, shared.SHARED)).fetchone()
+    return {"shared": shared.is_shared(meta), "docs": sum(r["n"] for r in mine),
+            "collections": {r["collection"]: r["n"] for r in mine}, "others": others, "shared_exists": bool(exists)}
+
+
+def set_data_mode(slug: str, on: bool, *, copy_from: str | None = None) -> int:
+    """Turn shared data on or off for a page or folder app; returns how many documents were copied. With
+    copy_from, turning it on copies that user's documents (not their data/users/ branch) to the shared data,
+    unless the app has shared documents already. Nothing is ever deleted: off brings the personal data back."""
+    meta_path = _data_meta_path(slug)
+    meta = _read_meta(meta_path)
+    copied = 0
+    if on and copy_from:
+        with db() as con:
+            if not con.execute("SELECT 1 FROM docs WHERE slug=? AND owner=? LIMIT 1", (slug, shared.SHARED)).fetchone():
+                copied = con.execute(
+                    """INSERT OR IGNORE INTO docs(slug, owner, collection, doc_id, data, updated_at)
+                       SELECT slug, ?, collection, doc_id, data, updated_at FROM docs
+                       WHERE slug=? AND owner=? AND substr(collection, 1, 11) != 'data/users/'""",
+                    (shared.SHARED, slug, copy_from.lower())).rowcount
+    if on:
+        meta["data"] = "shared"
+    else:
+        meta.pop("data", None)
+    _write_meta(meta_path, meta)
+    log.info("Shared data %s for %s (%d documents copied)", "on" if on else "off", slug, copied)
+    return copied
+
+
+@app.get("/api/data-mode")
+def data_mode_preview(slug: str, user: str = Depends(require_admin)):
+    try:
+        return share_preview(slug, user)
+    except HubError:
+        raise HTTPException(404) from None
+
+
+@app.post("/api/data-mode")
+async def data_mode_set(request: Request, user: str = Depends(require_admin)):
+    """Shared data on or off for one app: {"slug", "shared": bool, "copy": bool}; copy = copy my documents."""
+    _require_json(request)
+    body = await request.json()
+    if not isinstance(body, dict) or not isinstance(body.get("slug"), str) or not isinstance(body.get("shared"), bool):
+        raise HTTPException(400, 'Send {"slug", "shared", "copy"}')
+    try:
+        copied = set_data_mode(body["slug"], body["shared"], copy_from=user if body.get("copy") is True else None)
+    except HubError:
+        raise HTTPException(404) from None
+    return {"ok": True, "shared": body["shared"], "copied": copied}
+
+
 # ---------------------------------------------------------------- routes: invited people (app/access.py)
 def _all_slugs() -> list[str]:
     """Every app and link card in the data dir."""

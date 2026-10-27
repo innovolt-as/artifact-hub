@@ -104,3 +104,48 @@ def test_app_page_and_list_know_the_data_setting(hub, make_page, user_client):
     assert 'data-shared="0"' in user_client.get("/a/mat/").text
     modes = {a["slug"]: a["data"] for a in hub.list_artifacts("user@test.no")}
     assert modes == {"radar": "shared", "mat": "personal"}
+
+
+def test_preview_counts_my_docs_and_other_users(hub, make_page, admin_client, user_client):
+    make_page("radar")
+    for p in ("briefs/a", "briefs/b", "meta/guide", "data/users/admin@test.no/p"):
+        put(admin_client, "radar", p, {})
+    put(user_client, "radar", "x/y", {})
+    assert admin_client.get("/api/data-mode", params={"slug": "radar"}).json() == {
+        "shared": False, "docs": 3, "collections": {"briefs": 2, "meta": 1}, "others": 1, "shared_exists": False}
+
+
+def test_turn_on_with_copy_then_off_then_on_again(hub, make_page, admin_client, user_client):
+    make_page("radar")
+    put(admin_client, "radar", "briefs/a", {"n": 1})
+    put(admin_client, "radar", "data/users/admin@test.no/p", {"me": 1})
+    on = {"slug": "radar", "shared": True, "copy": True}
+    assert admin_client.post("/api/data-mode", json=on).json() == {"ok": True, "shared": True, "copied": 1}
+    assert get(user_client, "radar", "briefs/a") == {"n": 1}
+    assert get(admin_client, "radar", "data/users/admin@test.no/p") == {"me": 1}
+    admin_client.post("/api/data-mode", json={"slug": "radar", "shared": False, "copy": False})
+    assert "data" not in hub._read_meta(hub._meta_path("radar"))
+    assert get(admin_client, "radar", "briefs/a") == {"n": 1}  # the personal row was never touched
+    assert get(user_client, "radar", "briefs/a") is None
+    assert admin_client.post("/api/data-mode", json=on).json()["copied"] == 0  # shared rows exist already
+
+
+def test_turn_on_and_start_empty(hub, make_page, admin_client, user_client):
+    make_page("radar")
+    put(admin_client, "radar", "briefs/a", {"n": 1})
+    r = admin_client.post("/api/data-mode", json={"slug": "radar", "shared": True, "copy": False}).json()
+    assert r["copied"] == 0 and get(user_client, "radar", "briefs/a") is None
+
+
+def test_data_mode_only_for_admins_and_apps(hub, make_page, admin_client, user_client):
+    make_page("radar")
+    (hub.ARTIFACTS_DIR / "kort.link.json").write_text('{"url": "https://x.no", "title": "K"}')
+    assert user_client.post("/api/data-mode", json={"slug": "radar", "shared": True, "copy": False}).status_code == 403
+    assert admin_client.post("/api/data-mode", json={"slug": "kort", "shared": True, "copy": False}).status_code == 404
+    assert admin_client.get("/api/data-mode", params={"slug": "nope"}).status_code == 404
+
+
+def test_admin_page_has_the_data_button(hub, make_page, admin_client):
+    make_page("radar")
+    html = admin_client.get("/admin").text
+    assert 'class="small datamode"' in html and 'data-slug="radar"' in html

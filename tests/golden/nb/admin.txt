@@ -28,6 +28,8 @@ admin-app · side
 Rediger
 @title: Hub-stripa øverst i appen
 ▭ banner
+@title: Hvem appens data tilhører: hver bruker (personlige) eller alle som ser appen (felles)
+data: personlige
 @title: Hvem som har tilgang
 🔒 Bare meg
 Slett
@@ -37,6 +39,8 @@ alle · side
 Rediger
 @title: Hub-stripa øverst i appen
 ▭ banner
+@title: Hvem appens data tilhører: hver bruker (personlige) eller alle som ser appen (felles)
+data: personlige
 @title: Hvem som har tilgang
 🌍 Alle
 Slett
@@ -46,6 +50,8 @@ folk · side
 Rediger
 @title: Hub-stripa øverst i appen
 ▭ banner
+@title: Hvem appens data tilhører: hver bruker (personlige) eller alle som ser appen (felles)
+data: personlige
 @title: Hvem som har tilgang
 👥 1 person
 Slett
@@ -65,6 +71,11 @@ Bare meg
 Legg til
 Avbryt
 Lagre
+Skru på felles data:
+Alt appen og Claude lagrer, blir felles for alle som ser appen, og bare admins kan endre det. Det som ligger under data/users/<e-post>/, er fortsatt privat for hver bruker.
+Appen har felles data fra før, og de brukes igjen.
+Avbryt
+Kopier mine data
 Rediger
 Bilde brukes hvis det finnes, ellers emoji, ellers forbokstaven.
 Navn
