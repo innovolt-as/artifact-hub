@@ -278,3 +278,13 @@ def test_sharing_a_claude_filled_app_warns(mcp, token, hub):
     call(mcp, token, "set_app_data", slug="mat", path="days/d", data={})
     res = call(mcp, token, "update_app_info", slug="mat", private=False)
     assert "Claude fyller denne appen" in text(res)
+
+
+def test_copy_my_data_says_when_shared_data_exists(mcp, token, hub):
+    _page(hub, "radar")
+    call(mcp, token, "update_app_info", slug="radar", shared_data=True)
+    call(mcp, token, "set_app_data", slug="radar", path="briefs/a", data={"n": 1})  # a shared document
+    call(mcp, token, "update_app_info", slug="radar", shared_data=False)
+    res = call(mcp, token, "update_app_info", slug="radar", shared_data=True, copy_my_data=True)
+    assert not res.get("isError"), res
+    assert "fra før" in text(res) and "Kopierte" not in text(res)

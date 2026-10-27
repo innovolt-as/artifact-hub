@@ -212,6 +212,7 @@
   "mcp.data_personal": "Shared data is off: the app's data is personal again. Nothing was deleted.",
   "mcp.data_shared.one": "Shared data is on: everyone who can see the app reads it, and only admins change it. Copied {n} document.",
   "mcp.data_shared.other": "Shared data is on: everyone who can see the app reads it, and only admins change it. Copied {n} documents.",
+  "mcp.data_shared_exists": "Shared data is on: everyone who can see the app reads it, and only admins change it. The app had shared data from before, so nothing was copied.",
   "mcp.deleted": "Deleted {path}.",
   "mcp.edited.one": "Edited ({n} edit): {url}",
   "mcp.edited.other": "Edited ({n} edits): {url}",

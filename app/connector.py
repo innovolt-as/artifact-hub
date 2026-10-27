@@ -231,8 +231,12 @@ def build_mcp() -> MCPServer:
             hub.set_info(slug, title=title, description=description, emoji=emoji, private=private)
             said = [i18n.t("mcp.info_updated", slug=slug)]
             if shared_data is not None:
+                existed = shared_data and copy_my_data and hub.share_preview(slug, user)["shared_exists"]
                 copied = hub.set_data_mode(slug, shared_data, copy_from=user if copy_my_data else None)
-                said.append(i18n.tn("mcp.data_shared", copied) if shared_data else i18n.t("mcp.data_personal"))
+                if existed:  # nothing is copied over shared data the app already has
+                    said.append(i18n.t("mcp.data_shared_exists"))
+                else:
+                    said.append(i18n.tn("mcp.data_shared", copied) if shared_data else i18n.t("mcp.data_personal"))
             if private is False and slug in hub.claude_warned(hub.list_artifacts(user)):
                 said.append(i18n.t("mcp.claude_warning"))
         except hub.HubError as e:

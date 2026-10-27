@@ -212,6 +212,7 @@
   "mcp.data_personal": "Felles data er av: appens data er personlige igjen. Ingenting ble slettet.",
   "mcp.data_shared.one": "Felles data er på: alle som ser appen, leser dem, og bare admins endrer dem. Kopierte {n} dokument.",
   "mcp.data_shared.other": "Felles data er på: alle som ser appen, leser dem, og bare admins endrer dem. Kopierte {n} dokumenter.",
+  "mcp.data_shared_exists": "Felles data er på: alle som ser appen, leser dem, og bare admins endrer dem. Appen hadde felles data fra før, så ingenting ble kopiert.",
   "mcp.deleted": "Slettet {path}.",
   "mcp.edited.one": "Endret ({n} endringer): {url}",
   "mcp.edited.other": "Endret ({n} endringer): {url}",
