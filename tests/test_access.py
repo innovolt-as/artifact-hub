@@ -56,8 +56,8 @@ def test_people_app_everywhere(hub, make_page, admin_client, user_client, friend
         assert (c.get("/api/store/p/c", params={"path": "x"}).status_code == 200) is ok
     assert hub.list_artifacts("user@test.no") == []
     with pytest.raises(hub.HubError):
-        hub._data_owner("p", "user@test.no")
-    assert hub._data_owner("p", FRIEND) == FRIEND
+        hub.doc_scope("p", "user@test.no", "x")
+    assert hub.doc_scope("p", FRIEND, "x") == (FRIEND, "x")
 
 
 def test_admin_only_hidden_from_people_on_its_list(hub, make_page, friend_client):

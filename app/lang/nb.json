@@ -88,6 +88,8 @@
   "data.bad_path_doc": "Ugyldig sti «{path}»: må være et dokument (partall ledd, f.eks. days/2026-10-22).",
   "data.no_app": "Fant ingen app som heter «{slug}». Lenkekort har ikke data.",
   "data.not_object": "Et dokument må være et JSON-objekt.",
+  "data.not_yours": "Du kan bare skrive dine egne data her, under data/users/<din e-post>/.",
+  "data.read_only": "Bare administratorer kan endre de felles dataene i denne appen.",
   "data.too_big": "Dokumentet blir større enn 256 KB.",
   "date.days": [
     "mandag",

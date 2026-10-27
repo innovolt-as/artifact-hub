@@ -88,6 +88,8 @@
   "data.bad_path_doc": "Invalid path \"{path}\": must be a document (an even number of segments, e.g. days/2026-10-22).",
   "data.no_app": "Found no app called \"{slug}\". Link cards have no data.",
   "data.not_object": "A document must be a JSON object.",
+  "data.not_yours": "You can only write your own data here, under data/users/<your e-mail>/.",
+  "data.read_only": "Only administrators can change the shared data in this app.",
   "data.too_big": "The document would be larger than 256 KB.",
   "date.days": [
     "Monday",

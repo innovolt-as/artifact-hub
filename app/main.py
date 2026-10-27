@@ -37,7 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from app import access, banner, home, i18n, loginmail, mail, passwd, versions
+from app import access, banner, home, i18n, loginmail, mail, passwd, shared, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -100,7 +100,7 @@ ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin pag
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
 MAX_ICON_BYTES = 2 * 1024 * 1024
-META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner")  # what survives a re-upload
+META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data")  # what survives a re-upload
 
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -147,7 +147,8 @@ with db() as con:
         """CREATE TABLE IF NOT EXISTS logins(
              email TEXT NOT NULL, at INTEGER NOT NULL)"""
     )
-    # Document store behind window.claude.use("db") (static/hub.js): private per artifact and per user
+    # Document store behind window.claude.use("db") (static/hub.js): per artifact, and per user unless the app
+    # has shared data (app/shared.py: owner "*" for shared documents)
     con.execute(
         """CREATE TABLE IF NOT EXISTS docs(
              slug       TEXT NOT NULL,
@@ -458,6 +459,7 @@ def list_artifacts(user: str) -> list[dict]:
                 "access_text": access.describe(meta),
                 "people": access.people(meta) if admin else [],
                 "banner": meta.get("banner") is not False,  # the strip at the top of the app (banner.py)
+                "data": "shared" if shared.is_shared(meta) else "personal",  # app/shared.py
                 "updated": mtime,
                 "emoji": meta.get("emoji", ""),
                 "icon_url": f"/icon/{slug}?v={int(icon.stat().st_mtime)}" if icon else None,
@@ -771,8 +773,10 @@ def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool) -> H
     and the hub banner right after <body> unless the app has it turned off."""
     html = path.read_text("utf-8", errors="replace")
     strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
-    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-strings="{}"></script>'.format(
-        escape(slug), escape(user), "1" if is_admin(user) else "0", strings
+    found = artifact_root(slug)
+    data_shared = bool(found) and shared.is_shared(found[1])
+    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"></script>'.format(
+        escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
     html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
@@ -784,12 +788,14 @@ SEG_RE = re.compile(r"^[^/]{1,200}$")
 MAX_DOC_BYTES = 256 * 1024
 
 
-def _store_owner(slug: str, user: str) -> str:
-    """The store is private per user; you need access to the artifact to use it."""
-    found = artifact_root(slug)
-    if not found or not can_see(found[1], user):
-        raise HTTPException(404)
-    return user.lower()
+def _store_scope(slug: str, user: str, collection: str, *, write: bool = False) -> tuple[str | None, str]:
+    """doc_scope for the routes below: an app you cannot see is a 404, a write you may not make a 403."""
+    try:
+        return doc_scope(slug, user, collection, write=write)
+    except ReadOnly as e:
+        raise HTTPException(403, str(e)) from None
+    except HubError:
+        raise HTTPException(404) from None
 
 
 def _split_path(path: str, want_doc: bool) -> tuple[str, str]:
@@ -809,8 +815,10 @@ def _deep_merge(base: dict, patch: dict) -> dict:
 
 @app.get("/api/store/{slug}/c")
 def store_list(slug: str, path: str, user: str = Depends(require_user)):
-    owner = _store_owner(slug, user)
     collection, _ = _split_path(path, want_doc=False)
+    owner, collection = _store_scope(slug, user, collection)
+    if owner is None:
+        return {"docs": []}
     with db() as con:
         rows = con.execute(
             "SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
@@ -821,8 +829,10 @@ def store_list(slug: str, path: str, user: str = Depends(require_user)):
 
 @app.get("/api/store/{slug}/d")
 def store_get(slug: str, path: str, user: str = Depends(require_user)):
-    owner = _store_owner(slug, user)
     collection, doc_id = _split_path(path, want_doc=True)
+    owner, collection = _store_scope(slug, user, collection)
+    if owner is None:
+        return {"data": None}
     with db() as con:
         row = con.execute(
             "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
@@ -833,8 +843,8 @@ def store_get(slug: str, path: str, user: str = Depends(require_user)):
 
 @app.put("/api/store/{slug}/d")
 async def store_set(slug: str, path: str, request: Request, merge: bool = False, user: str = Depends(require_user)):
-    owner = _store_owner(slug, user)
     collection, doc_id = _split_path(path, want_doc=True)
+    owner, collection = _store_scope(slug, user, collection, write=True)
     body = await request.body()
     if len(body) > MAX_DOC_BYTES:
         raise HTTPException(413, i18n.t("store.too_big"))
@@ -863,8 +873,8 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
 
 @app.delete("/api/store/{slug}/d")
 def store_delete(slug: str, path: str, user: str = Depends(require_user)):
-    owner = _store_owner(slug, user)
     collection, doc_id = _split_path(path, want_doc=True)
+    owner, collection = _store_scope(slug, user, collection, write=True)
     with db() as con:
         con.execute(
             "DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?", (slug, owner, collection, doc_id)
@@ -874,13 +884,12 @@ def store_delete(slug: str, path: str, user: str = Depends(require_user)):
 
 @app.get("/api/store/{slug}")
 def store_dump(slug: str, user: str = Depends(require_user)):
-    """Everything you have stored for one artifact, as {collection: {doc_id: data}} — a backup."""
-    owner = _store_owner(slug, user)
-    with db() as con:
-        rows = con.execute(
-            "SELECT collection, doc_id, data FROM docs WHERE slug=? AND owner=? ORDER BY collection, doc_id",
-            (slug, owner),
-        ).fetchall()
+    """Everything you can read in one artifact, as {collection: {doc_id: data}} — a backup."""
+    try:
+        with db() as con:
+            rows = visible_docs(con, slug, user)
+    except HubError:
+        raise HTTPException(404) from None
     out: dict[str, dict] = {}
     for r in rows:
         out.setdefault(r["collection"], {})[r["doc_id"]] = json.loads(r["data"])
@@ -892,11 +901,43 @@ def store_dump(slug: str, user: str = Depends(require_user)):
 MAX_DATA_DOCS_LISTED = 500
 
 
-def _data_owner(slug: str, user: str) -> str:
+def _data_meta(slug: str, user: str) -> dict:
+    """The meta of an app the user can see; HubError if there is none (link cards have no data)."""
     found = artifact_root(slug)
     if not found or not can_see(found[1], user):
         raise HubError(i18n.t("data.no_app", slug=slug))
-    return user.lower()
+    return found[1]
+
+
+def doc_scope(slug: str, user: str, collection: str, *, write: bool = False) -> tuple[str | None, str]:
+    """(docs.owner, collection as stored) for one collection of an app (app/shared.py). Personal apps: the user.
+    Shared apps: SHARED, the user's own branch, or None for someone else's branch, where reads find nothing.
+    A write to shared data by a non-admin, or to someone else's branch, raises ReadOnly."""
+    meta = _data_meta(slug, user)
+    if not shared.is_shared(meta):
+        return user.lower(), collection
+    owner = shared.branch_owner(collection, user)
+    if write and owner is None:
+        raise ReadOnly(i18n.t("data.not_yours"))
+    if write and owner == shared.SHARED and not is_admin(user):
+        raise ReadOnly(i18n.t("data.read_only"))
+    return owner, shared.normalize(collection)
+
+
+def visible_docs(con: sqlite3.Connection, slug: str, user: str) -> list[sqlite3.Row]:
+    """collection, doc_id and data of every document the user can read in an app, by collection and id."""
+    meta = _data_meta(slug, user)
+    user = user.lower()
+    if not shared.is_shared(meta):
+        return con.execute("SELECT collection, doc_id, data FROM docs WHERE slug=? AND owner=? ORDER BY collection, doc_id",
+                           (slug, user)).fetchall()
+    own = shared.own_prefix(user)  # compared with substr, not LIKE: an e-mail may hold _ or %
+    return con.execute(
+        """SELECT collection, doc_id, data FROM docs
+             WHERE slug=? AND (owner=? OR (owner=? AND (collection=? OR substr(collection, 1, ?)=?)))
+             ORDER BY collection, doc_id""",
+        (slug, shared.SHARED, user, own, len(own) + 1, own + "/"),
+    ).fetchall()
 
 
 def _data_path(path: str, want_doc: bool) -> tuple[str, str]:
@@ -907,11 +948,9 @@ def _data_path(path: str, want_doc: bool) -> tuple[str, str]:
 
 
 def doc_overview(slug: str, user: str) -> dict[str, list[str]]:
-    """{collection: [doc ids]} for everything the user has stored in one app."""
-    owner = _data_owner(slug, user)
+    """{collection: [doc ids]} for everything the user can read in one app."""
     with db() as con:
-        rows = con.execute("SELECT collection, doc_id FROM docs WHERE slug=? AND owner=? ORDER BY collection, doc_id",
-                           (slug, owner)).fetchall()
+        rows = visible_docs(con, slug, user)
     out: dict[str, list[str]] = {}
     for r in rows:
         out.setdefault(r["collection"], []).append(r["doc_id"])
@@ -920,8 +959,10 @@ def doc_overview(slug: str, user: str) -> dict[str, list[str]]:
 
 def doc_list(slug: str, user: str, collection: str) -> dict[str, dict]:
     """{doc_id: data} for one collection (at most MAX_DATA_DOCS_LISTED, newest ids last)."""
-    owner = _data_owner(slug, user)
     col, _ = _data_path(collection, want_doc=False)
+    owner, col = doc_scope(slug, user, col)
+    if owner is None:
+        return {}
     with db() as con:
         rows = con.execute("SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
                            (slug, owner, col)).fetchall()
@@ -929,8 +970,10 @@ def doc_list(slug: str, user: str, collection: str) -> dict[str, dict]:
 
 
 def doc_get(slug: str, user: str, path: str) -> dict | None:
-    owner = _data_owner(slug, user)
     col, doc_id = _data_path(path, want_doc=True)
+    owner, col = doc_scope(slug, user, col)
+    if owner is None:
+        return None
     with db() as con:
         row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                           (slug, owner, col, doc_id)).fetchone()
@@ -939,8 +982,8 @@ def doc_get(slug: str, user: str, path: str) -> dict | None:
 
 def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False) -> dict:
     """Write one document (merge=True deep-merges into an existing one); returns what is stored now."""
-    owner = _data_owner(slug, user)
     col, doc_id = _data_path(path, want_doc=True)
+    owner, col = doc_scope(slug, user, col, write=True)
     if not isinstance(data, dict):
         raise HubError(i18n.t("data.not_object"))
     with db() as con:
@@ -961,8 +1004,8 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
 
 
 def doc_delete(slug: str, user: str, path: str) -> bool:
-    owner = _data_owner(slug, user)
     col, doc_id = _data_path(path, want_doc=True)
+    owner, col = doc_scope(slug, user, col, write=True)
     with db() as con:
         n = con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                         (slug, owner, col, doc_id)).rowcount
@@ -1244,6 +1287,10 @@ _HTML_HINT = re.compile(r"<html|<!doctype html|<body", re.I)
 
 class HubError(Exception):
     """A problem with a write; the message is text in the hub's language (HUB_LANG) shown to the user."""
+
+
+class ReadOnly(HubError):
+    """A write the user may not make: shared data by a non-admin, or someone else's data/users/<e-mail>/ branch."""
 
 
 def _write_meta(path: Path, meta: dict) -> None:
