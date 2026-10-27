@@ -1,4 +1,6 @@
 """Shared data: "data": "shared" in an app's meta; data/users/<e-mail>/ stays private (app/shared.py)."""
+import time
+
 from app import shared
 from tests.conftest import make_client
 
@@ -149,3 +151,43 @@ def test_admin_page_has_the_data_button(hub, make_page, admin_client):
     make_page("radar")
     html = admin_client.get("/admin").text
     assert 'class="small datamode"' in html and 'data-slug="radar"' in html
+
+
+def test_warning_rule(hub, make_page):
+    make_page("finn", "all")
+    make_page("mine", "admin")
+    make_page("venn", "people", ["user@test.no"])
+    make_page("admins", "people", ["admin@test.no"])
+    make_shared(hub, make_page, "felles")
+    make_page("gammel", "all")
+    make_page("ingen", "all")
+    with hub.db() as con:
+        for s in ("finn", "mine", "venn", "admins", "felles"):
+            shared.record_write(con, s, "admin@test.no")
+        shared.record_write(con, "gammel", "admin@test.no", now=int(time.time()) - 31 * 86400)
+    apps = hub.list_artifacts("admin@test.no")
+    assert hub.claude_filled(apps) == {"finn", "mine", "venn", "admins"}
+    assert hub.claude_warned(apps) == {"finn", "venn"}
+
+
+def test_admin_page_shows_the_warning(hub, make_page, admin_client):
+    make_page("finn", "all")
+    make_page("mine", "admin")
+    with hub.db() as con:
+        shared.record_write(con, "finn", "admin@test.no")
+        shared.record_write(con, "mine", "admin@test.no")
+    html = admin_client.get("/admin").text
+    assert html.count('<p class="claude-warn') == 1
+    assert "Claude fyller denne appen med dine personlige data." in html
+    assert html.count('data-claude="1"') == 2  # the access dialog warns before "mine" is shared
+
+
+def test_rename_moves_shared_rows_and_claude_writes(hub, make_page, admin_client):
+    make_shared(hub, make_page)
+    put(admin_client, "radar", "briefs/a", {"n": 1})
+    with hub.db() as con:
+        shared.record_write(con, "radar", "admin@test.no")
+    assert admin_client.post("/api/edit", data={"slug": "radar", "new_slug": "radar2"}).status_code == 200
+    assert get(admin_client, "radar2", "briefs/a") == {"n": 1}
+    with hub.db() as con:
+        assert con.execute("SELECT slug FROM claude_writes").fetchall()[0][0] == "radar2"

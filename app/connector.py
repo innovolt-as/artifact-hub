@@ -233,6 +233,8 @@ def build_mcp() -> MCPServer:
             if shared_data is not None:
                 copied = hub.set_data_mode(slug, shared_data, copy_from=user if copy_my_data else None)
                 said.append(i18n.tn("mcp.data_shared", copied) if shared_data else i18n.t("mcp.data_personal"))
+            if private is False and slug in hub.claude_warned(hub.list_artifacts(user)):
+                said.append(i18n.t("mcp.claude_warning"))
         except hub.HubError as e:
             return _error(str(e))
         return " ".join(said)

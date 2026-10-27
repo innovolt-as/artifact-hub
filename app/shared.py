@@ -7,10 +7,17 @@ Only admins write shared documents.
 
 Shared documents live in the same `docs` table with owner SHARED; a branch is stored with the user's e-mail
 as owner and the e-mail in lower case in the collection path.
+
+The table claude_writes notes when the connector last wrote data in an app, per user. The admin page uses it
+to warn about an app that Claude fills with an admin's personal data while others can see it.
 """
 from __future__ import annotations
 
+import sqlite3
+import time
+
 SHARED = "*"  # docs.owner of shared documents; never an e-mail address
+CLAUDE_DAYS = 30  # a connector write this recent counts for the admin warning
 
 
 def is_shared(meta: dict) -> bool:
@@ -43,3 +50,37 @@ def branch_owner(collection: str, user: str) -> str | None:
 def own_prefix(user: str) -> str:
     """The collection of a user's own branch; everything under it starts with this plus '/'."""
     return f"data/users/{user.lower()}"
+
+
+# ---------------------------------------------------------------- connector writes (the admin warning)
+def create_tables(con: sqlite3.Connection) -> None:
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS claude_writes(
+             slug  TEXT NOT NULL,
+             email TEXT NOT NULL,
+             at    INTEGER NOT NULL,
+             PRIMARY KEY (slug, email))"""
+    )
+
+
+def record_write(con: sqlite3.Connection, slug: str, email: str, now: int | None = None) -> None:
+    con.execute(
+        """INSERT INTO claude_writes(slug, email, at) VALUES(?,?,?)
+           ON CONFLICT(slug, email) DO UPDATE SET at=excluded.at""",
+        (slug, email.lower(), int(now if now is not None else time.time())),
+    )
+
+
+def recent_admin_writes(con: sqlite3.Connection, admins: set[str], now: int | None = None) -> set[str]:
+    """Apps an admin wrote data in through the connector within the last CLAUDE_DAYS days."""
+    if not admins:
+        return set()
+    since = int(now if now is not None else time.time()) - CLAUDE_DAYS * 86400
+    marks = ",".join("?" * len(admins))
+    rows = con.execute(f"SELECT DISTINCT slug FROM claude_writes WHERE at >= ? AND email IN ({marks})",
+                       (since, *sorted(admins))).fetchall()
+    return {r[0] for r in rows}
+
+
+def rename(con: sqlite3.Connection, old: str, new: str) -> None:
+    con.execute("UPDATE OR REPLACE claude_writes SET slug=? WHERE slug=?", (new, old))

@@ -262,3 +262,19 @@ def test_instructions_explain_shared_data_and_ask_first():
     from app import connector
     assert "shared_data" in connector.INSTRUCTIONS and "data/users/" in connector.INSTRUCTIONS
     assert "ask" in connector.INSTRUCTIONS.lower()
+
+
+def test_connector_writes_are_recorded(mcp, token, hub):
+    _page(hub)
+    call(mcp, token, "set_app_data", slug="mat", path="days/d", data={})
+    with hub.db() as con:
+        row = con.execute("SELECT slug, email, at FROM claude_writes").fetchone()
+    assert (row["slug"], row["email"]) == ("mat", "admin@test.no") and row["at"] > 0
+
+
+def test_sharing_a_claude_filled_app_warns(mcp, token, hub):
+    _page(hub)
+    hub._write_meta(hub.ARTIFACTS_DIR / "mat.meta.json", {"admin_only": True})
+    call(mcp, token, "set_app_data", slug="mat", path="days/d", data={})
+    res = call(mcp, token, "update_app_info", slug="mat", private=False)
+    assert "Claude fyller denne appen" in text(res)

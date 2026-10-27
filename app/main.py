@@ -199,6 +199,8 @@ with db() as con:
     home.create_tables(con)
     # People the admin has invited; they may log in (app/access.py)
     access.create_tables(con)
+    # When the connector last wrote data in an app, per user, for the admin warning (app/shared.py)
+    shared.create_tables(con)
     # Password hashes for LOGIN_MODE=password (app/passwd.py)
     passwd.ensure_table(con)
     if password_mode() and not any(passwd.get(con, e) for e in ADMIN_EMAILS):
@@ -1000,6 +1002,7 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
                ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
             (slug, owner, col, doc_id, raw, int(time.time())),
         )
+        shared.record_write(con, slug, user)
     log.info("Data %s %s/%s for %s", "merged" if merge else "set", slug, path, owner)
     return data
 
@@ -1010,6 +1013,7 @@ def doc_delete(slug: str, user: str, path: str) -> bool:
     with db() as con:
         n = con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                         (slug, owner, col, doc_id)).rowcount
+        shared.record_write(con, slug, user)
     return n > 0
 
 
@@ -1419,9 +1423,11 @@ def admin_page(request: Request, user: str = Depends(require_admin)):
             for p in people:
                 row = passwd.get(con, p["email"])
                 p["pw_status"] = "missing" if row is None else ("must_change" if row["must_change"] else "set")
+    apps = list_artifacts(user)
     return templates.TemplateResponse(
-        request, "admin.html", {"site": SITE_NAME, "user": user, "admin": True, "artifacts": list_artifacts(user),
-                                "known": known_people(), "people": people}
+        request, "admin.html", {"site": SITE_NAME, "user": user, "admin": True, "artifacts": apps,
+                                "known": known_people(), "people": people,
+                                "filled": claude_filled(apps), "warned": claude_warned(apps)}
     )
 
 
@@ -1586,6 +1592,20 @@ def set_data_mode(slug: str, on: bool, *, copy_from: str | None = None) -> int:
     _write_meta(meta_path, meta)
     log.info("Shared data %s for %s (%d documents copied)", "on" if on else "off", slug, copied)
     return copied
+
+
+def claude_filled(apps: list[dict]) -> set[str]:
+    """Pages and folder apps with personal data that an admin wrote data in through the connector lately."""
+    with db() as con:
+        recent = shared.recent_admin_writes(con, ADMIN_EMAILS)
+    return {a["slug"] for a in apps if a["kind"] != "link" and a["data"] == "personal" and a["slug"] in recent}
+
+
+def claude_warned(apps: list[dict]) -> set[str]:
+    """The apps in claude_filled that others than admins can see: in practice they only work for the admin."""
+    filled = claude_filled(apps)
+    return {a["slug"] for a in apps if a["slug"] in filled
+            and (a["access"] == "all" or (a["access"] == "people" and set(a["people"]) - ADMIN_EMAILS))}
 
 
 @app.get("/api/data-mode")
@@ -1799,6 +1819,7 @@ async def api_edit(
         with db() as con:  # users' stored data, choices and pins follow the artifact
             con.execute("UPDATE OR REPLACE docs SET slug=? WHERE slug=?", (new_slug, slug))
             home.rename(con, slug, new_slug)
+            shared.rename(con, slug, new_slug)
         log.info("Renamed artifact %s -> %s", slug, new_slug)
     return JSONResponse({"ok": True, "slug": new_slug})
 
