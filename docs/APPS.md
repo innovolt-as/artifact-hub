@@ -18,7 +18,7 @@ straight in.
 | `.versions/name/` | Earlier versions, see below. |
 
 `meta.json` can hold `title`, `description`, `emoji` (the icon when there is no uploaded image), `banner` (`false`
-turns the banner off) and the access level: `"admin_only": true` for admins only, or `"access": "people"` with
+turns the banner off), `data` (`"shared"` for [shared data](#shared-data)) and the access level: `"admin_only": true` for admins only, or `"access": "people"` with
 `"people": ["a@example.com"]`. Without either, everyone who can log in sees the app. The admin page writes this
 file for you, and it is kept when the app is replaced.
 
@@ -38,13 +38,34 @@ Artifacts made on claude.ai save data through `window.claude.use(...)`, which on
 
 | Capability | On the hub |
 |---|---|
-| `db` | Stored in SQLite on the server, per app and per logged-in user. `collection`/`doc`, `get`/`set`/`update`/`delete`, `add`, `where`/`orderBy`/`limit`, and `onSnapshot`, which picks up changes from other tabs and devices every 5 seconds. |
+| `db` | Stored in SQLite on the server, per app and per logged-in user, or [shared](#shared-data). `collection`/`doc`, `get`/`set`/`update`/`delete`, `add`, `where`/`orderBy`/`limit`, and `onSnapshot`, which picks up changes from other tabs and devices every 5 seconds. |
 | `downloads` | `save({filename, data})` becomes a normal browser download. |
-| `user` | The logged-in e-mail address. `isOwner()` and `canEdit()` are true for admins. |
+| `user` | The logged-in e-mail address, also as `id()`. `isOwner()` and `canEdit()` are true for admins; `can("data.write")` says whether the user may change shared data. |
 | Anything else (`sample`, `room`, `mcp`, …) | `null`. These need claude.ai. |
 
 The data follows an app when it is renamed, and stays when the app is deleted, so it comes back if the app is
-uploaded again. `GET /api/store/<name>` returns everything you have stored in one app as JSON.
+uploaded again. `GET /api/store/<name>` returns everything you can read in one app as JSON.
+
+## Shared data
+
+By default everything an app stores with `window.claude.use("db")` belongs to the person using it. That does not
+fit an app whose content is the same for everyone, such as a news digest that a scheduled Claude agent writes every
+morning: the agent writes as one person, and nobody else would see it.
+
+Such an app can have shared data instead: the *data* button on the admin page, `"data": "shared"` in its meta, or
+`shared_data` from [Claude](CONNECTOR.md). Then it works like an artifact on claude.ai:
+
+- every document is shared by everyone who can see the app;
+- only admins change shared documents. For anyone else `set`, `update` and `delete` reject with
+  `invalid_argument`;
+- each user's own branch, `data/users/<e-mail>/...`, stays private to that user, admins included. Use it for
+  anything personal, for example `db.collection("data/users/" + await user.id()).doc("settings")`, with
+  `user = await window.claude.use("user")`. Someone
+  else's branch reads as empty.
+
+Turning shared data on asks whether to copy your current documents in the app into the shared data, where
+everyone with access sees them, or to start empty. Other users' personal documents are hidden while shared data
+is on. Nothing is deleted: turn it off and the personal data is back. The key/value API below is always per user.
 
 ## Storage: the key/value API
 
@@ -74,7 +95,8 @@ await db.doc("hub/summary").set({ text: "12 open tasks" });
 ```
 
 With the key/value API, write the key `hub/summary` with `{"value": {"text": "..."}}`. The line is per user, cut at
-140 characters and shown as plain text.
+140 characters and shown as plain text. In an app with shared data it is the shared `hub/summary` document, the
+same for everyone.
 
 ## What the hub adds to every page
 

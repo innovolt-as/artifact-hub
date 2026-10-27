@@ -18,6 +18,8 @@ It is one FastAPI process with SQLite and plain files, behind Caddy, meant for o
   people, titles and icons, and who used what in the last 7 days.
 - **Uploads** from the browser, from the terminal (`scripts/push.sh`) or from Claude.
 - **Versions.** The last 10 versions of every app are kept when it is replaced.
+- **Shared data** for apps whose content is the same for everyone, such as a digest a scheduled Claude agent
+  writes every morning. Each user still gets a private corner in it.
 - **Link cards** for apps that run somewhere else, next to the hosted ones.
 - **English or Norwegian** interface (`HUB_LANG`). Another language is one JSON file.
 

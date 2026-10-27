@@ -21,11 +21,11 @@ everyone".
 |---|---|
 | `list_apps` | All apps and link cards: slug, title, who has access, whether it can be edited. |
 | `get_app` | The HTML of an app. |
-| `create_app` | Publishes a new single-file app (`slug`, `html`, `title`, optional `description`, `emoji`, `private`). |
+| `create_app` | Publishes a new single-file app (`slug`, `html`, `title`, optional `description`, `emoji`, `private`, `shared_data`). |
 | `update_app` | Replaces the whole HTML of an app. |
 | `edit_app` | Small changes: a list of `{old, new}` replacements, applied all or nothing. |
-| `update_app_info` | Changes title, description, emoji or `private` without touching the HTML. |
-| `list_app_data`, `get_app_data`, `set_app_data`, `delete_app_data` | Read and write the documents an app keeps with `window.claude.use("db")`, for the user behind the connection only. |
+| `update_app_info` | Changes title, description, emoji, `private` or `shared_data` without touching the HTML. |
+| `list_app_data`, `get_app_data`, `set_app_data`, `delete_app_data` | Read and write the documents an app keeps with `window.claude.use("db")`: the data of the user behind the connection, or in an app with shared data the shared documents and that user's own `data/users/<e-mail>/` branch. |
 
 The data tools let you, say, tell Claude what you had for lunch and have it log that in your food diary app.
 
@@ -39,6 +39,17 @@ the admin page. `private` leaves an existing list of people alone; it comes back
 again.
 
 Every replacement keeps the old version, as described in [APPS.md](APPS.md#versions).
+
+## Shared data
+
+An app that Claude or a scheduled agent fills with the same content for everyone needs
+[shared data](APPS.md#shared-data); otherwise the content lands in the data of whoever runs the agent, and nobody
+else sees it. Before Claude creates an app whose content it will write, it asks whether that content is the same
+for everyone or personal, and sets `shared_data` to match. `update_app_info` with `shared_data` switches an
+existing app; `copy_my_data=true` also copies your current documents into the shared data.
+
+The admin page warns about an app that is shared with others but has personal data that Claude has written in the
+last 30 days: in practice it only works for you. Claude passes on the same warning when it shares such an app.
 
 ## Revoking access
 
