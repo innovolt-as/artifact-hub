@@ -114,8 +114,46 @@ def test_a_redirect_counts_as_logged_out(client, admin_client):
     # fetch follows the hub's 302 to /login and sees a 200, so the script has to look for the redirect itself
     r = client.post("/api/toggle-banner", data={"slug": "a"})
     assert r.status_code == 302 and "/login" in r.headers["location"]
-    assert "r.redirected" in client.get("/static/admin-apps.js").text
+    assert "r.redirected" in client.get("/static/admin.js").text
     assert '"loggedOut": "Ikke innlogget"' in admin_client.get("/admin").text
+
+
+def test_upload_link_and_invite_redirect_an_ended_session(client):
+    # the premise of the three tests below: these end on the login page with a 200, not on an error status
+    upload = client.post("/api/upload", files={"file": ("a.html", b"x")})
+    link = client.post("/api/link", data={"title": "a", "url": "https://a.no"})
+    invite = client.post("/api/people/invite", json={"email": "a@a.no"})
+    assert [r.status_code for r in (upload, link, invite)] == [302, 302, 302]
+
+
+def test_upload_and_link_notice_an_ended_session_or_a_lost_network(client):
+    js = client.get("/static/admin-upload.js").text
+    assert "await reach(fetch('/api/upload'" in js and "await reach(fetch('/api/link'" in js
+    assert "await fetch(" not in js
+    assert "busy.remove();" in js  # the line saying the file is on its way goes when it did not get there
+
+
+def test_every_post_on_the_people_tab_notices_an_ended_session(client):
+    js = client.get("/static/admin-people.js").text
+    assert js.count("await reach(postJson(") == 3 and "await postJson(" not in js
+
+
+def test_the_apps_tab_uses_the_shared_reach(client):
+    js = client.get("/static/admin-apps.js").text
+    assert "const reach" not in js and "reach } = window.Admin" in js
+
+
+@pytest.mark.parametrize("path", ["/admin/upload", "/admin/people"])
+def test_the_error_texts_reach_the_upload_and_people_tabs(path, admin_client):
+    html = admin_client.get(path).text
+    assert '"loggedOut":' in html and '"netError":' in html
+
+
+def test_the_upload_log_links_to_the_app(client):
+    js = client.get("/static/admin-upload.js").text
+    assert "document.createElement('a')" in js and "innerHTML" not in js
+    # hub.css takes the underline off every link, and in the log nothing else says it is one
+    assert ".log a { text-decoration: underline; }" in client.get("/static/hub.css").text
 
 
 def test_clicks_just_after_open_are_ignored_inside_the_sheet(client):

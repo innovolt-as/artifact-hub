@@ -1,12 +1,12 @@
 // The People tab: invitations, temporary passwords and removal.
 (() => {
-  const { T, $, fmt, postJson, failText } = window.Admin;
+  const { T, $, fmt, postJson, failText, reach } = window.Admin;
 
   $('inviteForm').addEventListener('submit', async e => {
     e.preventDefault();
     const body = { email: e.target.email.value };
     if (e.target.password) body.password = e.target.password.value;
-    const r = await postJson('/api/people/invite', body);
+    const r = await reach(postJson('/api/people/invite', body));
     if (r.ok) {
       $('peopleError').textContent = '';
       if (!e.target.password) return location.reload();
@@ -42,7 +42,7 @@
     });
     $('pwForm').addEventListener('submit', async e => {
       e.preventDefault();
-      const r = await postJson('/api/people/password', { email: pwEmail, password: $('pwNew').value });
+      const r = await reach(postJson('/api/people/password', { email: pwEmail, password: $('pwNew').value }));
       if (!r.ok) { $('pwError').textContent = await failText(r); return; }
       $('pwError').textContent = '';
       $('pwMsg').textContent = T.pwSet;
@@ -51,7 +51,7 @@
   }
   document.querySelectorAll('.unperson').forEach(b => b.onclick = async () => {
     if (!confirm(fmt(T.confirmRemove, { email: b.dataset.email }))) return;
-    const r = await postJson('/api/people/remove', { email: b.dataset.email });
+    const r = await reach(postJson('/api/people/remove', { email: b.dataset.email }));
     if (r.ok) return location.reload();
     $('peopleError').textContent = await failText(r);
   });

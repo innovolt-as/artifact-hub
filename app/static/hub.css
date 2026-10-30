@@ -177,6 +177,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .check { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 14px; }
 .log { list-style: none; padding: 0; margin: 12px 0 0; font-size: 14px; }
 .log .ok { color: var(--ok); } .log .err { color: var(--danger); }
+.log a { text-decoration: underline; }
 
 button.small { font: inherit; font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); cursor: pointer; margin-left: 6px; }
 button.danger { color: var(--danger); }

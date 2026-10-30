@@ -1,6 +1,6 @@
 // The Apps tab: the list, the search, and the settings sheet per app with its views for edit, access and shared data.
 (() => {
-  const { T, $, fmt, postJson, failText } = window.Admin;
+  const { T, $, fmt, postJson, failText, reach } = window.Admin;
   const sheet = $('appSheet');
   let current = null;  // the slug of the app in the sheet
 
@@ -14,10 +14,6 @@
     li.textContent = `✗ ${slug ? slug + ': ' : ''}${msg}`; li.className = 'err';
     $('log').prepend(li);
   }
-  // A network failure, or the hub's redirect to the login page (fetch follows it and sees a 200), reads like a failed
-  // response, so each caller has one error path
-  const failed = (status, detail) => ({ ok: false, status, json: async () => ({ detail }) });
-  const reach = p => p.then(r => r.redirected ? failed(401, T.loggedOut) : r).catch(() => failed(0, T.netError));
   const why = r => r.status === 404 ? T.appGone : failText(r);
   function postSlug(url, slug) {
     const fd = new FormData(); fd.append('slug', slug);
