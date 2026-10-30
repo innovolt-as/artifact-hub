@@ -2,6 +2,7 @@ Koble til Claude · Artifact Hub
 Artifact Hub
 Admin
 admin@test.no
+@aria-label: Innstillinger
 Logg ut
 Gi Claude tilgang til å publisere apper i Artifact Hub?
 Claude

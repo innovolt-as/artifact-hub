@@ -31,7 +31,7 @@ docker run --rm -p 8000:8000 -e ADMIN_EMAILS=you@example.com ghcr.io/innovolt-as
 ```
 
 Open http://localhost:8000 and log in as `you@example.com`. Without SMTP the login link is printed in the
-container's output. Drop an `.html` file on `/admin` to publish it. Everything is gone when the container stops.
+container's output. Drop an `.html` file on the *Upload* tab of `/admin` to publish it. Everything is gone when the container stops.
 
 ## Running it on a server
 
@@ -104,7 +104,7 @@ mode `ALLOWED_DOMAINS=*` has no effect: only people with a password can log in.
 
 ## Publishing apps
 
-**From the browser:** log in as an admin, open `/admin` and drop `.html` files, or a `.zip` with an `index.html`.
+**From the browser:** log in as an admin, open `/admin/upload` and drop `.html` files, or a `.zip` with an `index.html`.
 
 **From the terminal**, with `UPLOAD_TOKEN` set on the server:
 

@@ -3,417 +3,134 @@
 {% block title %}{{ t("nav.admin") }} · {{ site }}{% endblock %}
 {% block body %}
 {% with tab = 'apps' %}{% include "_admin_tabs.html" %}{% endwith %}
-<section class="card">
-  <h1>{{ t("admin.upload") }}</h1>
-  <p class="muted">{{ t_html("admin.upload_hint") }}</p>
-  <div id="drop" class="drop">
-    <p>{{ t("admin.drop") }} <label for="file" class="link-like">{{ t("admin.drop_pick") }}</label></p>
-    <input id="file" type="file" accept=".html,.htm,.zip" multiple hidden>
-  </div>
-  <form id="linkForm" class="link-form">
-    <span class="muted small">{{ t("admin.link_or") }}</span>
-    <input name="title" placeholder="{{ t('admin.name') }}" required maxlength="120">
-    <input name="url" type="url" placeholder="https://…" required>
-    <button class="small">{{ t("admin.add_link") }}</button>
-  </form>
-  <label class="check"><input type="checkbox" id="adminOnly"> {{ t("admin.only_me") }}</label>
-  <ul id="log" class="log"></ul>
-</section>
+<h1 class="vh" id="appsHeading" tabindex="-1">{{ t('admin.tab_apps') }}</h1>
+<label class="asearch">
+  <span aria-hidden="true">🔍</span>
+  <input type="search" id="appSearch" placeholder="{{ t('admin.search') }}" aria-label="{{ t('admin.search') }}" autocomplete="off">
+</label>
+<p id="appCount" class="acount small muted" role="status" hidden></p>
+<ul class="alist" id="appList">
+  {% for a in artifacts %}
+  <li data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}" data-kind="{{ a.kind }}"
+      data-kindlabel="{{ t('admin.kind_' + a.kind) }}" data-url="{{ a.url }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}"
+      data-level="{{ a.access }}" data-label="{{ a.access_label }}" data-people='{{ a.people|tojson }}'
+      data-shared="{{ '1' if a.data == 'shared' else '0' }}" data-banner="{{ '1' if a.banner else '0' }}"
+      data-claude="{{ '1' if a.slug in filled else '0' }}" data-warned="{{ '1' if a.slug in warned else '0' }}">
+    <button type="button" class="arow">
+      {{ icon(a, "icon icon-sm") }}
+      <span class="txt"><b>{{ a.title }}</b><small>{{ a.access_label }}
+        {%- if a.data == 'shared' %} · {{ t('admin.meta_shared') }}{% endif %}
+        {%- if not a.banner %} · {{ t('admin.meta_no_banner') }}{% endif %}
+        {%- if a.kind == 'link' %} · {{ t('admin.kind_link') }}{% endif %}</small>
+        {%- if a.slug in warned %}<span class="claude-warn err small">⚠ {{ t('admin.claude_warning') }}</span>{% endif %}</span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>
+  </li>
+  {% else %}
+  <li class="aempty">{{ t('admin.no_apps') }} <a href="/admin/upload">{{ t('admin.upload') }}</a></li>
+  {% endfor %}
+</ul>
+<p id="appNone" class="muted" hidden>{{ t('admin.search_none') }}</p>
+<ul id="log" class="log"></ul>
 
-<section class="card">
-  <h1>{{ t('admin.artifacts_heading') }}</h1>
-  <table class="list">
-    <tbody>
-    {% for a in artifacts %}
-    <tr data-slug="{{ a.slug }}">
-      <td class="icon-cell">{{ icon(a, "icon icon-sm") }}</td>
-      <td><a href="{{ a.url }}" {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>{{ a.title }}</a>
-          <span class="muted small">{{ a.slug }} · {{ t('admin.kind_' + a.kind) }}</span>
-          {% if a.slug in warned %}<p class="claude-warn err small">⚠ {{ t('admin.claude_warning') }} {{ t('admin.claude_warning_fix') }}</p>{% endif %}</td>
-      <td class="right">
-        <button class="small edit" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}"
-                data-kind="{{ a.kind }}" data-url="{{ a.url if a.kind == 'link' else '' }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}">{{ t("admin.edit") }}</button>
-        {% if a.kind != 'link' %}<button class="small banner" data-slug="{{ a.slug }}" title="{{ t('admin.banner_title') }}">{{ t('admin.banner_on') if a.banner else t('admin.banner_off') }}</button>
-        <button class="small datamode" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-shared="{{ '1' if a.data == 'shared' else '0' }}" title="{{ t('admin.data_title') }}">{{ t('admin.data_shared') if a.data == 'shared' else t('admin.data_personal') }}</button>{% endif %}
-        <button class="small access" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-level="{{ a.access }}"
-                data-people='{{ a.people|tojson }}'{% if a.slug in filled %} data-claude="1"{% endif %} title="{{ t('admin.access_title') }}">{{ a.access_label }}</button>
-        <button class="small danger del" data-slug="{{ a.slug }}">{{ t("admin.delete") }}</button>
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</section>
-
-<section class="card" id="people">
-  <h1>{{ t("admin.people") }}</h1>
-  <p class="muted">{{ t("admin.people_hint") }}</p>
-  <form id="inviteForm" class="link-form">
-    <input name="email" type="email" placeholder="{{ t('admin.email_placeholder') }}" required>
-    {% if pw_mode() %}
-    <input name="password" type="text" placeholder="{{ t('admin.pw_placeholder') }}" required minlength="10" maxlength="200" autocomplete="off">
-    <button type="button" class="small" id="genPw">{{ t("admin.generate") }}</button>
-    {% endif %}
-    <button class="small">{{ t("admin.invite") }}</button>
-  </form>
-  <p id="peopleError" class="err small"></p>
-  <ul class="plist">
-    {% for p in people %}
-    <li><span class="e">{{ p.email }}</span>
-      {% if pw_mode() %}<span class="muted small">{{ t('admin.pw_status', status=t('admin.pw_' + p.pw_status)) }}</span>
-      <button class="small setpw" data-email="{{ p.email }}">{{ t("admin.new_temp_pw") }}</button>{% endif %}
-      {% if p.invited %}<button class="small danger unperson" data-email="{{ p.email }}">{{ t("admin.remove") }}</button>
-      {% elif not p.admin %}<span class="muted small">{{ t("admin.from_config") }}</span>{% endif %}</li>
-    {% else %}
-    <li class="muted">{{ t("admin.nobody") }}</li>
-    {% endfor %}
-  </ul>
-</section>
-
-<dialog id="accessDlg" class="editor">
-  <form id="accessForm" method="dialog">
-    <h1 tabindex="-1" autofocus>{{ t("admin.access") }}: <span id="acTitle"></span></h1>
-    <label class="check"><input type="radio" name="level" value="all"> {{ t("admin.level_all") }}</label>
-    <label class="check"><input type="radio" name="level" value="people"> {{ t("admin.level_people") }}</label>
-    <label class="check"><input type="radio" name="level" value="admin"> {{ t("admin.level_admin") }}</label>
-    <div id="acPeople" class="ac-people">
-      <ul id="acList" class="ac-list"></ul>
-      <div class="link-form">
-        <input type="email" id="acNew" placeholder="{{ t('admin.new_email_placeholder') }}">
-        <button type="button" class="small" id="acAdd">{{ t("admin.add") }}</button>
+<dialog id="appSheet" class="sheet" aria-labelledby="asTitle">
+  <div class="view" data-view="main">
+    <div class="as-top">
+      <span id="asIcon"></span>
+      <div class="txt">
+        <h1 id="asTitle" tabindex="-1" autofocus></h1>
+        <p id="asAddress"></p>
+        <a id="asOpen">{{ t('admin.open_app') }}</a>
       </div>
+      <button type="button" id="asClose" aria-label="{{ t('admin.close') }}">✕</button>
     </div>
-    <p id="acWarn" class="err small" hidden>⚠ {{ t('admin.claude_warning') }} {{ t('admin.claude_warning_fix') }}</p>
-    <p id="acError" class="err small"></p>
-    <div class="editor-actions">
-      <button type="button" class="small" id="acCancel">{{ t("admin.cancel") }}</button>
-      <button type="submit" class="primary">{{ t("admin.save") }}</button>
+    <p id="asWarn" class="err small" hidden>⚠ {{ t('admin.claude_warning') }} {{ t('admin.claude_warning_fix') }}</p>
+    <div class="as-group">
+      <button type="button" class="set" id="asEdit"><span>{{ t('admin.name_icon') }}</span><em aria-hidden="true">›</em></button>
+      <button type="button" class="set" id="asAccess"><span>{{ t('admin.access') }}</span><em><span id="asAccessLabel"></span> <span aria-hidden="true">›</span></em></button>
     </div>
-  </form>
-</dialog>
-{% if pw_mode() %}
-<dialog id="pwDialog" class="editor">
-  <form id="pwForm" method="dialog">
-    <h1 tabindex="-1" autofocus>{{ t("admin.new_temp_pw") }}: <span id="pwWho"></span></h1>
-    <div class="link-form">
-      <input id="pwNew" type="text" placeholder="{{ t('admin.pw_placeholder') }}" required minlength="10" maxlength="200" autocomplete="off">
-      <button type="button" class="small" id="pwGen">{{ t("admin.generate") }}</button>
+    <div id="asSwitches">
+      <div class="as-group">
+        <label class="set"><span>{{ t('admin.shared_data') }}</span><input type="checkbox" role="switch" id="asData"><span class="sw" aria-hidden="true"></span></label>
+        <label class="set"><span>{{ t('admin.banner_top') }}</span><input type="checkbox" role="switch" id="asBanner"><span class="sw" aria-hidden="true"></span></label>
+      </div>
+      <p class="as-hint">{{ t('admin.data_hint') }}</p>
     </div>
-    <p id="pwMsg" class="small"></p>
-    <p id="pwError" class="err small"></p>
-    <div class="editor-actions">
-      <button type="button" class="small" id="pwClose">{{ t("admin.close") }}</button>
-      <button type="submit" class="primary" id="pwSet">{{ t("admin.set") }}</button>
-    </div>
-  </form>
-</dialog>
-{% endif %}
-<dialog id="shareDlg" class="editor">
-  <form method="dialog">
-    <h1 tabindex="-1" autofocus>{{ t("admin.share_heading") }}: <span id="shTitle"></span></h1>
+    <p id="asError" class="err small" role="alert"></p>
+    <button type="button" id="asDelete">{{ t('admin.delete_app') }}</button>
+  </div>
+
+  <section class="editor view" data-view="edit" hidden>
+    <header class="view-top">
+      <button type="button" class="view-back" aria-label="{{ t('admin.back') }}">‹</button>
+      <h1 tabindex="-1">{{ t("admin.edit") }}</h1>
+    </header>
+    <form id="editForm" method="dialog">
+      <div class="editor-preview">
+        <span id="pvIcon" class="icon"></span>
+        <span class="muted small">{{ t("admin.edit_preview") }}</span>
+      </div>
+      <label>{{ t("admin.name") }}<input name="title" id="edTitle" maxlength="120"></label>
+      <label id="edSlugRow">{{ t("admin.address") }}
+        <span class="prefixed"><span class="muted">/a/</span><input name="new_slug" id="edSlug" maxlength="80" pattern="[a-z0-9][a-z0-9._\-]*"></span>
+        <span class="muted small">{{ t("admin.edit_old_links") }}</span>
+      </label>
+      <label id="edUrlRow">{{ t('admin.url_label') }}<input name="url" id="edUrl" type="url" placeholder="https://…"></label>
+      <label>{{ t('admin.emoji_label') }}<input name="emoji" id="edEmoji" maxlength="16" placeholder="{{ t('admin.emoji_placeholder') }}"></label>
+      <label>{{ t("admin.image") }}<input type="file" name="icon" id="edIcon" accept=".png,.jpg,.jpeg,.webp,.gif,.svg"></label>
+      <label class="check" id="edRemoveRow"><input type="checkbox" name="remove_icon" id="edRemove" value="true"> {{ t("admin.remove_image") }}</label>
+      <p id="edError" class="err small" role="alert"></p>
+      <div class="editor-actions">
+        <button type="button" class="small view-cancel">{{ t("admin.cancel") }}</button>
+        <button type="submit" class="primary">{{ t("admin.save") }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="editor view" data-view="access" hidden>
+    <header class="view-top">
+      <button type="button" class="view-back" aria-label="{{ t('admin.back') }}">‹</button>
+      <h1 tabindex="-1">{{ t("admin.access") }}: <span id="acTitle"></span></h1>
+    </header>
+    <form id="accessForm" method="dialog">
+      <label class="check"><input type="radio" name="level" value="all"> {{ t("admin.level_all") }}</label>
+      <label class="check"><input type="radio" name="level" value="people"> {{ t("admin.level_people") }}</label>
+      <label class="check"><input type="radio" name="level" value="admin"> {{ t("admin.level_admin") }}</label>
+      <div id="acPeople" class="ac-people">
+        <ul id="acList" class="ac-list"></ul>
+        <div class="link-form">
+          <input type="email" id="acNew" placeholder="{{ t('admin.new_email_placeholder') }}">
+          <button type="button" class="small" id="acAdd">{{ t("admin.add") }}</button>
+        </div>
+      </div>
+      <p id="acWarn" class="err small" hidden>⚠ {{ t('admin.claude_warning') }} {{ t('admin.claude_warning_fix') }}</p>
+      <p id="acError" class="err small" role="alert"></p>
+      <div class="editor-actions">
+        <button type="button" class="small view-cancel">{{ t("admin.cancel") }}</button>
+        <button type="submit" class="primary">{{ t("admin.save") }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="editor view" data-view="share" hidden>
+    <header class="view-top">
+      <button type="button" class="view-back" aria-label="{{ t('admin.back') }}">‹</button>
+      <h1 tabindex="-1">{{ t("admin.share_heading") }}: <span id="shTitle"></span></h1>
+    </header>
     <p class="small">{{ t("admin.share_intro") }}</p>
     <p id="shMine" class="small"></p>
     <p id="shOthers" class="small"></p>
     <p id="shExists" class="small">{{ t("admin.share_exists") }}</p>
+    <p id="shError" class="err small" role="alert"></p>
     <div class="editor-actions">
-      <button type="button" class="small" id="shCancel">{{ t("admin.cancel") }}</button>
+      <button type="button" class="small view-cancel">{{ t("admin.cancel") }}</button>
       <button type="button" class="small" id="shEmpty"></button>
       <button type="button" class="primary" id="shCopy">{{ t("admin.share_copy") }}</button>
     </div>
-  </form>
+  </section>
 </dialog>
 <script type="application/json" id="known">{{ known|tojson }}</script>
 
-<dialog id="editor" class="editor">
-  <form id="editForm" method="dialog">
-    <h1 tabindex="-1" autofocus>{{ t("admin.edit") }}</h1>
-    <div class="editor-preview">
-      <span id="pvIcon" class="icon"></span>
-      <span class="muted small">{{ t("admin.edit_preview") }}</span>
-    </div>
-    <label>{{ t("admin.name") }}<input name="title" id="edTitle" maxlength="120"></label>
-    <label id="edSlugRow">{{ t("admin.address") }}
-      <span class="prefixed"><span class="muted">/a/</span><input name="new_slug" id="edSlug" maxlength="80" pattern="[a-z0-9][a-z0-9._\-]*"></span>
-      <span class="muted small">{{ t("admin.edit_old_links") }}</span>
-    </label>
-    <label id="edUrlRow">{{ t('admin.url_label') }}<input name="url" id="edUrl" type="url" placeholder="https://…"></label>
-    <label>{{ t('admin.emoji_label') }}<input name="emoji" id="edEmoji" maxlength="16" placeholder="{{ t('admin.emoji_placeholder') }}"></label>
-    <label>{{ t("admin.image") }}<input type="file" name="icon" id="edIcon" accept=".png,.jpg,.jpeg,.webp,.gif,.svg"></label>
-    <label class="check" id="edRemoveRow"><input type="checkbox" name="remove_icon" id="edRemove" value="true"> {{ t("admin.remove_image") }}</label>
-    <p id="edError" class="err small"></p>
-    <div class="editor-actions">
-      <button type="button" class="small" id="edCancel">{{ t("admin.cancel") }}</button>
-      <button type="submit" class="primary">{{ t("admin.save") }}</button>
-    </div>
-  </form>
-</dialog>
-
-<script>
-const T = {
-  uploading: {{ raw("admin.uploading")|tojson }},
-  linkAdded: {{ raw("admin.link_added")|tojson }},
-  confirmDelete: {{ raw("admin.confirm_delete")|tojson }},
-  errorStatus: {{ raw("admin.error_status")|tojson }},
-  validEmail: {{ raw("admin.valid_email")|tojson }},
-  invitedNote: {{ raw("admin.invited_note")|tojson }},
-  ok: {{ raw("admin.ok")|tojson }},
-  pwSet: {{ raw("admin.pw_set_msg")|tojson }},
-  confirmRemove: {{ raw("admin.confirm_remove")|tojson }},
-  shareMine: {{ raw("admin.share_mine")|tojson }},
-  shareOthers: {{ raw("admin.share_others")|tojson }},
-  shareEmpty: {{ raw("admin.share_empty")|tojson }},
-  shareOn: {{ raw("admin.share_on")|tojson }},
-};
-const fmt = (s, vars) => s.replace(/\{(\w+)\}/g, (m, k) => k in vars ? vars[k] : m);
-
-const drop = document.getElementById('drop');
-const input = document.getElementById('file');
-const log = document.getElementById('log');
-
-function note(msg, ok = true) {
-  const li = document.createElement('li');
-  li.textContent = msg; li.className = ok ? 'ok' : 'err';
-  log.prepend(li);
-}
-
-async function upload(file) {
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('admin_only', document.getElementById('adminOnly').checked ? 'true' : 'false');
-  note(fmt(T.uploading, { name: file.name }));
-  const r = await fetch('/api/upload', { method: 'POST', body: fd });
-  const j = await r.json().catch(() => ({}));
-  if (r.ok) { note(`✓ ${file.name} → ${j.url}`); setTimeout(() => location.reload(), 800); }
-  else note(`✗ ${file.name}: ${j.detail || r.status}`, false);
-}
-
-['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
-['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
-drop.addEventListener('drop', e => [...e.dataTransfer.files].forEach(upload));
-input.addEventListener('change', () => [...input.files].forEach(upload));
-
-document.getElementById('linkForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const fd = new FormData(e.target);
-  fd.append('admin_only', document.getElementById('adminOnly').checked ? 'true' : 'false');
-  const r = await fetch('/api/link', { method: 'POST', body: fd });
-  const j = await r.json().catch(() => ({}));
-  if (r.ok) { note(fmt(T.linkAdded, { title: fd.get('title') })); setTimeout(() => location.reload(), 600); }
-  else note(`✗ ${j.detail || r.status}`, false);
-});
-
-async function post(url, slug) {
-  const fd = new FormData(); fd.append('slug', slug);
-  const r = await fetch(url, { method: 'POST', body: fd });
-  if (!r.ok) { const j = await r.json().catch(() => ({})); note(`✗ ${j.detail || r.status}`, false); return false; }
-  return true;
-}
-document.querySelectorAll('.del').forEach(b => b.onclick = async () => {
-  if (!confirm(fmt(T.confirmDelete, { slug: b.dataset.slug }))) return;
-  if (await post('/api/delete', b.dataset.slug)) b.closest('tr').remove();
-});
-document.querySelectorAll('.banner').forEach(b => b.onclick = async () => {
-  if (await post('/api/toggle-banner', b.dataset.slug)) location.reload();
-});
-
-// --- edit dialog: name, address, emoji, image
-const ed = document.getElementById('editor');
-const f = document.getElementById('editForm');
-const $ = id => document.getElementById(id);
-let current = null, objectUrl = null;
-
-function preview() {
-  const pv = $('pvIcon');
-  pv.style.setProperty('--hue', current.hue);
-  pv.replaceChildren();
-  const file = $('edIcon').files[0];
-  if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
-  const src = file ? (objectUrl = URL.createObjectURL(file)) : ($('edRemove').checked ? '' : current.icon);
-  const el = document.createElement(src ? 'img' : 'span');
-  if (src) { el.src = src; el.alt = ''; }
-  else if ($('edEmoji').value.trim()) { el.className = 'emoji'; el.textContent = $('edEmoji').value.trim(); }
-  else { el.className = 'letter'; el.textContent = ($('edTitle').value.trim()[0] || '?').toUpperCase(); }
-  pv.append(el);
-}
-
-document.querySelectorAll('.edit').forEach(b => b.onclick = () => {
-  current = b.dataset;
-  f.reset();
-  $('edTitle').value = current.title;
-  $('edSlug').value = current.slug;
-  $('edEmoji').value = current.emoji;
-  $('edSlugRow').hidden = current.kind === 'link';   // link cards have an external URL instead
-  $('edUrlRow').hidden = current.kind !== 'link';
-  $('edUrl').value = current.url;
-  $('edRemoveRow').hidden = !current.icon;
-  $('edError').textContent = '';
-  preview();
-  ed.showModal();
-});
-['edTitle', 'edEmoji', 'edIcon', 'edRemove'].forEach(id => $(id).addEventListener('input', preview));
-$('edCancel').onclick = () => ed.close();
-
-f.addEventListener('submit', async e => {
-  e.preventDefault();
-  const fd = new FormData(f);
-  fd.append('slug', current.slug);
-  if (!$('edIcon').files.length) fd.delete('icon');
-  const r = await fetch('/api/edit', { method: 'POST', body: fd });
-  if (r.ok) return location.reload();
-  const j = await r.json().catch(() => ({}));
-  $('edError').textContent = j.detail || fmt(T.errorStatus, { status: r.status });
-});
-
-const postJson = (url, body) =>
-  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-const failText = async r => (await r.json().catch(() => ({}))).detail || fmt(T.errorStatus, { status: r.status });
-
-// --- access dialog: everyone, the checked people, or only me (the list is kept whatever is chosen)
-const acDlg = $('accessDlg'), acForm = $('accessForm');
-const known = JSON.parse($('known').textContent);
-let acSlug = null, acClaude = false;
-
-function personRow(email, checked) {
-  const li = document.createElement('li');
-  const label = document.createElement('label');
-  label.className = 'check';
-  const cb = document.createElement('input');
-  cb.type = 'checkbox'; cb.value = email; cb.checked = checked;
-  label.append(cb, ' ' + email);
-  li.append(label);
-  return li;
-}
-// Claude fills the app with an admin's personal data: warn as soon as others than admins would see it
-function showWarn() {
-  const level = acForm.level.value;
-  const someone = $('acList').querySelector('input:checked') !== null;
-  $('acWarn').hidden = !(acClaude && (level === 'all' || (level === 'people' && someone)));
-}
-const showPeople = () => { $('acPeople').hidden = acForm.level.value !== 'people'; showWarn(); };
-$('acList').addEventListener('change', showWarn);
-
-document.querySelectorAll('.access').forEach(b => b.onclick = () => {
-  acSlug = b.dataset.slug;
-  acClaude = b.dataset.claude === '1';
-  const mine = JSON.parse(b.dataset.people);
-  $('acTitle').textContent = b.dataset.title;
-  acForm.level.value = b.dataset.level;
-  $('acList').replaceChildren(...[...new Set([...mine, ...known])].sort().map(e => personRow(e, mine.includes(e))));
-  $('acNew').value = '';
-  $('acError').textContent = '';
-  showPeople();
-  acDlg.showModal();
-});
-acForm.querySelectorAll('input[name=level]').forEach(r => r.onchange = showPeople);
-
-function addPerson() {
-  const input = $('acNew'), email = input.value.trim().toLowerCase();
-  if (!email) return true;
-  if (!input.checkValidity()) { $('acError').textContent = T.validEmail; return false; }
-  const row = [...$('acList').querySelectorAll('input')].find(cb => cb.value === email);
-  if (row) row.checked = true;
-  else $('acList').prepend(personRow(email, true));
-  showWarn();
-  input.value = '';
-  $('acError').textContent = '';
-  return true;
-}
-$('acAdd').onclick = addPerson;
-$('acNew').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addPerson(); } });
-$('acCancel').onclick = () => acDlg.close();
-
-acForm.addEventListener('submit', async e => {
-  e.preventDefault();
-  if (!addPerson()) return;  // an address typed but not added yet still counts
-  const people = [...$('acList').querySelectorAll('input:checked')].map(cb => cb.value);
-  const r = await postJson('/api/access', { slug: acSlug, level: acForm.level.value, people });
-  if (r.ok) return location.reload();
-  $('acError').textContent = await failText(r);
-});
-
-// --- people who may log in
-$('inviteForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const body = { email: e.target.email.value };
-  if (e.target.password) body.password = e.target.password.value;
-  const r = await postJson('/api/people/invite', body);
-  if (r.ok) {
-    $('peopleError').textContent = '';
-    if (!e.target.password) return location.reload();
-    // password mode: keep the page so the admin can pass the password on; reload when they click OK
-    e.target.querySelectorAll('input, button').forEach(x => x.disabled = true);
-    $('peopleError').classList.remove('err');
-    $('peopleError').innerHTML = '';
-    $('peopleError').append(T.invitedNote);
-    const ok = document.createElement('button'); ok.className = 'small'; ok.textContent = T.ok;
-    ok.onclick = () => location.reload();
-    $('peopleError').append(ok);
-    return;
-  }
-  $('peopleError').textContent = await failText(r);
-});
-function genPw() {
-  const abc = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  const v = crypto.getRandomValues(new Uint32Array(12));
-  return [...v].map(n => abc[n % abc.length]).join('');
-}
-if ($('genPw')) $('genPw').onclick = () => { $('inviteForm').password.value = genPw(); };
-if ($('pwDialog')) {
-  let pwEmail = '';
-  $('pwDialog').addEventListener('close', () => { if ($('pwSet').disabled) location.reload(); });
-  $('pwGen').onclick = () => { $('pwNew').value = genPw(); };
-  $('pwClose').onclick = () => $('pwDialog').close();
-  document.querySelectorAll('.setpw').forEach(b => b.onclick = () => {
-    pwEmail = b.dataset.email;
-    $('pwWho').textContent = pwEmail;
-    $('pwNew').value = ''; $('pwNew').disabled = false; $('pwSet').disabled = false;
-    $('pwMsg').textContent = ''; $('pwError').textContent = '';
-    $('pwDialog').showModal();
-  });
-  $('pwForm').addEventListener('submit', async e => {
-    e.preventDefault();
-    const r = await postJson('/api/people/password', { email: pwEmail, password: $('pwNew').value });
-    if (!r.ok) { $('pwError').textContent = await failText(r); return; }
-    $('pwError').textContent = '';
-    $('pwMsg').textContent = T.pwSet;
-    $('pwSet').disabled = true; $('pwNew').disabled = true;  // the dialog reloads the page when closed
-  });
-}
-document.querySelectorAll('.unperson').forEach(b => b.onclick = async () => {
-  if (!confirm(fmt(T.confirmRemove, { email: b.dataset.email }))) return;
-  const r = await postJson('/api/people/remove', { email: b.dataset.email });
-  if (r.ok) return location.reload();
-  $('peopleError').textContent = await failText(r);
-});
-
-// --- shared data: everyone who can see the app reads it, only admins change it (app/shared.py)
-const shDlg = $('shareDlg');
-let shSlug = null;
-async function setData(slug, shared, copy) {
-  const r = await postJson('/api/data-mode', { slug, shared, copy });
-  if (r.ok) return location.reload();
-  shDlg.close();
-  note(`✗ ${await failText(r)}`, false);
-}
-document.querySelectorAll('.datamode').forEach(b => b.onclick = async () => {
-  if (b.dataset.shared === '1') return setData(b.dataset.slug, false, false);
-  const r = await fetch('/api/data-mode?slug=' + encodeURIComponent(b.dataset.slug));
-  if (!r.ok) return note(`✗ ${await failText(r)}`, false);
-  const p = await r.json();
-  const canCopy = p.docs > 0 && !p.shared_exists;
-  shSlug = b.dataset.slug;
-  $('shTitle').textContent = b.dataset.title;
-  $('shMine').textContent = fmt(T.shareMine, { collections: Object.entries(p.collections).map(([c, n]) => `${c} (${n})`).join(', ') });
-  $('shMine').hidden = !canCopy;
-  $('shOthers').textContent = fmt(T.shareOthers, { n: p.others });
-  $('shOthers').hidden = !p.others;
-  $('shExists').hidden = !p.shared_exists;
-  $('shCopy').hidden = !canCopy;
-  $('shEmpty').textContent = canCopy ? T.shareEmpty : T.shareOn;
-  shDlg.showModal();
-});
-$('shCancel').onclick = () => shDlg.close();
-$('shCopy').onclick = () => setData(shSlug, true, true);
-$('shEmpty').onclick = () => setData(shSlug, true, false);
-</script>
+{% include "_admin_js.html" %}
+<script src="/static/admin-apps.js"></script>
 {% endblock %}

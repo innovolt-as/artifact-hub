@@ -50,15 +50,17 @@ def test_known_people(hub, make_page, admin_client):
     assert hub.known_people() == ["gammel@test.no", "ny@test.no", "user@test.no", "venn@test.no"]
 
 
-def test_admin_page_access_buttons_and_people(hub, make_page, admin_client):
+def test_admin_page_shows_access_and_people(hub, make_page, admin_client):
     make_page("p", "people", ["venn@test.no"])
     make_page("q", "admin")
     make_page("r")
     admin_client.post("/api/people/invite", json={"email": "ny@test.no"})
     html = admin_client.get("/admin").text
     assert "👥 1 person" in html and "🔒 Bare meg" in html and "🌍 Alle" in html
+    assert 'data-level="people"' in html and """data-people='["venn@test.no"]'""" in html
     assert "toggle-private" not in html and "🌐 delt" not in html
-    people = html[html.find('id="people"'):]
+    people = admin_client.get("/admin/people").text
+    people = people[people.find('id="people"'):]
     assert "Personer" in people and "ny@test.no" in people and "user@test.no" in people
     assert "admin@test.no" not in people and "Inviter" in people
 
@@ -85,11 +87,11 @@ def test_server_config_people_are_not_invited(hub, make_page, admin_client):
     admin_client.post("/api/access", json={"slug": "p", "level": "people", "people": ["user@test.no", "ny@test.no"]})
     with hub.db() as con:
         assert hub.access.invited(con) == ["ny@test.no"]
-    row = _person_row(admin_client.get("/admin").text, "user@test.no")
+    row = _person_row(admin_client.get("/admin/people").text, "user@test.no")
     assert "fra serveroppsettet" in row and "Fjern" not in row
 
 
 def test_server_config_person_invited_earlier_has_no_remove(hub, admin_client):
     admin_client.post("/api/people/invite", json={"email": "user@test.no"})
-    row = _person_row(admin_client.get("/admin").text, "user@test.no")
+    row = _person_row(admin_client.get("/admin/people").text, "user@test.no")
     assert "fra serveroppsettet" in row and "Fjern" not in row

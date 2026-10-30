@@ -36,6 +36,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
+from jinja2 import pass_context
 
 from app import access, banner, cards, home, i18n, loginmail, mail, passwd, shared, versions
 
@@ -126,6 +127,23 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["pw_mode"] = lambda: password_mode()
 templates.env.globals.update(t=i18n.t, t_html=i18n.t_html, tn=i18n.tn, raw=i18n.raw, lang=lambda: i18n.LANG)
 signer = URLSafeTimedSerializer(SECRET_KEY, salt="session")
+
+
+@pass_context
+def _theme(ctx) -> str:
+    """The signed-in viewer's chosen theme for <html data-theme>; "auto" for anyone else and on any db trouble."""
+    request = ctx.get("request")
+    user = current_user(request) if request is not None else None
+    if not user:
+        return "auto"
+    try:
+        with db() as con:
+            return home.get_theme(con, user)
+    except sqlite3.Error:
+        return "auto"
+
+
+templates.env.globals["theme"] = _theme
 
 
 # ---------------------------------------------------------------- db
@@ -609,6 +627,14 @@ def password_page(request: Request, next: str = "/"):
             if passwd.get(con, current_user(request)) is None:
                 return _password_form(request, False, safe_next(next), no_password=True)
     return _password_form(request, bool(pending), safe_next(next))
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, user: str = Depends(require_user)):
+    with db() as con:
+        chosen = home.get_theme(con, user)
+    return templates.TemplateResponse(request, "settings.html", {
+        "site": SITE_NAME, "user": user, "admin": is_admin(user), "chosen": chosen})
 
 
 @app.post("/password", response_class=HTMLResponse)
@@ -1159,6 +1185,19 @@ async def prefs_view(request: Request, user: str = Depends(api_user)):
     return {"ok": True, "view": view}
 
 
+@app.post("/api/prefs/theme")
+async def prefs_theme(request: Request, user: str = Depends(api_user)):
+    _require_json(request)
+    body = await request.json()
+    theme = body.get("theme") if isinstance(body, dict) else None
+    with db() as con:
+        try:
+            home.set_theme(con, user, theme)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+    return {"ok": True, "theme": theme}
+
+
 @app.post("/api/prefs/tz")
 async def prefs_tz(request: Request, user: str = Depends(api_user)):
     """The browser tells the hub its time zone, so card recipes see the viewer's "today"."""
@@ -1504,6 +1543,21 @@ def known_people() -> list[str]:
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, user: str = Depends(require_admin)):
+    apps = list_artifacts(user)
+    return templates.TemplateResponse(
+        request, "admin.html", {"site": SITE_NAME, "user": user, "admin": True, "artifacts": apps,
+                                "known": known_people(),
+                                "filled": claude_filled(apps), "warned": claude_warned(apps)}
+    )
+
+
+@app.get("/admin/upload", response_class=HTMLResponse)
+def admin_upload(request: Request, user: str = Depends(require_admin)):
+    return templates.TemplateResponse(request, "admin_upload.html", {"site": SITE_NAME, "user": user, "admin": True})
+
+
+@app.get("/admin/people", response_class=HTMLResponse)
+def admin_people(request: Request, user: str = Depends(require_admin)):
     with db() as con:
         invited = set(access.invited(con))
     # "Fjern" only for those an invitation lets in; ALLOWED_EMAILS are let in by the server config
@@ -1517,12 +1571,8 @@ def admin_page(request: Request, user: str = Depends(require_admin)):
             for p in people:
                 row = passwd.get(con, p["email"])
                 p["pw_status"] = "missing" if row is None else ("must_change" if row["must_change"] else "set")
-    apps = list_artifacts(user)
-    return templates.TemplateResponse(
-        request, "admin.html", {"site": SITE_NAME, "user": user, "admin": True, "artifacts": apps,
-                                "known": known_people(), "people": people,
-                                "filled": claude_filled(apps), "warned": claude_warned(apps)}
-    )
+    return templates.TemplateResponse(request, "admin_people.html",
+                                      {"site": SITE_NAME, "user": user, "admin": True, "people": people})
 
 
 def _ago(ts: int, now: int) -> str:

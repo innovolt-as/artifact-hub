@@ -1,5 +1,6 @@
 <!doctype html>
-<html lang="{{ lang() }}">
+{% set th = theme() %}
+<html lang="{{ lang() }}"{% if th != 'auto' %} data-theme="{{ th }}"{% endif %}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,6 +14,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="{{ site }}">
 <script src="/static/pull.js" defer></script>
+{% if user %}<script src="/static/theme.js" defer></script>{% endif %}
 </head>
 <body>
 {% block topbar %}{% endblock %}
@@ -22,9 +24,9 @@
   <a class="brand" href="/"><img src="/static/logo.svg" alt="" width="26" height="26">{{ site }}</a>
   {% if user %}
   <nav>
-    {% if admin %}<a href="/admin" class="{% if request.url.path == '/admin' %}active{% endif %}">{{ t("nav.admin") }}</a>{% endif %}
-    <span class="who">{{ user }}</span>
-    {% if pw_mode() and user %}<a href="/password">{{ t("nav.change_password") }}</a>{% endif %}
+    {% if admin %}<a href="/admin" class="{% if request.url.path.startswith('/admin') %}active{% endif %}">{{ t("nav.admin") }}</a>{% endif %}
+    <a class="who" href="/settings">{{ user }}</a>
+    <a class="who-icon" href="/settings" aria-label="{{ t('settings.title') }}"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg></a>
     <form method="post" action="/logout"><button class="link">{{ t("nav.logout") }}</button></form>
   </nav>
   {% endif %}

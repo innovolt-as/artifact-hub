@@ -61,9 +61,9 @@ def test_logged_in_user_changes_password(pw_mode, hub, user_client):
 
 
 def test_link_only_in_password_mode(hub, user_client, monkeypatch):
-    assert "Bytt passord" not in user_client.get("/").text
+    assert "Bytt passord" not in user_client.get("/settings").text
     monkeypatch.setattr(hub, "LOGIN_MODE", "password")
-    assert "Bytt passord" in user_client.get("/").text
+    assert "Bytt passord" in user_client.get("/settings").text
 
 
 def test_password_routes_404_in_default_mode(client, user_client):

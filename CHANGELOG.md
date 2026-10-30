@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.4.0 (unreleased)
+
+### New
+
+- The admin page has tabs, each with its own address: *Apps* (`/admin`), *Upload* (`/admin/upload`), *People*
+  (`/admin/people`) and *Statistics* (`/admin/stats`).
+- The *Apps* tab is a search box and one short row per app. Tapping a row opens a settings sheet with the name and
+  icon, access, the *Shared data* and *Banner at the top* switches and *Delete app*.
+- A settings page at `/settings` for everyone who is logged in, reached through the e-mail address in the top bar
+  (a small person icon on phones). *Appearance* is *Automatic*, *Light* or *Dark*, and applies to the hub's own pages
+  only, not to apps, the banner or the login page.
+
+### Changed
+
+- *Change password* has moved from the top bar to the settings page. It only shows when `LOGIN_MODE=password`.
+- The *Apps* and *Upload* tabs no longer reload the page when an app changes.
+
 ## v1.3.0 (2026-10-30)
 
 ### Before you upgrade

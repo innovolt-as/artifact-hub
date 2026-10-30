@@ -44,7 +44,7 @@ def test_remove_deletes_password(pw_mode, hub, admin_client):
 
 def test_admin_page_shows_status_and_controls(pw_mode, hub, admin_client):
     admin_client.post("/api/people/invite", json={"email": "ny@test.no", "password": "temp-passord"})
-    html = admin_client.get("/admin").text
+    html = admin_client.get("/admin/people").text
     assert "må byttes" in html and "Nytt midlertidig passord" in html and 'id="genPw"' in html
     assert "user@test.no" in html and "mangler" in html  # ALLOWED_EMAILS without a password row
 
@@ -53,7 +53,7 @@ def test_default_mode_admin_untouched(admin_client, hub):
     r = admin_client.post("/api/people/invite", json={"email": "ny@test.no"})
     assert r.status_code == 200
     assert admin_client.post("/api/people/password", json={"email": "ny@test.no", "password": "temp-passord"}).status_code == 404
-    html = admin_client.get("/admin").text
+    html = admin_client.get("/admin/people").text
     assert "Nytt midlertidig passord" not in html and 'name="password"' not in html
 
 

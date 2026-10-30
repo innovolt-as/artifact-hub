@@ -45,13 +45,16 @@ def test_admin_pages_en(hub, make_page, admin_client, english, pw_mode):
     make_page("p")
     admin_client.post("/api/people/invite", json={"email": "ny@test.no", "password": "temporary-pw-1"})
     admin_client.get("/a/p/")
-    for path in ("/admin", "/admin/stats"):
+    for path in ("/admin", "/admin/upload", "/admin/people", "/admin/stats"):
         r = admin_client.get(path)
         assert r.status_code == 200
         assert_no_norwegian(r.text)
     body = admin_client.get("/admin").text
-    assert "Upload" in body and "password: must be changed" in body
-    assert "Delete" in body and "Everyone" in body
+    assert "Upload" in body and "Delete app" in body and "Everyone" in body
+    for text in ("Search apps", "Name and icon", "Access", "Shared data", "Banner at the top", "Open the app ↗"):
+        assert text in body
+    assert 'aria-label="Close"' in body and 'aria-label="Back"' in body
+    assert "password: must be changed" in admin_client.get("/admin/people").text
 
 
 def test_admin_stats_en_with_data(hub, make_page, user_client, admin_client, english):

@@ -2,6 +2,7 @@ Artifact Hub
 Artifact Hub
 Admin
 admin@test.no
+@aria-label: Innstillinger
 Logg ut
 Hei
 mandag 26. oktober

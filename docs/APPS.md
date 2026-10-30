@@ -52,7 +52,7 @@ By default everything an app stores with `window.claude.use("db")` belongs to th
 fit an app whose content is the same for everyone, such as a news digest that a scheduled Claude agent writes every
 morning: the agent writes as one person, and nobody else would see it.
 
-Such an app can have shared data instead: the *data* button on the admin page, `"data": "shared"` in its meta, or
+Such an app can have shared data instead: the *Shared data* switch in an app's settings on the admin page, `"data": "shared"` in its meta, or
 `shared_data` from [Claude](CONNECTOR.md). Then it works like an artifact on claude.ai:
 
 - every document is shared by everyone who can see the app;
@@ -176,6 +176,6 @@ variable is only set while the banner is there, and follows its height (safe are
 
 ### Turning the banner off
 
-The *banner* button on the admin page turns the banner off for one app (`"banner": false` in its meta). Turn it off
+The *Banner at the top* switch in an app's settings on the admin page turns the banner off for one app (`"banner": false` in its meta). Turn it off
 for apps that are exactly one screen tall (`100dvh`): with the banner they no longer fit, and a strip of them is
 always out of sight. Turn it off as well for an app whose top bar cannot be moved as above.

@@ -91,11 +91,28 @@ def admin(hub, admin_client, make_page, **_):
     return _ok(admin_client.get("/admin"))
 
 
+def admin_upload(admin_client, **_):
+    return _ok(admin_client.get("/admin/upload"))
+
+
+def admin_people(hub, admin_client, make_page, **_):
+    _admin_setup(hub, admin_client, make_page)
+    return _ok(admin_client.get("/admin/people"))
+
+
 def admin_password(hub, admin_client, make_page, pw_mode, **_):
     _admin_setup(hub, admin_client, make_page)
     set_pw(USER, PW)
     set_pw(FRIEND, PW, must_change=True)
-    return _ok(admin_client.get("/admin"))
+    return _ok(admin_client.get("/admin/people"))
+
+
+def settings(user_client, **_):
+    return _ok(user_client.get("/settings"))
+
+
+def settings_password(user_client, pw_mode, **_):
+    return _ok(user_client.get("/settings"))
 
 
 def stats(hub, admin_client, make_page, **_):
@@ -129,7 +146,7 @@ def auth_error(client, **_):
 
 CASES = {f.__name__: f for f in (
     login, login_sent, login_password, login_password_error, password_change, password_no_password,
-    password_error, home_empty, home_apps, home_notice, admin, admin_password, stats, consent,
+    password_error, home_empty, home_apps, home_notice, admin, admin_upload, admin_people, admin_password, settings, settings_password, stats, consent,
     consent_error, app_banner, auth_error)}
 JSON_CASES = {"auth_error"}
 
