@@ -17,6 +17,7 @@
 - On an iPhone, the settings sheet on the admin page and the list of apps on the front page opened as a sliver at the
   bottom of the screen, or not at all.
 - The stylesheet's address now changes with its content, so a browser picks up a new version after an upgrade.
+- On older phones the switches show when they are off, and the code screen sends the form at the fourth digit.
 
 ## v1.4.0 (2026-10-30)
 

@@ -86,7 +86,7 @@ def test_the_code_field_has_the_right_keyboard_and_no_keychain(user_client, lock
 
 def test_lock_js_sends_the_form_once(client):
     js = client.get("/static/lock.js").text
-    assert "requestSubmit" in js and "preventDefault" in js
+    assert 'querySelector("button").click()' in js and "form.requestSubmit" not in js and "preventDefault" in js
 
 
 def test_the_screen_stays_on_the_address_it_was_shown_for(user_client, locked):

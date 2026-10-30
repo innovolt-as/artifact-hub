@@ -26,3 +26,8 @@ def test_every_top_bar_has_the_front_pages_colour(selector):
 def test_the_stylesheet_address_follows_its_content(client):
     digest = hashlib.sha256(CSS.encode("utf-8")).hexdigest()[:8]
     assert f'href="/static/hub.css?v={digest}"' in client.get("/login").text
+
+
+def test_a_switch_shows_on_a_phone_without_color_mix():
+    # Safari before 16.2 and Chrome before 111 drop the color-mix line, and the switch would have no track when off
+    assert re.search(r"background: var\(--line\); background: color-mix", rule(".sw"))

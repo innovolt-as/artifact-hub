@@ -16,7 +16,7 @@
   });
   if (field) {
     field.addEventListener("input", () => {
-      if (/^[0-9]{4}$/.test(field.value)) form.requestSubmit();
+      if (/^[0-9]{4}$/.test(field.value)) form.querySelector("button").click();  // iOS 15 has no requestSubmit
     });
   }
 })();
