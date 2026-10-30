@@ -8,3 +8,10 @@ Utseende
 Automatisk
 Lys
 Mørk
+Kodelås
+Velg en kode på fire siffer, og slå på kode for appene du vil skjerme. Claude når dem fortsatt.
+@placeholder: Velg kode
+@aria-label: Velg kode
+@placeholder: Gjenta kode
+@aria-label: Gjenta kode
+Lagre

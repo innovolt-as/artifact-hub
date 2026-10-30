@@ -145,7 +145,7 @@ def test_the_uploading_line_goes_whatever_the_answer(client):
 
 def test_every_post_on_the_people_tab_notices_an_ended_session(client):
     js = client.get("/static/admin-people.js").text
-    assert js.count("await reach(postJson(") == 3 and "await postJson(" not in js
+    assert js.count("await reach(postJson(") == 4 and "await postJson(" not in js
 
 
 def test_the_apps_tab_uses_the_shared_reach(client):

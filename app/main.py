@@ -28,8 +28,9 @@ import threading
 import time
 import zipfile
 from html import escape
+from math import ceil
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -38,7 +39,7 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from jinja2 import pass_context
 
-from app import access, banner, cards, home, i18n, loginmail, mail, passwd, shared, versions
+from app import access, applock, banner, cards, home, i18n, loginmail, mail, passwd, shared, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -81,6 +82,7 @@ def password_mode() -> bool:
 MAGIC_TTL = 15 * 60               # seconds a magic link is valid
 SESSION_TTL = 30 * 24 * 3600      # seconds a session cookie lives
 COOKIE = "hub_session"
+UNLOCK_PREFIX = "hub_unlock_"     # + slug: one cookie per unlocked app (app/applock.py)
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 OPEN_SIGNUP = "*" in ALLOWED_DOMAINS  # ALLOWED_DOMAINS=* lets anyone with an e-mail log in
@@ -127,6 +129,7 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["pw_mode"] = lambda: password_mode()
 templates.env.globals.update(t=i18n.t, t_html=i18n.t_html, tn=i18n.tn, raw=i18n.raw, lang=lambda: i18n.LANG)
 signer = URLSafeTimedSerializer(SECRET_KEY, salt="session")
+unlock_signer = URLSafeTimedSerializer(SECRET_KEY, salt="app-unlock")
 
 
 @pass_context
@@ -221,6 +224,8 @@ with db() as con:
     shared.create_tables(con)
     # Password hashes for LOGIN_MODE=password (app/passwd.py)
     passwd.ensure_table(con)
+    # App code lock: codes, locked apps and the attempt limit (app/applock.py)
+    applock.create_tables(con)
     if password_mode() and not any(passwd.get(con, e) for e in ADMIN_EMAILS):
         log.warning("LOGIN_MODE=password but no admin has a password yet — run: "
                     "docker compose exec hub python -m app.passwd set <admin e-mail>")
@@ -298,6 +303,60 @@ def set_session(resp, email: str) -> None:
 
 def set_pending(resp, email: str, pw_at: int) -> None:
     _set_cookie(resp, {"email": email, "pw_change": True, "pw_at": pw_at}, PENDING_TTL)
+
+
+def set_unlock(resp, email: str, slug: str, code_at: int) -> None:
+    """Open `slug` on this device. `code_at` is the code's updated_at, so a new code shuts every unlock."""
+    resp.set_cookie(
+        UNLOCK_PREFIX + slug,
+        unlock_signer.dumps({"email": email, "slug": slug, "at": code_at}),
+        max_age=applock.UNLOCK_TTL,
+        httponly=True,
+        samesite="lax",
+        secure=BASE_URL.startswith("https://"),
+        path="/",
+    )
+
+
+def app_locked(user: str, slug: str) -> bool:
+    """The app has a lock for this user, whether or not it is open on this device."""
+    with db() as con:
+        return applock.is_locked(con, user, slug)
+
+
+def unlocked(request: Request, user: str, slug: str) -> bool:
+    """This device holds an unlock of `slug` for `user`, under the code as it is now and not older than UNLOCK_TTL."""
+    raw = request.cookies.get(UNLOCK_PREFIX + slug)
+    if not raw:
+        return False
+    with db() as con:
+        row = applock.get(con, user)
+    try:
+        data = unlock_signer.loads(raw, max_age=applock.UNLOCK_TTL)
+        return (row is not None and access.norm(data["email"]) == access.norm(user)
+                and data["slug"] == slug and data["at"] == row["updated_at"])
+    except (BadSignature, KeyError):
+        return False
+
+
+def _locked_error() -> HTTPException:
+    return HTTPException(423, i18n.t("lock.unlock_first"), headers={"Cache-Control": "no-store"})
+
+
+def require_unlocked(request: Request, user: str, slug: str) -> None:
+    if app_locked(user, slug) and not unlocked(request, user, slug):
+        raise _locked_error()
+
+
+def require_unlocked_to_manage(request: Request, user: str, slug: str) -> None:
+    """For delete, access and upload: a link card is no app, so a lock that outlived the app at its address does not stop them."""
+    path = _meta_path(slug)
+    if not (path and path.name.endswith(".link.json")):
+        require_unlocked(request, user, slug)
+
+
+def check_code(user: str, code: str) -> applock.Check:
+    return applock.check(db, user, code)
 
 
 def _pw_window(key: str) -> int:
@@ -603,9 +662,12 @@ def auth(token: str, next: str = "/"):
 
 
 @app.post("/logout")
-def logout():
+def logout(request: Request):
     resp = RedirectResponse("/login", status_code=302)
     resp.delete_cookie(COOKIE)
+    for name in request.cookies:
+        if name.startswith(UNLOCK_PREFIX) and SLUG_RE.match(name[len(UNLOCK_PREFIX):]):  # an illegal name would raise
+            resp.delete_cookie(name)
     return resp
 
 
@@ -633,8 +695,13 @@ def password_page(request: Request, next: str = "/"):
 def settings_page(request: Request, user: str = Depends(require_user)):
     with db() as con:
         chosen = home.get_theme(con, user)
+        has_code = applock.get(con, user) is not None
+        locked = applock.locked_slugs(con, user)
+    lockable = [{"slug": a["slug"], "title": a["title"], "locked": a["slug"] in locked}
+                for a in list_artifacts(user) if a["kind"] != "link"]
     return templates.TemplateResponse(request, "settings.html", {
-        "site": SITE_NAME, "user": user, "admin": is_admin(user), "chosen": chosen})
+        "site": SITE_NAME, "user": user, "admin": is_admin(user), "chosen": chosen,
+        "has_code": has_code, "lockable": lockable})
 
 
 @app.post("/password", response_class=HTMLResponse)
@@ -697,6 +764,9 @@ def index(request: Request, user: str = Depends(require_user)):
         prefs = home.get_prefs(con, user)
         mine = [a for a in apps if a["slug"] in prefs["apps"]]  # only the apps this user has chosen
         stats = home.visit_stats(con, user)
+        locked = applock.locked_slugs(con, user)
+    for a in apps:
+        a["code_locked"] = a["slug"] in locked
     summaries: dict[str, str] = {}
     if prefs["view"] == "cards":
         with db() as con:  # a new connection: the recipes read through doc_get/doc_list, which open their own
@@ -757,7 +827,8 @@ def card_lines(con: sqlite3.Connection, user: str, apps: list[dict], tz: str | N
     """The line for each app's card: its recipe's, else the stored hub/summary. A recipe that fails falls back to
     the stored line only if that was written today (in the viewer's zone); an older one would be stale."""
     now = time.time() if now is None else now
-    real = [a for a in apps if a["kind"] != "link"]
+    locked = applock.locked_slugs(con, user)  # a locked app's line is never read, run or shown
+    real = [a for a in apps if a["kind"] != "link" and a["slug"] not in locked]
     stored = home.summaries(con, user, [a["slug"] for a in real], {a["slug"] for a in real if a["data"] == "shared"})
     out: dict[str, str] = {}
     for a in real:
@@ -812,6 +883,11 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     root, meta = found
     if not can_see(meta, user):
         raise HTTPException(404)
+    protected = app_locked(user, slug)
+    if protected and not unlocked(request, user, slug):
+        if request.headers.get("sec-fetch-dest", "document") == "document":
+            return _lock_screen(request, user, slug, request.url.path + (f"?{request.url.query}" if request.url.query else ""))
+        raise _locked_error()
     if path in ("", "index.html"):
         _log_visit(user, slug)
     # only a page the browser opens gets the banner, not HTML an app fetches or shows in an iframe
@@ -819,7 +895,7 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     if root.is_file():
         if path not in ("", "index.html"):
             raise HTTPException(404)
-        return _html_with_shim(root, slug, user, with_banner=with_banner)
+        return _html_with_shim(root, slug, user, with_banner=with_banner, locked=protected)
     target = (root / (path or "index.html")).resolve()
     if root.resolve() not in target.parents and target != root.resolve():
         raise HTTPException(404)
@@ -828,8 +904,9 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     if not target.is_file() or target.name == "meta.json":
         raise HTTPException(404)
     if target.suffix.lower() in (".html", ".htm"):
-        return _html_with_shim(target, slug, user, with_banner=with_banner)
-    return FileResponse(target)
+        return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected)
+    # a locked app's files must not outlive the unlock in the browser's cache
+    return FileResponse(target, headers={"Cache-Control": "no-store"} if protected else None)
 
 
 # Apps are used on phones and must never scroll sideways. iOS zooms in on inputs under 16px and
@@ -864,19 +941,89 @@ def open_link(slug: str, user: str = Depends(require_user)):
     return RedirectResponse(link["url"], status_code=302)
 
 
-def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool) -> HTMLResponse:
+def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool, locked: bool = False) -> HTMLResponse:
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
-    and the hub banner right after <body> unless the app has it turned off."""
+    and the hub banner right after <body> unless the app has it turned off. `locked` marks an app the viewer has
+    locked, so hub.js keeps its unlock alive."""
     html = path.read_text("utf-8", errors="replace")
     strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
     found = artifact_root(slug)
     data_shared = bool(found) and shared.is_shared(found[1])
-    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"></script>'.format(
-        escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings
+    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"{}></script>'.format(
+        escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings,
+        ' data-lock="1"' if locked else ""
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
     html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------- routes: the code lock (app/applock.py)
+def _lock_next(slug: str, target: str) -> str:
+    """Where to go after the code: `target` if it stays inside this app, else the app's front."""
+    home_url = f"/a/{slug}/"
+    if safe_next(target) != target or not target.startswith(home_url):
+        return home_url
+    # a browser resolves .. in a redirect, also when it is written %2e%2e, and would leave the app
+    if ".." in unquote(target.split("?", 1)[0]).split("/"):
+        return home_url
+    return target
+
+
+def _lock_screen(request: Request, user: str, slug: str, next: str, *, error: str | None = None,
+                 code: str | None = None, status: int = 423):
+    """The code screen, sent instead of the app. `code` is the one-time code, on the step that picks a new one."""
+    a = [a for a in list_artifacts(user) if a["slug"] == slug][0]
+    return templates.TemplateResponse(request, "lock.html", {
+        "site": SITE_NAME, "user": user, "admin": is_admin(user), "a": a, "next": next, "error": error, "code": code,
+    }, status_code=status, headers={"Cache-Control": "no-store"})
+
+
+def _lock_open(user: str, slug: str, target: str, code_at: int) -> RedirectResponse:
+    resp = RedirectResponse(target, status_code=303, headers={"Cache-Control": "no-store"})
+    set_unlock(resp, user, slug, code_at)
+    return resp
+
+
+@app.get("/lock/{slug}")
+def lock_page(slug: str, user: str = Depends(require_user)):
+    """What reaches the code screen's address by GET: the address bar, a restored home-screen app, the back button, a
+    login return. (A reload of the wrong-code screen re-sends the POST and never gets here.)"""
+    return RedirectResponse(f"/a/{slug}/", status_code=302)
+
+
+@app.post("/lock/{slug}", response_class=HTMLResponse)
+def lock_submit(slug: str, request: Request, code: str = Form(""), next: str = Form(""), new1: str = Form(""),
+                new2: str = Form(""), user: str = Depends(require_user)):
+    found = artifact_root(slug)
+    if not found or not can_see(found[1], user):
+        raise HTTPException(404)
+    target = _lock_next(slug, next)
+    if not app_locked(user, slug):  # no check here: this must not be a way to test codes
+        return RedirectResponse(target, status_code=303)
+    checked = check_code(user, code)
+    if checked.wait > 0:
+        return _lock_screen(request, user, slug, target, error=i18n.t("lock.err.blocked", minutes=ceil(checked.wait / 60)))
+    if not checked.ok:
+        return _lock_screen(request, user, slug, target, error=i18n.t("lock.err.wrong"))
+    if not checked.must_change:
+        with db() as con:
+            return _lock_open(user, slug, target, applock.get(con, user)["updated_at"])
+    # a one-time code opens nothing: it only lets the user pick a new code, and the form sends it along each time
+    if not new1:
+        return _lock_screen(request, user, slug, target, code=code, status=200)
+    error = None
+    if not applock.valid_code(new1):
+        error = i18n.t("lock.err.format")
+    elif new1 != new2:
+        error = i18n.t("lock.err.mismatch")
+    elif new1 == code:
+        error = i18n.t("lock.err.same")
+    if error:
+        return _lock_screen(request, user, slug, target, error=error, code=code, status=200)
+    with db() as con:
+        at = applock.set_code(con, user, new1, must_change=False)
+    return _lock_open(user, slug, target, at)
 
 
 # ---------------------------------------------------------------- routes: document store (hub.js)
@@ -909,8 +1056,14 @@ def _deep_merge(base: dict, patch: dict) -> dict:
     return out
 
 
+def store_user(slug: str, request: Request, user: str = Depends(require_user)) -> str:
+    """require_user, and 423 while the app is locked for this user and not opened on this device."""
+    require_unlocked(request, user, slug)
+    return user
+
+
 @app.get("/api/store/{slug}/c")
-def store_list(slug: str, path: str, user: str = Depends(require_user)):
+def store_list(slug: str, path: str, user: str = Depends(store_user)):
     collection, _ = _split_path(path, want_doc=False)
     owner, collection = _store_scope(slug, user, collection)
     if owner is None:
@@ -924,7 +1077,7 @@ def store_list(slug: str, path: str, user: str = Depends(require_user)):
 
 
 @app.get("/api/store/{slug}/d")
-def store_get(slug: str, path: str, user: str = Depends(require_user)):
+def store_get(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
     owner, collection = _store_scope(slug, user, collection)
     if owner is None:
@@ -938,7 +1091,7 @@ def store_get(slug: str, path: str, user: str = Depends(require_user)):
 
 
 @app.put("/api/store/{slug}/d")
-async def store_set(slug: str, path: str, request: Request, merge: bool = False, user: str = Depends(require_user)):
+async def store_set(slug: str, path: str, request: Request, merge: bool = False, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
     owner, collection = _store_scope(slug, user, collection, write=True)
     body = await request.body()
@@ -968,7 +1121,7 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
 
 
 @app.delete("/api/store/{slug}/d")
-def store_delete(slug: str, path: str, user: str = Depends(require_user)):
+def store_delete(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
     owner, collection = _store_scope(slug, user, collection, write=True)
     with db() as con:
@@ -979,7 +1132,7 @@ def store_delete(slug: str, path: str, user: str = Depends(require_user)):
 
 
 @app.get("/api/store/{slug}")
-def store_dump(slug: str, user: str = Depends(require_user)):
+def store_dump(slug: str, user: str = Depends(store_user)):
     """Everything you can read in one artifact, as {collection: {doc_id: data}} — a backup."""
     try:
         with db() as con:
@@ -1135,6 +1288,25 @@ def api_user(request: Request) -> str:
     return user
 
 
+def data_user(app_name: str, request: Request, user: str = Depends(api_user)) -> str:
+    """api_user, and 423 while the app is locked for this user and not opened on this device."""
+    require_unlocked(request, user, app_name)
+    return user
+
+
+@app.post("/api/lock/{slug}/ping")
+def lock_ping(slug: str, request: Request, user: str = Depends(api_user)):
+    """hub.js of an open locked app: renew the unlock while the page is on screen. An expired one is not revived."""
+    resp = JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+    if not app_locked(user, slug):
+        return resp
+    if not unlocked(request, user, slug):
+        raise _locked_error()
+    with db() as con:
+        set_unlock(resp, user, slug, applock.get(con, user)["updated_at"])
+    return resp
+
+
 def _check_app_key(app_name: str, key: str | None = None) -> None:
     if not SLUG_RE.match(app_name):
         raise HTTPException(400, i18n.t("store.bad_app"))
@@ -1263,8 +1435,74 @@ def prefs_seen(request: Request, user: str = Depends(api_user)):
     return {"ok": True}
 
 
+def _require_code(user: str, code: object) -> applock.Check:
+    """The user's code, or 429 while they are blocked and 403 when it is wrong. Shares the limit with the code screen."""
+    checked = check_code(user, code)
+    if checked.ok:
+        return checked
+    if checked.wait:
+        raise HTTPException(429, i18n.t("lock.err.blocked", minutes=ceil(checked.wait / 60)))
+    raise HTTPException(403, i18n.t("lock.err.wrong"))
+
+
+async def _lock_body(request: Request) -> dict:
+    _require_json(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Send a JSON object")
+    return body
+
+
+@app.post("/api/lock/code")
+async def lock_code(request: Request, user: str = Depends(api_user)):
+    """Choose the user's code, or change it. A new code locks every app again, on every device."""
+    body = await _lock_body(request)
+    current, code, repeat = body.get("current"), body.get("code"), body.get("repeat")
+    if current is not None and not isinstance(current, str):
+        raise HTTPException(400, 'Send {"current"?: "0000", "code": "0000", "repeat": "0000"}')
+    # form and match first: a typo costs no attempt
+    if not applock.valid_code(code) or not isinstance(repeat, str):
+        raise HTTPException(400, i18n.t("lock.err.format"))
+    if code != repeat:
+        raise HTTPException(400, i18n.t("lock.err.mismatch"))
+    with db() as con:
+        has_code = applock.get(con, user) is not None
+    if has_code:
+        _require_code(user, current)
+        if code == current:
+            raise HTTPException(400, i18n.t("lock.err.same"))
+    with db() as con:
+        applock.set_code(con, user, code, must_change=False)
+    return {"ok": True}
+
+
+@app.post("/api/lock/apps")
+async def lock_apps(request: Request, user: str = Depends(api_user)):
+    """Turn the code on for an app, which needs nothing, or off, which needs the code."""
+    body = await _lock_body(request)
+    slug, on, code = body.get("slug"), body.get("on"), body.get("code")
+    if not isinstance(slug, str) or not isinstance(on, bool) or not (code is None or isinstance(code, str)):
+        raise HTTPException(400, 'Send {"slug": "...", "on": true|false, "code"?: "0000"}')
+    if not any(a["slug"] == slug and a["kind"] != "link" for a in list_artifacts(user)):
+        raise HTTPException(404)
+    if on:
+        with db() as con:
+            if applock.get(con, user) is None:
+                raise HTTPException(400, i18n.t("lock.err.no_code"))
+            applock.set_locked(con, user, slug, True)
+        return {"ok": True, "on": True}
+    if _require_code(user, code).must_change:  # a one-time code only chooses a new code
+        raise HTTPException(403, i18n.t("lock.err.pick_new"))
+    with db() as con:
+        applock.set_locked(con, user, slug, False)
+    return {"ok": True, "on": False}
+
+
 @app.get("/api/data/{app_name}")
-def data_list(app_name: str, prefix: str = "", user: str = Depends(api_user)):
+def data_list(app_name: str, prefix: str = "", user: str = Depends(data_user)):
     _check_app_key(app_name)
     like = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
     with db() as con:
@@ -1276,7 +1514,7 @@ def data_list(app_name: str, prefix: str = "", user: str = Depends(api_user)):
 
 
 @app.post("/api/data/{app_name}/_batch")
-async def data_batch(app_name: str, request: Request, user: str = Depends(api_user)):
+async def data_batch(app_name: str, request: Request, user: str = Depends(data_user)):
     _check_app_key(app_name)
     _require_json(request)
     body = await request.json()
@@ -1300,7 +1538,7 @@ async def data_batch(app_name: str, request: Request, user: str = Depends(api_us
 
 
 @app.get("/api/data/{app_name}/{key:path}")
-def data_get(app_name: str, key: str, user: str = Depends(api_user)):
+def data_get(app_name: str, key: str, user: str = Depends(data_user)):
     _check_app_key(app_name, key)
     with db() as con:
         r = con.execute("SELECT value, updated FROM app_data WHERE email=? AND app=? AND key=?", (user, app_name, key)).fetchone()
@@ -1310,7 +1548,7 @@ def data_get(app_name: str, key: str, user: str = Depends(api_user)):
 
 
 @app.put("/api/data/{app_name}/{key:path}")
-async def data_put(app_name: str, key: str, request: Request, user: str = Depends(api_user)):
+async def data_put(app_name: str, key: str, request: Request, user: str = Depends(data_user)):
     _check_app_key(app_name, key)
     _require_json(request)
     body = await request.json()
@@ -1329,7 +1567,7 @@ async def data_put(app_name: str, key: str, request: Request, user: str = Depend
 
 
 @app.delete("/api/data/{app_name}/{key:path}")
-def data_delete(app_name: str, key: str, request: Request, user: str = Depends(api_user)):
+def data_delete(app_name: str, key: str, request: Request, user: str = Depends(data_user)):
     _check_app_key(app_name, key)
     with db() as con:
         con.execute("DELETE FROM app_data WHERE email=? AND app=? AND key=?", (user, app_name, key))
@@ -1350,6 +1588,11 @@ def _slugify(name: str) -> str:
     return s[:80] or "artifact"
 
 
+def _upload_slug(filename: str | None, slug: str | None) -> str:
+    """The address an upload lands on: the given slug, else the file name without its extension."""
+    return _slugify(slug or os.path.splitext(filename or "artifact")[0])
+
+
 def _new_app(slug: str) -> None:
     """A brand-new app goes straight onto the admins' front pages (others pick it from their list)."""
     with db() as con:
@@ -1357,9 +1600,8 @@ def _new_app(slug: str) -> None:
 
 
 def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: str | None) -> str:
-    filename = upload.filename or "artifact"
-    stem, ext = os.path.splitext(filename)
-    slug = _slugify(slug or stem)
+    ext = os.path.splitext(upload.filename or "artifact")[1]
+    slug = _upload_slug(upload.filename, slug)
     if not SLUG_RE.match(slug):
         raise HTTPException(400, i18n.t("err.invalid_name", name=slug))
     # a new version keeps the old name, emoji, private flag and banner switch (stored as false) unless overridden
@@ -1564,7 +1806,12 @@ def admin_people(request: Request, user: str = Depends(require_admin)):
     shown = (invited | ALLOWED_EMAILS) - ADMIN_EMAILS
     if password_mode():
         shown |= ADMIN_EMAILS - {access.norm(user)}  # other admins may need a password too
-    people = [{"email": e, "invited": e in invited and e not in ALLOWED_EMAILS, "admin": e in ADMIN_EMAILS}
+    with db() as con:
+        coded = applock.emails(con)
+    # anyone who may still log in and has a code (other admins too); your own is reset on the server
+    shown |= {e for e in coded if email_allowed(e)} - {access.norm(user)}
+    people = [{"email": e, "invited": e in invited and e not in ALLOWED_EMAILS, "admin": e in ADMIN_EMAILS,
+               "has_code": e in coded and e != access.norm(user)}
               for e in sorted(shown)]
     if password_mode():
         with db() as con:
@@ -1615,16 +1862,22 @@ async def api_upload(
     title: str | None = Form(None),
     admin_only: bool = Form(False),
 ):
-    _upload_authorized(request)
+    who = _upload_authorized(request)
+    target = _upload_slug(file.filename, slug)
+    # only an existing app can be lost; with none at the address nothing is removed, and a surviving lock stays
+    if who != "token" and _meta_path(target):
+        require_unlocked_to_manage(request, who, target)
     saved = _save_upload(file, slug, admin_only, title)
     return JSONResponse({"ok": True, "slug": saved, "url": f"{BASE_URL}/a/{saved}/"})
 
 
 @app.post("/api/delete")
 def api_delete(request: Request, slug: str = Form(...)):
-    _upload_authorized(request)
+    who = _upload_authorized(request)
     if not SLUG_RE.match(slug):
         raise HTTPException(400)
+    if who != "token":
+        require_unlocked_to_manage(request, who, slug)
     removed = False
     for p in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json", ARTIFACTS_DIR / f"{slug}.link.json"):
         if p.exists():
@@ -1651,6 +1904,7 @@ async def api_access(request: Request, user: str = Depends(require_admin)):
     meta_path = _meta_path(slug) if isinstance(slug, str) else None
     if not meta_path:
         raise HTTPException(404)
+    require_unlocked_to_manage(request, user, slug)
     if level not in access.LEVELS:
         raise HTTPException(400, i18n.t("access.unknown", level=level))
     if not isinstance(people, list) or not all(isinstance(e, str) for e in people):
@@ -1753,7 +2007,8 @@ def claude_warned(apps: list[dict]) -> set[str]:
 
 
 @app.get("/api/data-mode")
-def data_mode_preview(slug: str, user: str = Depends(require_admin)):
+def data_mode_preview(slug: str, request: Request, user: str = Depends(require_admin)):
+    require_unlocked(request, user, slug)
     try:
         return share_preview(slug, user)
     except HubError:
@@ -1767,6 +2022,7 @@ async def data_mode_set(request: Request, user: str = Depends(require_admin)):
     body = await request.json()
     if not isinstance(body, dict) or not isinstance(body.get("slug"), str) or not isinstance(body.get("shared"), bool):
         raise HTTPException(400, 'Send {"slug", "shared", "copy"}')
+    require_unlocked(request, user, body["slug"])
     try:
         copied = set_data_mode(body["slug"], body["shared"], copy_from=user if body.get("copy") is True else None)
     except HubError:
@@ -1859,6 +2115,20 @@ async def people_password(request: Request, user: str = Depends(require_admin)):
     return {"ok": True, "email": email}
 
 
+@app.post("/api/people/lock-reset")
+async def people_lock_reset(request: Request, user: str = Depends(require_admin)):
+    """A one-time app code for someone else, who must pick a new one. Never for your own: a lent admin phone
+    would otherwise walk past the lock."""
+    email = await _email_in(request)
+    if email == access.norm(user):
+        raise HTTPException(403, i18n.t("lock.err.not_yourself"))
+    with db() as con:
+        code = applock.reset(con, email)
+    if code is None:
+        raise HTTPException(404, i18n.t("lock.err.no_code_for"))
+    return {"ok": True, "code": code}
+
+
 @app.post("/api/people/remove")
 async def people_remove(request: Request, user: str = Depends(require_admin)):
     email = await _email_in(request)
@@ -1916,7 +2186,7 @@ async def api_edit(
     url: str = Form(""),
 ):
     """Rename (title and/or address) and set the icon of an artifact or link card."""
-    _upload_authorized(request)
+    who = _upload_authorized(request)
     meta_path = _meta_path(slug)
     if not meta_path:
         raise HTTPException(404)
@@ -1925,6 +2195,8 @@ async def api_edit(
         raise HTTPException(400, i18n.t("err.address_invalid", slug=new_slug))
     if new_slug != slug and _meta_path(new_slug):
         raise HTTPException(409, i18n.t("err.address_taken", slug=new_slug))
+    if new_slug != slug and who != "token":
+        require_unlocked(request, who, slug)  # before anything is written; strict: a rename moves the lock, not the data
 
     icon_data, icon_ext = None, ""
     if icon and icon.filename:
@@ -1963,6 +2235,7 @@ async def api_edit(
         with db() as con:  # users' stored data, choices and pins follow the artifact
             con.execute("UPDATE OR REPLACE docs SET slug=? WHERE slug=?", (new_slug, slug))
             home.rename(con, slug, new_slug)
+            applock.rename(con, slug, new_slug)
             shared.rename(con, slug, new_slug)
         log.info("Renamed artifact %s -> %s", slug, new_slug)
     return JSONResponse({"ok": True, "slug": new_slug})

@@ -19,6 +19,7 @@
     <li><span class="e">{{ p.email }}</span>
       {% if pw_mode() %}<span class="muted small">{{ t('admin.pw_status', status=t('admin.pw_' + p.pw_status)) }}</span>
       <button class="small setpw" data-email="{{ p.email }}">{{ t("admin.new_temp_pw") }}</button>{% endif %}
+      {% if p.has_code %}<button class="small lockreset" data-email="{{ p.email }}">{{ t("admin.lock_reset") }}</button>{% endif %}
       {% if p.invited %}<button class="small danger unperson" data-email="{{ p.email }}">{{ t("admin.remove") }}</button>
       {% elif not p.admin %}<span class="muted small">{{ t("admin.from_config") }}</span>{% endif %}</li>
     {% else %}
@@ -44,6 +45,15 @@
   </form>
 </dialog>
 {% endif %}
+
+<dialog id="codeDialog" class="editor">
+  <h1 tabindex="-1" autofocus>{{ t("admin.lock_reset") }}: <span id="codeWho"></span></h1>
+  <p class="code-shown" id="codeShown"></p>
+  <p class="muted small">{{ t("admin.lock_reset_note") }}</p>
+  <div class="editor-actions">
+    <button type="button" class="small" id="codeClose">{{ t("admin.close") }}</button>
+  </div>
+</dialog>
 
 {% include "_admin_js.html" %}
 <script src="/static/admin-people.js"></script>

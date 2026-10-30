@@ -45,6 +45,8 @@ and pass shared_data accordingly. In a shared app, put anything personal under d
 and say in the app's guide (meta/guide) what is shared and what is personal. update_app_info(shared_data=...)
 switches an existing app; copy_my_data=true also copies the user's current documents into the shared data, where
 everyone with access sees them, so check them for personal content first.
+A user can lock an app behind a code on the hub; the lock covers the hub's own storage, not the browser's, so keep
+anything sensitive in window.claude.use("db"), never in localStorage.
 
 The hub's front page can show one line from each app on its card. Give the app a card recipe: a
 <script data-hub-card> block with a function hubCard({{ db, today, now, timeZone }}) that returns the line as a

@@ -113,6 +113,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .cards .txt { min-width: 0; }
 .cards h2 { font-size: 15.5px; font-weight: 650; margin: 0; line-height: 1.3; overflow-wrap: anywhere; }
 .summary { margin: 2px 0 0; font-size: 13.5px; color: var(--muted); line-height: 1.35; overflow-wrap: anywhere; }
+.summary.locked { font-size: 12px; opacity: .7; }
 .cards .ext, .cards .lock { position: static; display: none; }
 .cards .dot { top: 10px; right: 40px; }
 .pin { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); width: 36px; height: 36px; border: 0; border-radius: 10px; background: none; color: var(--muted); font-size: 19px; cursor: pointer; }
@@ -189,6 +190,7 @@ code { font-size: 13px; background: var(--bg); padding: 1px 5px; border-radius: 
 html:has(dialog[open]) { overflow: hidden; }
 dialog { overscroll-behavior: contain; }
 .editor::backdrop { background: rgb(0 0 0 / .35); }
+.code-shown { font-size: 32px; font-weight: 700; letter-spacing: .3em; text-align: center; margin: 8px 0; font-variant-numeric: tabular-nums; }
 .editor h1 { font-size: 20px; margin: 0 0 12px; outline: none; }  /* takes focus when opened: no keyboard, no focus ring */
 .editor label { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 14px; font-weight: 600; }
 .editor label.check { flex-direction: row; font-weight: 400; }
@@ -249,6 +251,24 @@ dialog { overscroll-behavior: contain; }
 .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -4px; }
 .setrow { display: flex; justify-content: space-between; align-items: center; min-height: 44px; margin-top: 16px; padding: 0 4px; border-top: 1px solid var(--line); color: var(--fg); }
 .setrow span { color: var(--muted); }
+
+/* ---------------------------------------------------------------- the code lock */
+/* type=text, not password: a password field brings the keychain and the wrong keyboard. So the dots come from here. */
+.code { width: 100%; font: inherit; font-size: 24px; text-align: center; letter-spacing: .4em; -webkit-text-security: disc; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+.code::placeholder { font-size: 16px; letter-spacing: 0; }  /* the spacing is for the dots; a label would not fit */
+#lockCard h2 { margin: 0 0 4px; font-size: 18px; }
+#lockCard .muted { margin: 0 0 4px; }
+#lockCard form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+#lockCard .code, #lockAsk .code { min-height: 44px; }
+#lockCard button.primary { min-height: 44px; }
+#lockCard summary { display: flex; align-items: center; min-height: 44px; margin-top: 10px; color: var(--accent); cursor: pointer; }
+#lockAsk .code { margin-top: 12px; font-size: 24px; text-align: center; letter-spacing: .4em; }  /* beats .editor input */
+#lockAsk .editor-actions button { min-height: 44px; }
+.lockscreen { text-align: center; }
+.lockscreen h1 { margin: 12px 0 0; overflow-wrap: anywhere; }
+.lockscreen p { margin: 4px 0 0; }
+.lockscreen form { flex-direction: column; }
+.lockback a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
 
 /* ---------------------------------------------------------------- admin: the app list */
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

@@ -44,6 +44,7 @@
       location.href = "/login?next=" + encodeURIComponent(location.pathname);
       throw dbError("unavailable", tr("not_logged_in"));
     }
+    if (r.status === 423) { location.reload(); throw dbError("unavailable", tr("locked")); } // the code screen takes over
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       // claude.ai has no permission code; a refused write (403) cannot succeed on retry either
@@ -83,6 +84,27 @@
     subs.add(sub);
     refresh(sub);
     return () => subs.delete(sub);
+  }
+
+  // ------------------------------------------------------------------ code lock (data-lock="1")
+  // The hub keeps a locked app open for 10 minutes after the last ping, so ping while the page shows. The clock here
+  // is what locks a page that has lost the network or has been in the background: reload without waiting for an answer.
+  if (me.dataset.lock === "1") {
+    const PING_MS = 60000, OPEN_MS = 600000;
+    let last = Date.now();
+    const lock = () => { document.documentElement.style.display = "none"; location.reload(); };
+    const late = () => Date.now() - last >= OPEN_MS;
+    async function ping() {
+      try {
+        const r = await fetch(`/api/lock/${encodeURIComponent(SLUG)}/ping`, { method: "POST", credentials: "same-origin" });
+        if (r.status === 423 || r.status === 401) return lock();
+        if (r.ok) last = Date.now();
+      } catch (e) { /* no network: the deadline decides */ }
+    }
+    const check = () => { if (late()) lock(); else if (!document.hidden) ping(); };
+    setInterval(check, PING_MS);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+    addEventListener("pageshow", check);
   }
 
   // ------------------------------------------------------------------ queries

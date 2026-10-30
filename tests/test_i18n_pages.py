@@ -2,7 +2,7 @@
 import json
 import re
 
-from tests.conftest import set_pw
+from tests.conftest import lock, set_pw, unlock
 from tests.textutil import assert_no_norwegian, visible_text
 
 USER = "user@test.no"
@@ -95,6 +95,27 @@ def test_banner_en(admin_client, english, make_page):
     make_page("bannerapp", "all", title="Bannerapp")
     body = admin_client.get("/a/bannerapp/").text
     assert 'aria-label="Back to Artifact Hub"' in body
+
+
+def test_lock_screen_en(hub, user_client, english, make_page):
+    make_page("notat", "all", title="Notes")
+    lock(USER, "notat")
+    body = user_client.get("/a/notat/").text
+    assert_no_norwegian(body)
+    text = visible_text(body)
+    assert "Code required" in text and "Open" in text and "Back to the front page" in text
+    assert "<title>Code required" in body
+
+    body = unlock(user_client, "notat", "0000").text
+    assert_no_norwegian(body)
+    assert "Wrong code." in body
+
+    with hub.db() as con:
+        code = hub.applock.reset(con, USER)
+    body = unlock(user_client, "notat", code).text
+    assert_no_norwegian(body)
+    text = visible_text(body)
+    assert "Choose a new code" in text and "Save and open" in text and "@placeholder: Repeat new code" in text
 
 
 def _strings(body):

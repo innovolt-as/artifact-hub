@@ -51,6 +51,15 @@ existing app; `copy_my_data=true` also copies your current documents into the sh
 The admin page warns about an app that is shared with others but has personal data that Claude has written in the
 last 30 days: in practice it only works for you. Claude passes on the same warning when it shares such an app.
 
+## Code lock
+
+If you have set a [code](APPS.md#code-lock), the page where you approve a new connection asks for it, so someone
+holding your logged-in phone cannot connect their own Claude. *Cancel* needs no code, and existing connections are not
+affected.
+
+The connector reaches locked apps without a code. Reading, writing and updating work as for any other app, and
+anyone who can ask the Claude app on your phone can have it read them out.
+
 ## Revoking access
 
 Remove the address from `ADMIN_EMAILS` and run `docker compose up -d`. Every call checks the address against the
