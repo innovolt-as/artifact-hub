@@ -630,3 +630,15 @@ def test_prefs_pins_api(hub, user_client, client):
     assert user_client.post("/api/prefs/pins", json={"order": "a"}).status_code == 400
     assert user_client.post("/api/prefs/pins", json={"order": [1]}).status_code == 400
     assert client.post("/api/prefs/pins", json={"order": ["a"]}).status_code == 401
+
+
+def test_front_page_structure(hub, user_client):
+    html = user_client.get("/").text
+    assert html.index('class="topbar"') < html.index("data-pull-content") < html.index('id="hello"')
+    assert 'id="home"' in html and '/static/drag.js' in html
+    assert html.index('id="home"') < html.index('id="picker"')
+
+
+def test_other_pages_have_no_topbar(admin_client):
+    html = admin_client.get("/admin").text
+    assert 'class="topbar"' not in html and "data-pull-content" in html
