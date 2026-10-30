@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.3.0 (unreleased)
+## v1.3.0 (2026-10-30)
 
 ### Before you upgrade
 
