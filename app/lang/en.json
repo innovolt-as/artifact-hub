@@ -105,6 +105,7 @@
   "cli.short": "The password must be at least {min} characters",
   "consent.allow": "Give access",
   "consent.body": "<strong>{client}</strong> asks for access on behalf of {user}. It can then create and update apps in the hub.",
+  "consent.code": "Your code lock",
   "consent.deny": "Cancel",
   "consent.error_title": "Cannot connect",
   "consent.home": "To the front page",

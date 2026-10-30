@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
+from math import ceil
 from urllib.parse import quote
 
 from fastapi import APIRouter, Form, Request
@@ -32,7 +33,7 @@ from mcp.server.auth.provider import (
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from app import i18n
+from app import applock, i18n
 from app import main as hub
 
 REDIRECT_ALLOWLIST = {"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"}
@@ -224,6 +225,12 @@ def _page(request: Request, user: str | None, status: int = 200, **ctx) -> HTMLR
     )
 
 
+def _needs_code(user: str) -> bool:
+    """True if `user` has a code lock, so connecting a new Claude (which reaches locked apps) asks for it."""
+    with hub.db() as con:
+        return applock.get(con, user) is not None
+
+
 def _gate(request: Request, req: str):
     """None if the logged-in user is an admin; otherwise the response to send instead."""
     user = hub.current_user(request)
@@ -243,16 +250,27 @@ def consent_page(request: Request, req: str = ""):
     client = _pending_client(req)
     if not client:
         return _page(request, user, 400, error=i18n.t("oauth.expired"))
-    return _page(request, user, req=req, client_name=client.client_name or client.client_id)
+    return _page(request, user, req=req, client_name=client.client_name or client.client_id,
+                 needs_code=_needs_code(user))
 
 
 @router.post("/oauth/consent")
-def consent_submit(request: Request, req: str = Form(""), decision: str = Form("")):
+def consent_submit(request: Request, req: str = Form(""), decision: str = Form(""), code: str = Form("")):
     if refused := _gate(request, req):
         return refused
     user = hub.current_user(request)
     if decision not in ("allow", "deny"):
         return _page(request, user, 400, error=i18n.t("oauth.bad_choice"))
+    if decision == "allow" and _needs_code(user):
+        # before _take: a wrong code must leave the request alive, and an expired one costs no attempt
+        client = _pending_client(req)
+        if not client:
+            return _page(request, user, 400, error=i18n.t("oauth.expired"))
+        c = hub.check_code(user, code)
+        if not c.ok:
+            message = i18n.t("lock.err.blocked", minutes=ceil(c.wait / 60)) if c.wait else i18n.t("lock.err.wrong")
+            return _page(request, user, 403, req=req, client_name=client.client_name or client.client_id,
+                         needs_code=True, code_error=message)
     taken = _take(req)
     # registration already restricts redirect_uris to the allowlist; check again before redirecting
     if not taken or str(taken[1].redirect_uri) not in REDIRECT_ALLOWLIST:

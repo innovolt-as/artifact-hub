@@ -105,6 +105,7 @@
   "cli.short": "Passordet må være minst {min} tegn",
   "consent.allow": "Gi tilgang",
   "consent.body": "<strong>{client}</strong> ber om tilgang på vegne av {user}. Den kan da opprette og oppdatere apper i huben.",
+  "consent.code": "Kodelåsen din",
   "consent.deny": "Avbryt",
   "consent.error_title": "Kan ikke koble til",
   "consent.home": "Til forsiden",
