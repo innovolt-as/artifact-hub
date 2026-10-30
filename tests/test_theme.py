@@ -40,6 +40,30 @@ def test_login_page_follows_the_device(client):
     assert "data-theme" not in client.get("/login").text.split("<head>")[0]
 
 
+THEME_JS = '<script src="/static/theme.js"'
+
+
+def test_theme_script_is_on_the_hubs_pages_but_not_on_apps_or_login(make_page, user_client, client):
+    assert THEME_JS in user_client.get("/").text and THEME_JS in user_client.get("/settings").text
+    assert THEME_JS not in client.get("/login").text
+    make_page("appen")
+    app = user_client.get("/a/appen/").text
+    assert "/static/pull.js" in app and "theme.js" not in app
+
+
+def test_a_restored_page_gets_the_theme_chosen_since(client):
+    settings = client.get("/static/settings.js").text
+    assert 'sessionStorage.setItem("hub-theme"' in settings
+    assert 'saved = root.dataset.theme || "auto";' in settings  # settings itself restored: the buttons follow
+    js = client.get("/static/theme.js").text
+    assert "e.persisted" in js and 'sessionStorage.getItem("hub-theme")' in js
+
+
+def test_the_restore_stays_out_of_pull_js(client):
+    # pull.js is injected into every app page too, and the theme must never touch apps
+    assert "hub-theme" not in client.get("/static/pull.js").text
+
+
 def test_theme_survives_db_error(pw_mode, hub, user_client, monkeypatch):
     def boom(con, email):
         raise sqlite3.OperationalError("locked")

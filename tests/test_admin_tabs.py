@@ -43,6 +43,10 @@ def test_no_reload_on_the_apps_tab(client):
     assert "location.reload" not in client.get("/static/admin-apps.js").text
 
 
+def test_the_list_refreshes_on_the_way_back_from_the_page_cache(client):
+    assert "addEventListener('pageshow', e => { if (e.persisted) refresh(); });" in client.get("/static/admin-apps.js").text
+
+
 def _page(hub, slug, **meta):
     hub.save_page(slug, f"<!doctype html><title>{slug}</title>", create=True, private=False)
     p = hub._meta_path(slug)

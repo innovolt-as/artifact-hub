@@ -59,6 +59,8 @@
     $('asError').textContent = '';
     if (!await refresh()) fail(T.refreshFailed);
   }
+  // Back from the page cache: an app may have been added on the Upload tab. A sheet stays as it is, see refresh()
+  addEventListener('pageshow', e => { if (e.persisted) refresh(); });
 
   // --- the sheet
   function render(li) {
