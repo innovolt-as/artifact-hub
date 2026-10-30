@@ -54,7 +54,7 @@ last 30 days: in practice it only works for you. Claude passes on the same warni
 ## Code lock
 
 If you have set a [code](APPS.md#code-lock), the page where you approve a new connection asks for it, so someone
-holding your logged-in phone cannot connect their own Claude. *Deny* needs no code, and existing connections are not
+holding your logged-in phone cannot connect their own Claude. *Cancel* needs no code, and existing connections are not
 affected.
 
 The connector reaches locked apps without a code. Reading, writing and updating work as for any other app, and
