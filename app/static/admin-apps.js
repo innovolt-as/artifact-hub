@@ -156,6 +156,8 @@
       const r = await post();
       if (r.ok) {
         const renamed = (await r.json().catch(() => ({}))).slug;  // /api/edit: the address may be new
+        // The row moves with it, or a refresh that fails leaves the sheet looking for a row that is not there
+        if (renamed) { const li = rowOf(slug); if (li) li.dataset.slug = renamed; }
         if (renamed && current === slug) current = renamed;
         await saved();  // refresh() counts itself before its first await, so an older list cannot look for the new address
         if (here === visit) show('main');

@@ -220,6 +220,13 @@ def test_a_rename_moves_the_sheet_only_if_it_still_shows_that_app(client):
     assert "if (renamed && current === slug) current = renamed;" in client.get("/static/admin-apps.js").text
 
 
+def test_a_rename_retags_the_row_before_the_refresh_that_may_fail(client):
+    # the sheet finds its app through the row, and only a refresh that works brings a row with the new address
+    js = client.get("/static/admin-apps.js").text
+    retag = js.index("li.dataset.slug = renamed")
+    assert retag < js.index("if (renamed && current === slug)") < js.index("await saved();  // refresh() counts")
+
+
 def test_edit_returns_new_slug(hub, admin_client):
     hub.save_page("gammel", "<!doctype html><title>x</title>", create=True, private=False)
     r = admin_client.post("/api/edit", data={"slug": "gammel", "new_slug": "ny", "title": "Ny"})
