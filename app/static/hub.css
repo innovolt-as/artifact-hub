@@ -295,6 +295,18 @@ dialog { overscroll-behavior: contain; }
 #asError { margin: 0; min-height: 0; }
 #asError:not(:empty) { margin-top: 10px; }
 #asDelete { display: block; width: 100%; min-height: 48px; margin-top: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: none; color: var(--danger); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+/* the views in the sheet: the forms keep .editor without its box, and every target is 44 px, as in the main view */
+.sheet .editor { border: 0; width: auto; padding: 8px 18px 18px; background: none; }
+.sheet .editor, .sheet .editor form { display: flex; flex-direction: column; }
+.sheet .editor form { flex: 1; }
+.sheet .editor p { overflow-wrap: anywhere; }
+.sheet .editor label.check { min-height: 44px; margin-top: 0; }
+.sheet .editor input:not([type=checkbox]):not([type=radio]) { min-height: 44px; }
+.sheet .editor-actions { flex-wrap: wrap; margin-top: auto; padding-top: 20px; }  /* at the bottom when a short view keeps the sheet's height */
+.sheet .editor-actions button, .sheet .link-form button { min-height: 44px; }
+.view-top { display: flex; align-items: center; gap: 2px; margin: 0 0 8px -12px; }
+.view-top h1 { min-width: 0; margin: 0; font-size: 18px; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; }
+.view-back { flex: none; width: 44px; height: 44px; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 30px; line-height: 1; cursor: pointer; }
 @media (max-width: 640px) and (prefers-reduced-motion: no-preference) {
   #appSheet[open] { animation: sheet-up .24s cubic-bezier(.2, .8, .2, 1); }
 }

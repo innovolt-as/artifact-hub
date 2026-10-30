@@ -59,68 +59,77 @@
     <p id="asError" class="err small" role="alert"></p>
     <button type="button" id="asDelete">{{ t('admin.delete_app') }}</button>
   </div>
-</dialog>
 
-<dialog id="accessDlg" class="editor">
-  <form id="accessForm" method="dialog">
-    <h1 tabindex="-1" autofocus>{{ t("admin.access") }}: <span id="acTitle"></span></h1>
-    <label class="check"><input type="radio" name="level" value="all"> {{ t("admin.level_all") }}</label>
-    <label class="check"><input type="radio" name="level" value="people"> {{ t("admin.level_people") }}</label>
-    <label class="check"><input type="radio" name="level" value="admin"> {{ t("admin.level_admin") }}</label>
-    <div id="acPeople" class="ac-people">
-      <ul id="acList" class="ac-list"></ul>
-      <div class="link-form">
-        <input type="email" id="acNew" placeholder="{{ t('admin.new_email_placeholder') }}">
-        <button type="button" class="small" id="acAdd">{{ t("admin.add") }}</button>
+  <section class="editor view" data-view="edit" hidden>
+    <header class="view-top">
+      <button type="button" class="view-back" aria-label="{{ t('admin.back') }}">‹</button>
+      <h1 tabindex="-1">{{ t("admin.edit") }}</h1>
+    </header>
+    <form id="editForm" method="dialog">
+      <div class="editor-preview">
+        <span id="pvIcon" class="icon"></span>
+        <span class="muted small">{{ t("admin.edit_preview") }}</span>
       </div>
-    </div>
-    <p id="acWarn" class="err small" hidden>⚠ {{ t('admin.claude_warning') }} {{ t('admin.claude_warning_fix') }}</p>
-    <p id="acError" class="err small"></p>
-    <div class="editor-actions">
-      <button type="button" class="small" id="acCancel">{{ t("admin.cancel") }}</button>
-      <button type="submit" class="primary">{{ t("admin.save") }}</button>
-    </div>
-  </form>
-</dialog>
-<dialog id="shareDlg" class="editor">
-  <form method="dialog">
-    <h1 tabindex="-1" autofocus>{{ t("admin.share_heading") }}: <span id="shTitle"></span></h1>
+      <label>{{ t("admin.name") }}<input name="title" id="edTitle" maxlength="120"></label>
+      <label id="edSlugRow">{{ t("admin.address") }}
+        <span class="prefixed"><span class="muted">/a/</span><input name="new_slug" id="edSlug" maxlength="80" pattern="[a-z0-9][a-z0-9._\-]*"></span>
+        <span class="muted small">{{ t("admin.edit_old_links") }}</span>
+      </label>
+      <label id="edUrlRow">{{ t('admin.url_label') }}<input name="url" id="edUrl" type="url" placeholder="https://…"></label>
+      <label>{{ t('admin.emoji_label') }}<input name="emoji" id="edEmoji" maxlength="16" placeholder="{{ t('admin.emoji_placeholder') }}"></label>
+      <label>{{ t("admin.image") }}<input type="file" name="icon" id="edIcon" accept=".png,.jpg,.jpeg,.webp,.gif,.svg"></label>
+      <label class="check" id="edRemoveRow"><input type="checkbox" name="remove_icon" id="edRemove" value="true"> {{ t("admin.remove_image") }}</label>
+      <p id="edError" class="err small" role="alert"></p>
+      <div class="editor-actions">
+        <button type="button" class="small view-cancel">{{ t("admin.cancel") }}</button>
+        <button type="submit" class="primary">{{ t("admin.save") }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="editor view" data-view="access" hidden>
+    <header class="view-top">
+      <button type="button" class="view-back" aria-label="{{ t('admin.back') }}">‹</button>
+      <h1 tabindex="-1">{{ t("admin.access") }}: <span id="acTitle"></span></h1>
+    </header>
+    <form id="accessForm" method="dialog">
+      <label class="check"><input type="radio" name="level" value="all"> {{ t("admin.level_all") }}</label>
+      <label class="check"><input type="radio" name="level" value="people"> {{ t("admin.level_people") }}</label>
+      <label class="check"><input type="radio" name="level" value="admin"> {{ t("admin.level_admin") }}</label>
+      <div id="acPeople" class="ac-people">
+        <ul id="acList" class="ac-list"></ul>
+        <div class="link-form">
+          <input type="email" id="acNew" placeholder="{{ t('admin.new_email_placeholder') }}">
+          <button type="button" class="small" id="acAdd">{{ t("admin.add") }}</button>
+        </div>
+      </div>
+      <p id="acWarn" class="err small" hidden>⚠ {{ t('admin.claude_warning') }} {{ t('admin.claude_warning_fix') }}</p>
+      <p id="acError" class="err small" role="alert"></p>
+      <div class="editor-actions">
+        <button type="button" class="small view-cancel">{{ t("admin.cancel") }}</button>
+        <button type="submit" class="primary">{{ t("admin.save") }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="editor view" data-view="share" hidden>
+    <header class="view-top">
+      <button type="button" class="view-back" aria-label="{{ t('admin.back') }}">‹</button>
+      <h1 tabindex="-1">{{ t("admin.share_heading") }}: <span id="shTitle"></span></h1>
+    </header>
     <p class="small">{{ t("admin.share_intro") }}</p>
     <p id="shMine" class="small"></p>
     <p id="shOthers" class="small"></p>
     <p id="shExists" class="small">{{ t("admin.share_exists") }}</p>
+    <p id="shError" class="err small" role="alert"></p>
     <div class="editor-actions">
-      <button type="button" class="small" id="shCancel">{{ t("admin.cancel") }}</button>
+      <button type="button" class="small view-cancel">{{ t("admin.cancel") }}</button>
       <button type="button" class="small" id="shEmpty"></button>
       <button type="button" class="primary" id="shCopy">{{ t("admin.share_copy") }}</button>
     </div>
-  </form>
+  </section>
 </dialog>
 <script type="application/json" id="known">{{ known|tojson }}</script>
-
-<dialog id="editor" class="editor">
-  <form id="editForm" method="dialog">
-    <h1 tabindex="-1" autofocus>{{ t("admin.edit") }}</h1>
-    <div class="editor-preview">
-      <span id="pvIcon" class="icon"></span>
-      <span class="muted small">{{ t("admin.edit_preview") }}</span>
-    </div>
-    <label>{{ t("admin.name") }}<input name="title" id="edTitle" maxlength="120"></label>
-    <label id="edSlugRow">{{ t("admin.address") }}
-      <span class="prefixed"><span class="muted">/a/</span><input name="new_slug" id="edSlug" maxlength="80" pattern="[a-z0-9][a-z0-9._\-]*"></span>
-      <span class="muted small">{{ t("admin.edit_old_links") }}</span>
-    </label>
-    <label id="edUrlRow">{{ t('admin.url_label') }}<input name="url" id="edUrl" type="url" placeholder="https://…"></label>
-    <label>{{ t('admin.emoji_label') }}<input name="emoji" id="edEmoji" maxlength="16" placeholder="{{ t('admin.emoji_placeholder') }}"></label>
-    <label>{{ t("admin.image") }}<input type="file" name="icon" id="edIcon" accept=".png,.jpg,.jpeg,.webp,.gif,.svg"></label>
-    <label class="check" id="edRemoveRow"><input type="checkbox" name="remove_icon" id="edRemove" value="true"> {{ t("admin.remove_image") }}</label>
-    <p id="edError" class="err small"></p>
-    <div class="editor-actions">
-      <button type="button" class="small" id="edCancel">{{ t("admin.cancel") }}</button>
-      <button type="submit" class="primary">{{ t("admin.save") }}</button>
-    </div>
-  </form>
-</dialog>
 
 {% include "_admin_js.html" %}
 <script src="/static/admin-apps.js"></script>

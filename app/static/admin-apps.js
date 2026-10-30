@@ -1,4 +1,4 @@
-// The Apps tab: the list, the search, the settings sheet per app, and the edit, access and shared-data dialogs.
+// The Apps tab: the list, the search, and the settings sheet per app with its views for edit, access and shared data.
 (() => {
   const { T, $, fmt, postJson, failText } = window.Admin;
   const sheet = $('appSheet');
@@ -79,25 +79,47 @@
     $('asData').checked = d.shared === '1';
     $('asBanner').checked = d.banner === '1';
   }
-  let openedAt = 0;
+  // visit counts every change of view, so a save or a preview that lands late can tell if the person is still there
+  let visit = 0, shownAt = 0;
+  function show(view) {
+    visit++;
+    shownAt = performance.now();
+    // A shorter view keeps the height of the main view, so the sheet does not jump (86vh: the phone may turn meanwhile)
+    sheet.style.minHeight = view === 'main' ? '' : `min(${sheet.offsetHeight}px, 86vh)`;
+    // However a view is left (‹, Cancel, a save, the sheet closing), the switch says what the app has now
+    $('asData').checked = rowOf(current)?.dataset.shared === '1';
+    for (const v of sheet.querySelectorAll('.view')) {
+      v.hidden = v.dataset.view !== view;
+      if (v.hidden) continue;
+      v.scrollTop = 0;
+      v.querySelector('h1').focus({ preventScroll: true });
+    }
+  }
+  sheet.querySelectorAll('.view-back, .view-cancel').forEach(b => { b.onclick = () => show('main'); });
+
   function open(li) {
     current = li.dataset.slug;
     $('asError').textContent = '';
     render(li);
     sheet.showModal();
-    openedAt = performance.now();
+    shownAt = performance.now();
   }
   $('appList').addEventListener('click', e => {
     const row = e.target.closest('.arow');
     if (row) open(row.closest('li'));
   });
   $('asClose').onclick = () => sheet.close();
-  // The second click of the double click that opened the sheet lands in it, and must not close it or change a setting
+  // The second click of a double click lands on whatever the first brought up, the sheet or a view in it (a double click
+  // on Cancel can land on a switch), and must not close the sheet or change a setting
   sheet.addEventListener('click', e => {
-    if (performance.now() - openedAt < 350) { e.preventDefault(); e.stopPropagation(); }
+    if (performance.now() - shownAt < 350) { e.preventDefault(); e.stopPropagation(); }
   }, true);
-  sheet.addEventListener('click', e => { if (e.target === sheet) sheet.close(); });  // the backdrop
+  // The backdrop. Selecting text in a form and letting go outside also ends up here, and must not throw away what was typed
+  let pressed = null;
+  sheet.addEventListener('pointerdown', e => { pressed = e.target; });
+  sheet.addEventListener('click', e => { if (e.target === sheet && pressed === sheet) sheet.close(); });
   sheet.addEventListener('close', () => {
+    show('main');  // the next app opens on its main view, and a save still running can tell it was left
     // The tapped row may have been replaced since, so the browser cannot always put the focus back by itself
     const li = rowOf(current);
     current = null;
@@ -106,9 +128,9 @@
   });
 
   // One save at a time: a tap on a switch while one runs does nothing
-  let busy = false;
-  for (const box of [$('asData'), $('asBanner')]) box.addEventListener('click', e => { if (busy) e.preventDefault(); });
-  // work() saves and returns the response, or null when a dialog takes over from here
+  let busy = false, saving = false;
+  for (const box of [$('asData'), $('asBanner')]) box.addEventListener('click', e => { if (busy || saving) e.preventDefault(); });
+  // work() saves and returns the response, or null when a view takes over from here
   async function flip(work) {
     const slug = current;
     busy = true;
@@ -125,6 +147,27 @@
   }
   $('asBanner').addEventListener('change', () => flip(() => postSlug('/api/toggle-banner', current)));
 
+  // A save from a view goes back to the main view, which by then shows the new value. A failure stays in the view with
+  // its error, for another try, unless the person has left the view: then fail() finds a place for it.
+  async function save(errorId, post) {
+    if (saving) return;  // a second tap on Save
+    const slug = current, here = visit;
+    saving = true;
+    $(errorId).textContent = '';
+    try {
+      const r = await post();
+      if (r.ok) {
+        const renamed = (await r.json().catch(() => ({}))).slug;  // /api/edit: the address may be new
+        if (renamed && current === slug) current = renamed;
+        await saved();  // refresh() counts itself before its first await, so an older list cannot look for the new address
+        if (here === visit) show('main');
+      } else {
+        const msg = await why(r);
+        if (here === visit) $(errorId).textContent = msg; else fail(msg, slug);
+      }
+    } finally { saving = false; }
+  }
+
   $('asDelete').onclick = async () => {
     const slug = current, btn = $('asDelete');
     if (!confirm(fmt(T.confirmDelete, { slug }))) return;
@@ -138,8 +181,7 @@
     await saved();
   };
 
-  // --- edit dialog: name, address, emoji, image
-  const ed = $('editor');
+  // --- edit view: name, address, emoji, image
   const f = $('editForm');
   let editing = null, objectUrl = null;
 
@@ -170,25 +212,20 @@
     $('edRemoveRow').hidden = !editing.icon;
     $('edError').textContent = '';
     preview();
-    ed.showModal();
+    show('edit');
   };
   ['edTitle', 'edEmoji', 'edIcon', 'edRemove'].forEach(id => $(id).addEventListener('input', preview));
-  $('edCancel').onclick = () => ed.close();
 
-  f.addEventListener('submit', async e => {
+  f.addEventListener('submit', e => {
     e.preventDefault();
     const fd = new FormData(f);
     fd.append('slug', current);
     if (!$('edIcon').files.length) fd.delete('icon');
-    const r = await reach(fetch('/api/edit', { method: 'POST', body: fd }));
-    if (!r.ok) { $('edError').textContent = await why(r); return; }
-    current = (await r.json()).slug;  // the address may be new
-    ed.close();
-    await saved();
+    save('edError', () => reach(fetch('/api/edit', { method: 'POST', body: fd })));
   });
 
-  // --- access dialog: everyone, the checked people, or only me (the list is kept whatever is chosen)
-  const acDlg = $('accessDlg'), acForm = $('accessForm');
+  // --- access view: everyone, the checked people, or only me (the list is kept whatever is chosen)
+  const acForm = $('accessForm');
   let known = JSON.parse($('known').textContent), acClaude = false;
 
   function personRow(email, checked) {
@@ -220,7 +257,7 @@
     $('acNew').value = '';
     $('acError').textContent = '';
     showPeople();
-    acDlg.showModal();
+    show('access');
   };
   acForm.querySelectorAll('input[name=level]').forEach(r => r.onchange = showPeople);
 
@@ -238,20 +275,15 @@
   }
   $('acAdd').onclick = addPerson;
   $('acNew').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addPerson(); } });
-  $('acCancel').onclick = () => acDlg.close();
 
-  acForm.addEventListener('submit', async e => {
+  acForm.addEventListener('submit', e => {
     e.preventDefault();
     if (!addPerson()) return;  // an address typed but not added yet still counts
     const people = [...$('acList').querySelectorAll('input:checked')].map(cb => cb.value);
-    const r = await reach(postJson('/api/access', { slug: current, level: acForm.level.value, people }));
-    if (!r.ok) { $('acError').textContent = await why(r); return; }
-    acDlg.close();
-    await saved();
+    save('acError', () => reach(postJson('/api/access', { slug: current, level: acForm.level.value, people })));
   });
 
   // --- shared data: everyone who can see the app reads it, only admins change it (app/shared.py)
-  const shDlg = $('shareDlg');
   const setData = (shared, copy) => reach(postJson('/api/data-mode', { slug: current, shared, copy }));
 
   function showShare(p) {
@@ -264,27 +296,19 @@
     $('shExists').hidden = !p.shared_exists;
     $('shCopy').hidden = !canCopy;
     $('shEmpty').textContent = canCopy ? T.shareEmpty : T.shareOn;
-    shDlg.showModal();
+    $('shError').textContent = '';
+    show('share');
   }
   $('asData').addEventListener('change', e => flip(async () => {
     if (!e.target.checked) return setData(false, false);
-    const slug = current;
-    const r = await reach(fetch('/api/data-mode?slug=' + encodeURIComponent(slug)));
+    const here = visit;
+    const r = await reach(fetch('/api/data-mode?slug=' + encodeURIComponent(current)));
     if (!r.ok) return r;
     const p = await r.json();
-    if (current === slug) showShare(p);  // unless the sheet was closed while this was on its way
+    if (here === visit) showShare(p);  // unless the person went elsewhere while this was on its way
     return null;
   }));
-  async function share(copy) {
-    const slug = current;
-    const r = await setData(true, copy);
-    if (r.ok) await saved();
-    shDlg.close();
-    if (!r.ok) fail(await why(r), slug);
-  }
+  const share = copy => save('shError', () => setData(true, copy));
   $('shCopy').onclick = () => share(true);
   $('shEmpty').onclick = () => share(false);
-  $('shCancel').onclick = () => shDlg.close();
-  // However the dialog closes (Cancel, Esc, a save), the switch says what the app has now
-  shDlg.addEventListener('close', () => { $('asData').checked = rowOf(current)?.dataset.shared === '1'; });
 })();

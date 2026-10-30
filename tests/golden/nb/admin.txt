@@ -38,20 +38,8 @@ Felles data
 Banner øverst
 Felles data: alle med tilgang ser det samme. Du får se hva som kopieres før det skjer.
 Slett app
-Tilgang:
-Alle som kan logge inn
-Bestemte personer
-Bare meg
-@placeholder: ny@epost.no
-Legg til
-⚠ Claude fyller denne appen med dine personlige data. De andre som har tilgang, ser ikke dette innholdet. Skru på felles data hvis innholdet er likt for alle, eller sett appen til bare meg.
-Avbryt
-Lagre
-Skru på felles data:
-Alt appen og Claude lagrer, blir felles for alle som ser appen, og bare admins kan endre det. Det som ligger under data/users/<e-post>/, er fortsatt privat for hver bruker.
-Appen har felles data fra før, og de brukes igjen.
-Avbryt
-Kopier mine data
+@aria-label: Tilbake
+‹
 Rediger
 Bilde brukes hvis det finnes, ellers emoji, ellers forbokstaven.
 Navn
@@ -66,3 +54,21 @@ Bilde
 Fjern bildet
 Avbryt
 Lagre
+@aria-label: Tilbake
+‹
+Tilgang:
+Alle som kan logge inn
+Bestemte personer
+Bare meg
+@placeholder: ny@epost.no
+Legg til
+⚠ Claude fyller denne appen med dine personlige data. De andre som har tilgang, ser ikke dette innholdet. Skru på felles data hvis innholdet er likt for alle, eller sett appen til bare meg.
+Avbryt
+Lagre
+@aria-label: Tilbake
+‹
+Skru på felles data:
+Alt appen og Claude lagrer, blir felles for alle som ser appen, og bare admins kan endre det. Det som ligger under data/users/<e-post>/, er fortsatt privat for hver bruker.
+Appen har felles data fra før, og de brukes igjen.
+Avbryt
+Kopier mine data

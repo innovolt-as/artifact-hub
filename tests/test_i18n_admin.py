@@ -53,7 +53,7 @@ def test_admin_pages_en(hub, make_page, admin_client, english, pw_mode):
     assert "Upload" in body and "Delete app" in body and "Everyone" in body
     for text in ("Search apps", "Name and icon", "Access", "Shared data", "Banner at the top", "Open the app ↗"):
         assert text in body
-    assert 'aria-label="Close"' in body
+    assert 'aria-label="Close"' in body and 'aria-label="Back"' in body
     assert "password: must be changed" in admin_client.get("/admin/people").text
 
 

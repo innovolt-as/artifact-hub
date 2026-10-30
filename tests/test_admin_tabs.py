@@ -39,7 +39,7 @@ def test_upload_page_does_not_reload(client):
     assert "location.reload" not in client.get("/static/admin-upload.js").text
 
 
-def test_apps_page_does_not_reload(client):
+def test_no_reload_on_the_apps_tab(client):
     assert "location.reload" not in client.get("/static/admin-apps.js").text
 
 
@@ -122,3 +122,63 @@ def test_clicks_just_after_open_are_ignored_inside_the_sheet(client):
     # the second click of a double click on a row lands in the sheet, and on a switch it would change a setting
     js = client.get("/static/admin-apps.js").text
     assert "stopPropagation" in js and "e.preventDefault(); e.stopPropagation();" in js
+
+
+def test_sub_views_live_in_the_sheet(admin_client):
+    html = admin_client.get("/admin").text
+    sheet = html[html.index('id="appSheet"'):html.index("</dialog>", html.index('id="appSheet"'))]
+    for form in ('id="editForm"', 'id="accessForm"', 'data-view="share"'):
+        assert form in sheet
+    assert html.count("<dialog") == 1
+
+
+@pytest.mark.parametrize("view", ["edit", "access", "share"])
+def test_each_sub_view_starts_hidden_and_has_a_way_back(view, admin_client):
+    html = admin_client.get("/admin").text
+    section = html[html.index(f'<section class="editor view" data-view="{view}" hidden>'):]
+    section = section[:section.index("</section>")]
+    assert '<button type="button" class="view-back" aria-label="Tilbake">‹</button>' in section
+    assert 'class="small view-cancel"' in section
+    assert '<h1 tabindex="-1">' in section  # the view takes the focus on its heading, as the dialogs did
+    assert 'class="err small" role="alert"' in section  # a failed save stays in the view, with the error
+
+
+def test_the_old_dialogs_are_gone(admin_client, client):
+    html = admin_client.get("/admin").text
+    for gone in ('id="accessDlg"', 'id="editor"', 'id="shareDlg"'):
+        assert gone not in html
+    js = client.get("/static/admin-apps.js").text
+    assert js.count("showModal") == 1  # the sheet is the only dialog on the page
+
+
+def test_sheet_styles_the_forms_without_a_box_of_their_own(client):
+    css = client.get("/static/hub.css").text
+    assert ".sheet .editor { border: 0; width: auto; padding: 8px 18px 18px; background: none; }" in css
+
+
+def _show(client):
+    js = client.get("/static/admin-apps.js").text
+    return js[js.index("function show("):js.index("function open(")]
+
+
+def test_every_way_out_of_a_view_puts_the_data_switch_back(client):
+    # the view has no close event of its own: ‹, Cancel, a save and the sheet closing all pass through show()
+    assert "$('asData').checked = rowOf(current)?.dataset.shared === '1'" in _show(client)
+    js = client.get("/static/admin-apps.js").text
+    assert "sheet.addEventListener('close', () => {\n    show('main');" in js
+
+
+def test_the_double_click_guard_covers_every_change_of_view(client):
+    # a double click on Cancel lands on the main view, where the same spot can be a switch
+    assert "shownAt = performance.now();" in _show(client)
+
+
+def test_a_rename_moves_the_sheet_only_if_it_still_shows_that_app(client):
+    # the sheet can be closed and opened on another app while the save is on its way
+    assert "if (renamed && current === slug) current = renamed;" in client.get("/static/admin-apps.js").text
+
+
+def test_edit_returns_new_slug(hub, admin_client):
+    hub.save_page("gammel", "<!doctype html><title>x</title>", create=True, private=False)
+    r = admin_client.post("/api/edit", data={"slug": "gammel", "new_slug": "ny", "title": "Ny"})
+    assert r.status_code == 200 and r.json()["slug"] == "ny"
