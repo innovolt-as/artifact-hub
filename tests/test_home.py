@@ -2,6 +2,7 @@
 import json
 import re
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -561,6 +562,27 @@ def test_failed_recipe_falls_back_only_to_todays_line(hub, user_client):
     with hub.db() as con:
         con.execute("UPDATE docs SET updated_at=? WHERE slug='mat'", (int(time.time()) - 2 * DAY,))
     assert "fra i dag" not in user_client.get("/").text
+
+
+def test_fallback_is_todays_in_the_viewers_zone(hub):  # in Oslo (CET) midnight is 23:00 UTC
+    _recipe_page(hub, "mat", "<script data-hub-card>function hubCard() { throw new Error('au'); }</script>")
+    apps = [a for a in hub.list_artifacts(USER) if a["slug"] == "mat"]
+
+    def utc(day, hour, minute):
+        return int(datetime(2026, 10, day, hour, minute, tzinfo=timezone.utc).timestamp())
+
+    def line(at, now, tz):
+        with hub.db() as con:
+            con.execute("DELETE FROM docs WHERE slug='mat'")
+            _doc_summary(con, "mat", USER, {"text": "stored"}, at)
+            return hub.card_lines(con, USER, apps, tz, now).get("mat")
+
+    # written 23:30 UTC on the 28th, 00:30 on the 29th in Oslo; now 00:15 UTC, the same Oslo day
+    assert line(utc(28, 23, 30), utc(29, 0, 15), OSLO) == "stored"
+    assert line(utc(28, 23, 30), utc(29, 0, 15), "UTC") is None  # yesterday in UTC
+    # written 22:30 UTC, 23:30 on the 28th in Oslo; now 23:15 UTC, still the 28th in UTC but the 29th in Oslo
+    assert line(utc(28, 22, 30), utc(28, 23, 15), OSLO) is None
+    assert line(utc(28, 22, 30), utc(28, 23, 15), "UTC") == "stored"
 
 
 def test_recipe_sees_what_the_viewer_sees(hub, user_client):
