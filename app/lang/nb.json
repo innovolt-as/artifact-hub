@@ -144,6 +144,7 @@
   "err.not_logged_in": "Ikke innlogget",
   "err.people_list": "people må være en liste med e-poster",
   "err.temp_pw": "Midlertidig passord må ha 10–200 tegn",
+  "err.unknown_theme": "Ukjent utseende: {theme}",
   "err.unknown_tz": "Ukjent tidssone: {tz}",
   "err.unknown_view": "Ukjent visning: {view}",
   "err.upload_type": "Bare .html eller .zip (med index.html) støttes",

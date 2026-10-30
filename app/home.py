@@ -24,6 +24,7 @@ MOST_USED_MAX = 4
 STATS_DAYS = 7         # the admin statistics cover the last week
 SUMMARY_MAX = 140
 VIEWS = ("icons", "cards")
+THEMES = ("auto", "light", "dark")
 SUMMARY_DOC = ("hub", "summary")      # db.doc("hub/summary") in apps using window.claude.use("db")
 SUMMARY_KEY = "hub/summary"           # /api/data/<slug>/hub/summary in apps using the data API
 
@@ -127,6 +128,18 @@ def set_view(con: sqlite3.Connection, email: str, view: str) -> None:
     if view not in VIEWS:
         raise ValueError(i18n.t("err.unknown_view", view=view))
     _put(con, email, "view", view)
+
+
+def get_theme(con: sqlite3.Connection, email: str) -> str:
+    """The viewer's chosen theme; "auto" (follow the device) when never chosen or the stored value is unknown."""
+    theme = _get(con, email, "theme", "auto")
+    return theme if theme in THEMES else "auto"
+
+
+def set_theme(con: sqlite3.Connection, email: str, theme: str) -> None:
+    if theme not in THEMES:
+        raise ValueError(i18n.t("err.unknown_theme", theme=theme))
+    _put(con, email, "theme", theme)
 
 
 def set_tz(con: sqlite3.Connection, email: str, tz: str) -> None:

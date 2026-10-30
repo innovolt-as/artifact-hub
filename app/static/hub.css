@@ -1,12 +1,15 @@
 :root {
+  color-scheme: light dark;
   --bg: #f6f5f1; --fg: #1d1c1a; --muted: #6e6a62; --card: #ffffff; --line: #e4e1da;
   --accent: #2f5fd1; --accent-fg: #fff; --danger: #b4321f; --ok: #227a4c;
   --bar: #2f5fd1;
   --radius: 12px; --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --bar: #5b86f0; }
+  :root:not([data-theme="light"]) { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --bar: #5b86f0; }
 }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --bar: #5b86f0; color-scheme: dark; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--font); }
 a { color: inherit; text-decoration: none; }

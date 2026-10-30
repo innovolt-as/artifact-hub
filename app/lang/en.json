@@ -144,6 +144,7 @@
   "err.not_logged_in": "Not logged in",
   "err.people_list": "people must be a list of e-mails",
   "err.temp_pw": "Temporary password must be 10–200 characters",
+  "err.unknown_theme": "Unknown theme: {theme}",
   "err.unknown_tz": "Unknown time zone: {tz}",
   "err.unknown_view": "Unknown view: {view}",
   "err.upload_type": "Only .html or .zip (with index.html) is supported",
