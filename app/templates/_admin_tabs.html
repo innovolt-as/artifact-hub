@@ -1,5 +1,7 @@
-{# Tabs at the top of the admin pages; `tab` is "apps" or "stats". #}
+{# Tabs at the top of the admin pages; `tab` is "apps", "upload", "people" or "stats". #}
 <nav class="tabs" aria-label="{{ t('nav.admin') }}">
   <a href="/admin"{% if tab == 'apps' %} aria-current="page"{% endif %}>{{ t("admin.tab_apps") }}</a>
+  <a href="/admin/upload"{% if tab == 'upload' %} aria-current="page"{% endif %}>{{ t("admin.tab_upload") }}</a>
+  <a href="/admin/people"{% if tab == 'people' %} aria-current="page"{% endif %}>{{ t("admin.tab_people") }}</a>
   <a href="/admin/stats"{% if tab == 'stats' %} aria-current="page"{% endif %}>{{ t("admin.tab_stats") }}</a>
 </nav>

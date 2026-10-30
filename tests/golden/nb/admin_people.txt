@@ -1,0 +1,19 @@
+Admin · Artifact Hub
+Artifact Hub
+Admin
+admin@test.no
+@aria-label: Innstillinger
+Logg ut
+@aria-label: Admin
+Apper
+Last opp
+Personer
+Statistikk
+Personer
+Kan logge inn. De ser appene som står på «Alle», og appene de står på.
+@placeholder: navn@epost.no
+Inviter
+ny@test.no
+Fjern
+user@test.no
+fra serveroppsettet

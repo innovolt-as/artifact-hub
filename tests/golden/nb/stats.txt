@@ -6,6 +6,8 @@ admin@test.no
 Logg ut
 @aria-label: Admin
 Apper
+Last opp
+Personer
 Statistikk
 Siste 7 dager
 Hvor ofte appene åpnes. Samme app åpnet igjen innen 10 minutter teller som én gang. Admin er ikke med.

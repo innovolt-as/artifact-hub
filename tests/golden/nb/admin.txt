@@ -6,22 +6,9 @@ admin@test.no
 Logg ut
 @aria-label: Admin
 Apper
-Statistikk
 Last opp
-Dra inn
-.html
--filer eller en
-.zip
-med
-index.html
-. Samme filnavn erstatter eksisterende.
-Slipp filer her, eller
-velg filer
-…eller legg til en lenke til en ekstern app:
-@placeholder: Navn
-@placeholder: https://…
-Legg til lenke
-Kun synlig for meg
+Personer
+Statistikk
 Artifacts
 B
 Bare admin
@@ -56,14 +43,6 @@ data: personlige
 @title: Hvem som har tilgang
 👥 1 person
 Slett
-Personer
-Kan logge inn. De ser appene som står på «Alle», og appene de står på.
-@placeholder: navn@epost.no
-Inviter
-ny@test.no
-Fjern
-user@test.no
-fra serveroppsettet
 Tilgang:
 Alle som kan logge inn
 Bestemte personer

@@ -1,0 +1,26 @@
+Admin · Artifact Hub
+Artifact Hub
+Admin
+admin@test.no
+@aria-label: Innstillinger
+Logg ut
+@aria-label: Admin
+Apper
+Last opp
+Personer
+Statistikk
+Last opp
+Dra inn
+.html
+-filer eller en
+.zip
+med
+index.html
+. Samme filnavn erstatter eksisterende.
+Slipp filer her, eller
+velg filer
+…eller legg til en lenke til en ekstern app:
+@placeholder: Navn
+@placeholder: https://…
+Legg til lenke
+Kun synlig for meg

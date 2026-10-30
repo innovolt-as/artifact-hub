@@ -1,0 +1,17 @@
+{# The texts the admin scripts need (static/admin.js reads them). #}
+<script type="application/json" id="__admin_strings">{
+  "uploading": {{ raw("admin.uploading")|tojson }},
+  "linkAdded": {{ raw("admin.link_added")|tojson }},
+  "confirmDelete": {{ raw("admin.confirm_delete")|tojson }},
+  "errorStatus": {{ raw("admin.error_status")|tojson }},
+  "validEmail": {{ raw("admin.valid_email")|tojson }},
+  "invitedNote": {{ raw("admin.invited_note")|tojson }},
+  "ok": {{ raw("admin.ok")|tojson }},
+  "pwSet": {{ raw("admin.pw_set_msg")|tojson }},
+  "confirmRemove": {{ raw("admin.confirm_remove")|tojson }},
+  "shareMine": {{ raw("admin.share_mine")|tojson }},
+  "shareOthers": {{ raw("admin.share_others")|tojson }},
+  "shareEmpty": {{ raw("admin.share_empty")|tojson }},
+  "shareOn": {{ raw("admin.share_on")|tojson }}
+}</script>
+<script src="/static/admin.js"></script>

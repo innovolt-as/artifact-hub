@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_icon.html" import icon %}
+{% block title %}{{ t("nav.admin") }} · {{ site }}{% endblock %}
+{% block body %}
+{% with tab = 'upload' %}{% include "_admin_tabs.html" %}{% endwith %}
+<section class="card">
+  <h1>{{ t("admin.upload") }}</h1>
+  <p class="muted">{{ t_html("admin.upload_hint") }}</p>
+  <div id="drop" class="drop">
+    <p>{{ t("admin.drop") }} <label for="file" class="link-like">{{ t("admin.drop_pick") }}</label></p>
+    <input id="file" type="file" accept=".html,.htm,.zip" multiple hidden>
+  </div>
+  <form id="linkForm" class="link-form">
+    <span class="muted small">{{ t("admin.link_or") }}</span>
+    <input name="title" placeholder="{{ t('admin.name') }}" required maxlength="120">
+    <input name="url" type="url" placeholder="https://…" required>
+    <button class="small">{{ t("admin.add_link") }}</button>
+  </form>
+  <label class="check"><input type="checkbox" id="adminOnly"> {{ t("admin.only_me") }}</label>
+  <ul id="log" class="log"></ul>
+</section>
+
+{% include "_admin_js.html" %}
+<script src="/static/admin-upload.js"></script>
+{% endblock %}

@@ -1543,6 +1543,21 @@ def known_people() -> list[str]:
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, user: str = Depends(require_admin)):
+    apps = list_artifacts(user)
+    return templates.TemplateResponse(
+        request, "admin.html", {"site": SITE_NAME, "user": user, "admin": True, "artifacts": apps,
+                                "known": known_people(),
+                                "filled": claude_filled(apps), "warned": claude_warned(apps)}
+    )
+
+
+@app.get("/admin/upload", response_class=HTMLResponse)
+def admin_upload(request: Request, user: str = Depends(require_admin)):
+    return templates.TemplateResponse(request, "admin_upload.html", {"site": SITE_NAME, "user": user, "admin": True})
+
+
+@app.get("/admin/people", response_class=HTMLResponse)
+def admin_people(request: Request, user: str = Depends(require_admin)):
     with db() as con:
         invited = set(access.invited(con))
     # "Fjern" only for those an invitation lets in; ALLOWED_EMAILS are let in by the server config
@@ -1556,12 +1571,8 @@ def admin_page(request: Request, user: str = Depends(require_admin)):
             for p in people:
                 row = passwd.get(con, p["email"])
                 p["pw_status"] = "missing" if row is None else ("must_change" if row["must_change"] else "set")
-    apps = list_artifacts(user)
-    return templates.TemplateResponse(
-        request, "admin.html", {"site": SITE_NAME, "user": user, "admin": True, "artifacts": apps,
-                                "known": known_people(), "people": people,
-                                "filled": claude_filled(apps), "warned": claude_warned(apps)}
-    )
+    return templates.TemplateResponse(request, "admin_people.html",
+                                      {"site": SITE_NAME, "user": user, "admin": True, "people": people})
 
 
 def _ago(ts: int, now: int) -> str:
