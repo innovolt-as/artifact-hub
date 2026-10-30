@@ -43,10 +43,17 @@ and say in the app's guide (meta/guide) what is shared and what is personal. upd
 switches an existing app; copy_my_data=true also copies the user's current documents into the shared data, where
 everyone with access sees them, so check them for personal content first.
 
-The hub's front page can show one line from each app on its card. An app sets it by writing the document
-hub/summary = {{"text": "<one short line, e.g. 93 hits ▼1>"}} (db.doc("hub/summary").set(...)) whenever the
-numbers it shows change. When you build or change an app, add or keep that line if the app has a natural
-headline number."""
+The hub's front page can show one line from each app on its card. Give the app a card recipe: a
+<script data-hub-card> block with a function hubCard({{ db, today, now, timeZone }}) that returns the line as a
+string (or null for none), e.g.
+<script data-hub-card>async function hubCard({{ db, today }}) {{ const d = await db.doc(`days/${{today}}`).get(); return d.exists ? d.data().kcal + " kcal" : null; }}</script>
+The recipe is read-only (db.doc(path).get(), db.collection(path).get() and .where(...)), has no network and no DOM,
+gets only plain functions, and has 0.25 s. today is the viewer's date as YYYY-MM-DD, now is milliseconds and timeZone
+the viewer's zone. The server runs it every time the front page is shown, so the line is always current, and get_app
+shows what it gives (the card field). Add one when the app has a natural headline number. Only a line that cannot be
+computed from the stored data is written by the app itself as the document hub/summary =
+{{"text": "<one short line, e.g. 93 hits ▼1>"}} (db.doc("hub/summary").set(...)); that is the fallback when there is no
+recipe or it fails."""
 
 
 class Edit(BaseModel):
@@ -121,7 +128,8 @@ def build_mcp() -> MCPServer:
     @mcp.tool(
         name="get_app",
         title="Get app source",
-        description="Return the current HTML source of an app (for a folder app: its index.html), with its title, description, emoji and kind. "
+        description="Return the current HTML source of an app (for a folder app: its index.html), with its title, description, emoji and kind, "
+        "and \"card\": the line its card recipe gives on the front page right now ({\"text\"}, {\"error\"}, or null without a recipe). "
         "Call this before update_app or edit_app "
         "unless the app's current source is already in the conversation. Use list_apps to find the slug.",
         annotations=ToolAnnotations(readOnlyHint=True),
@@ -132,10 +140,15 @@ def build_mcp() -> MCPServer:
             user = _user()
             html = hub.page_source(slug)
             info = next((a for a in hub.list_artifacts(user) if a["slug"] == slug), {})
+            with hub.db() as con:
+                tz = hub.home.get_prefs(con, user)["tz"]
+            result = hub.card_result(user, slug, tz)
         except hub.HubError as e:
             return _error(str(e))
+        card = None if result is None else {"error": result.error} if result.error else {"text": result.text}
         return json.dumps({"slug": slug, "title": info.get("title", ""), "description": info.get("description", ""),
-                           "emoji": info.get("emoji", ""), "kind": info.get("kind", ""), "html": html}, ensure_ascii=False)
+                           "emoji": info.get("emoji", ""), "kind": info.get("kind", ""), "html": html, "card": card},
+                          ensure_ascii=False)
 
     @mcp.tool(
         name="create_app",

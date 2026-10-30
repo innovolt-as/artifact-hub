@@ -1,6 +1,7 @@
 """Front page: per-user visits, pins, view mode, app summaries and the new-dot (app/home.py)."""
 import json
 import re
+import time
 
 import pytest
 
@@ -81,7 +82,7 @@ def test_users_isolated(hub):
     with hub.db() as con:
         hub.home.set_pin(con, "x@t.no", "b", True)
         hub.home.set_view(con, "x@t.no", "cards")
-        assert hub.home.get_prefs(con, "y@t.no") == {"view": "icons", "pins": [], "apps": [], "seen": None}
+        assert hub.home.get_prefs(con, "y@t.no") == {"view": "icons", "pins": [], "apps": [], "seen": None, "tz": None}
     favs, top, _ = _sections(hub, "y@t.no", _apps("a", "b"))
     assert favs == [] and top == []
 
@@ -104,7 +105,7 @@ def test_new_dot(hub):
 
 def test_prefs_defaults_and_validation(hub):
     with hub.db() as con:
-        assert hub.home.get_prefs(con, "x@t.no") == {"view": "icons", "pins": [], "apps": [], "seen": None}
+        assert hub.home.get_prefs(con, "x@t.no") == {"view": "icons", "pins": [], "apps": [], "seen": None, "tz": None}
         with pytest.raises(ValueError):
             hub.home.set_view(con, "x@t.no", "list")
         hub.home.set_view(con, "x@t.no", "cards")
@@ -112,7 +113,7 @@ def test_prefs_defaults_and_validation(hub):
         assert hub.home.set_pin(con, "x@t.no", "a", True) == ["a"]
         assert hub.home.set_pin(con, "x@t.no", "b", True) == ["a", "b"]
         assert hub.home.set_pin(con, "x@t.no", "a", False) == ["b"]
-        assert hub.home.get_prefs(con, "x@t.no") == {"view": "cards", "pins": ["b"], "apps": [], "seen": None}
+        assert hub.home.get_prefs(con, "x@t.no") == {"view": "cards", "pins": ["b"], "apps": [], "seen": None, "tz": None}
 
 
 def _doc_summary(con, slug, owner, data, at):
@@ -136,7 +137,7 @@ def test_summaries_shared_apps_read_the_shared_line(hub):
         _doc_summary(con, "mat", "*", {"text": "ikke en felles app"}, 100)
         _doc_summary(con, "mat", "x@t.no", {"text": "min"}, 100)
         got = hub.home.summaries(con, "x@t.no", ["radar", "mat"], shared={"radar"})
-    assert got == {"radar": "felles", "mat": "min"}
+    assert {k: v.text for k, v in got.items()} == {"radar": "felles", "mat": "min"}
 
 
 def test_index_cards_show_shared_line_to_someone_who_never_opened_the_app(hub, make_page, user_client):
@@ -160,8 +161,8 @@ def test_summaries_both_sources_newest_wins_and_cut(hub):
         _data_summary(con, "e", "x@t.no", {"text": ""}, 100)
         _doc_summary(con, "f", "y@t.no", {"text": "andres"}, 100)
         got = hub.home.summaries(con, "x@t.no", ["a", "b", "c", "d", "e", "f"])
-    assert got["a"] == "B"
-    assert len(got["b"]) == 140
+    assert got["a"] == ("B", 200)
+    assert len(got["b"].text) == 140
     assert set(got) == {"a", "b"}
 
 
@@ -501,3 +502,103 @@ def test_admin_picker_shows_lock(hub, make_page, admin_client):
     make_page("q", "admin", title="Hemmelig")
     p = _picker(admin_client.get("/").text)
     assert "Hemmelig" in p and "🔒" in p
+
+
+# ---------------------------------------------------------------- card recipes
+RECIPE = ("<script data-hub-card>async function hubCard({db, today}) { const d = await db.doc(`days/${today}`).get(); "
+          "return d.exists ? d.data().k + ' kcal' : null; }</script>")
+OSLO = "Europe/Oslo"
+USER = "user@test.no"
+
+
+def _recipe_page(hub, slug, recipe=RECIPE, shared=False):
+    hub.save_page(slug, f"<!doctype html><html><head><title>{slug}</title></head><body>{recipe}</body></html>",
+                  create=True, private=False)
+    if shared:
+        p = hub._meta_path(slug)
+        hub._write_meta(p, {**hub._read_meta(p), "data": "shared"})
+    with hub.db() as con:
+        hub.home.set_view(con, USER, "cards")
+        hub.home.set_added(con, USER, slug, True)
+
+
+def _set_tz(hub, tz=OSLO):
+    with hub.db() as con:
+        hub.home.set_tz(con, USER, tz)
+
+
+def _oslo_today(hub):
+    return hub.cards.today(OSLO, time.time())[0]
+
+
+def _put_doc(hub, slug, owner, collection, doc_id, data, at=100):
+    with hub.db() as con:
+        con.execute("INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)",
+                    (slug, owner, collection, doc_id, json.dumps(data), at))
+
+
+def test_index_shows_recipe_line(hub, user_client):
+    _recipe_page(hub, "mat")
+    _set_tz(hub)
+    _put_doc(hub, "mat", USER, "days", _oslo_today(hub), {"k": 900})
+    assert "900 kcal" in user_client.get("/").text
+
+
+def test_recipe_line_wins_over_stored_summary(hub, user_client):
+    _recipe_page(hub, "mat", "<script data-hub-card>function hubCard() { return 'ny'; }</script>")
+    with hub.db() as con:
+        _doc_summary(con, "mat", USER, {"text": "gammel"}, int(time.time()))
+    html = user_client.get("/").text
+    assert "ny</p>" in html and "gammel" not in html
+
+
+def test_failed_recipe_falls_back_only_to_todays_line(hub, user_client):
+    _recipe_page(hub, "mat", "<script data-hub-card>function hubCard() { throw new Error('au'); }</script>")
+    _set_tz(hub)
+    with hub.db() as con:
+        _doc_summary(con, "mat", USER, {"text": "fra i dag"}, int(time.time()))
+    assert "fra i dag" in user_client.get("/").text
+    with hub.db() as con:
+        con.execute("UPDATE docs SET updated_at=? WHERE slug='mat'", (int(time.time()) - 2 * DAY,))
+    assert "fra i dag" not in user_client.get("/").text
+
+
+def test_recipe_sees_what_the_viewer_sees(hub, user_client):
+    recipe = ("<script data-hub-card>async function hubCard({db}) { const out = []; "
+              "for (const p of ['a/common', 'data/users/user@test.no/mine', 'data/users/andre@test.no/theirs']) "
+              "{ const d = await db.doc(p).get(); out.push(d.exists ? 1 : 0); } return out.join(''); }</script>")
+    _recipe_page(hub, "delt", recipe, shared=True)
+    _put_doc(hub, "delt", "*", "a", "common", {"x": 1})
+    _put_doc(hub, "delt", USER, "data/users/user@test.no", "mine", {"x": 1})
+    _put_doc(hub, "delt", "andre@test.no", "data/users/andre@test.no", "theirs", {"x": 1})
+    _put_doc(hub, "annen", USER, "a", "common", {"x": 1})  # another app, same path
+    assert "110</p>" in user_client.get("/").text
+
+
+def test_icon_view_runs_no_recipes(hub, user_client, monkeypatch):
+    _recipe_page(hub, "mat")
+    with hub.db() as con:
+        hub.home.set_view(con, USER, "icons")
+    monkeypatch.setattr(hub.cards, "run_recipe", lambda *a, **k: pytest.fail("a recipe ran"))
+    assert user_client.get("/").status_code == 200
+
+
+def test_recipe_line_trimmed_and_cut(hub, user_client):
+    _recipe_page(hub, "mat", "<script data-hub-card>function hubCard() { return '  ' + 'x'.repeat(200); }</script>")
+    assert re.search(r"<p class=\"summary\">x{140}</p>", user_client.get("/").text)
+
+
+def test_prefs_tz_api(hub, user_client, client):
+    assert user_client.post("/api/prefs/tz", json={"tz": "Europe/Oslo"}).json() == {"ok": True, "tz": "Europe/Oslo"}
+    with hub.db() as con:
+        assert hub.home.get_prefs(con, USER)["tz"] == "Europe/Oslo"
+    assert client.post("/api/prefs/tz", json={"tz": "Europe/Oslo"}).status_code == 401
+
+
+def test_bad_timezone_is_refused_and_ignored(hub, user_client):
+    for bad in ("Ikke/Sone", "x" * 65, "Europe", "../etc/passwd", 5):
+        assert user_client.post("/api/prefs/tz", json={"tz": bad}).status_code == 400
+    _recipe_page(hub, "mat")
+    with hub.db() as con:
+        hub.home._put(con, USER, "tz", "Ikke/Sone")
+    assert user_client.get("/").status_code == 200

@@ -86,15 +86,43 @@ Use the app's name (its slug) as `<app>`.
 
 ## A line on the front-page card
 
-In the card view, an app can show one line of text under its name, such as a count or today's total. The app
-writes it to the document `hub/summary`:
+In the card view, an app can show one line of text under its name, such as a count or today's total. The best way
+is a card recipe: a `<script data-hub-card>` block in the app's HTML with a function `hubCard` that computes the
+line from the data the app has stored. The hub runs it every time the front page is shown, so the line is always
+current and the app does not have to be opened to update it:
+
+```html
+<script data-hub-card>
+async function hubCard({ db, today }) {
+  const day = await db.doc(`days/${today}`).get();
+  return day.exists ? `${day.data().kcal} kcal today` : null;
+}
+</script>
+```
+
+`hubCard` gets `{ db, today, now, timeZone }` and returns a string, or `null` for no line (it may be `async`).
+
+- `db` is read-only: `db.doc(path).get()`, `db.collection(path).get()` and `.where(field, op, value)` on a
+  collection. It reads what the viewer sees in the app: personal data, or in an app with shared data the shared
+  documents and the viewer's own branch.
+- `today` is the viewer's date as `YYYY-MM-DD`, `now` the time in milliseconds and `timeZone` the viewer's IANA zone
+  (the hub learns it from the browser; until then it is the server's).
+- No DOM and no network, only plain functions. The recipe has 0.25 seconds for everything it does and 32 MB of memory;
+  one that takes longer, or throws, gives no line.
+- The first `<script data-hub-card>` in the page counts. The line is trimmed and cut at 140 characters and shown as
+  plain text. Claude can see what it gives with `get_app` (the `card` field).
+
+What wins: the recipe, when the app has one. If it fails, the card falls back to a `hub/summary` line, but only one
+written today; an older one would be stale, so the card then has no line.
+
+For a line that cannot be computed from stored data, the app writes it to the document `hub/summary` instead:
 
 ```js
 const db = await window.claude.use("db");
 await db.doc("hub/summary").set({ text: "12 open tasks" });
 ```
 
-With the key/value API, write the key `hub/summary` with `{"value": {"text": "..."}}`. The line is per user, cut at
+With the key/value API, write the key `hub/summary` with `{"value": {"text": "..."}}`. This line is per user, cut at
 140 characters and shown as plain text. In an app with shared data it is the shared `hub/summary` document, the
 same for everyone.
 

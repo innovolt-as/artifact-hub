@@ -90,6 +90,18 @@ def test_create_then_list_then_get(mcp, token, hub):
     assert (got["title"], got["emoji"], got["description"]) == ("Hei", "👋", "")
 
 
+def test_get_app_shows_card_line_or_error(mcp, token, hub):
+    page = "<!doctype html><html><head><title>T</title></head><body>{}</body></html>"
+    ok = "<script data-hub-card>function hubCard() { return 'tre'; }</script>"
+    bad = "<script data-hub-card>function hubCard() { throw new Error('au'); }</script>"
+    for slug, body in (("ok", ok), ("bad", bad), ("none", "")):
+        call(mcp, token, "create_app", slug=slug, html=page.format(body), title=slug)
+    card = lambda slug: json.loads(text(call(mcp, token, "get_app", slug=slug)))["card"]  # noqa: E731
+    assert card("ok") == {"text": "tre"}
+    assert card("bad")["error"].startswith("failed")
+    assert card("none") is None
+
+
 def test_create_existing_returns_error_text(mcp, token):
     call(mcp, token, "create_app", slug="hei", html=PAGE, title="Hei")
     res = call(mcp, token, "create_app", slug="hei", html=PAGE, title="Hei")
