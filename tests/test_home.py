@@ -642,3 +642,10 @@ def test_front_page_structure(hub, user_client):
 def test_other_pages_have_no_topbar(admin_client):
     html = admin_client.get("/admin").text
     assert 'class="topbar"' not in html and "data-pull-content" in html
+
+
+def test_home_js_hooks(client):
+    js = client.get("/static/home.js").text
+    for hook in ("hubRefresh", "hub:menu", "hub:idle", "/api/prefs/tz", "pageshow", "DOMParser"):
+        assert hook in js
+    assert "STALE_MS" not in js and "location.reload" not in js
