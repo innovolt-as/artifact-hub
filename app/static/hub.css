@@ -254,6 +254,14 @@ dialog { overscroll-behavior: contain; }
 /* type=text, not password: a password field brings the keychain and the wrong keyboard. So the dots come from here. */
 .code { width: 100%; font: inherit; font-size: 24px; text-align: center; letter-spacing: .4em; -webkit-text-security: disc; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
 .code::placeholder { font-size: 16px; letter-spacing: 0; }  /* the spacing is for the dots; a label would not fit */
+#lockCard h2 { margin: 0 0 4px; font-size: 18px; }
+#lockCard .muted { margin: 0 0 4px; }
+#lockCard form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+#lockCard .code, #lockAsk .code { min-height: 44px; }
+#lockCard button.primary { min-height: 44px; }
+#lockCard summary { display: flex; align-items: center; min-height: 44px; margin-top: 10px; color: var(--accent); cursor: pointer; }
+#lockAsk .code { margin-top: 12px; font-size: 24px; text-align: center; letter-spacing: .4em; }  /* beats .editor input */
+#lockAsk .editor-actions button { min-height: 44px; }
 .lockscreen { text-align: center; }
 .lockscreen h1 { margin: 12px 0 0; overflow-wrap: anywhere; }
 .lockscreen p { margin: 4px 0 0; }

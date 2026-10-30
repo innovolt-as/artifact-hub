@@ -1,4 +1,7 @@
 {% extends "base.html" %}
+{% macro code_field(name, label) -%}
+<input type="text" class="code" name="{{ name }}" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="{{ label }}" aria-label="{{ label }}">
+{%- endmacro %}
 {% block title %}{{ t("settings.title") }} · {{ site }}{% endblock %}
 {% block body %}
 <section class="card settings">
@@ -16,5 +19,46 @@
   <a class="setrow" href="/password">{{ t("nav.change_password") }} <span>›</span></a>
   {% endif %}
 </section>
+<section class="card settings" id="lockCard" data-failed="{{ t('settings.save_failed') }}">
+  <h2>{{ t("lock.heading") }}</h2>
+  <p class="muted small">{{ t("lock.hint") }}</p>
+  {% if has_code %}
+  <div class="as-group">
+    {% for a in lockable %}
+    <label class="set"><span>{{ a.title }}</span><input type="checkbox" role="switch" data-slug="{{ a.slug }}"{% if a.locked %} checked{% endif %}><span class="sw" aria-hidden="true"></span></label>
+    {% endfor %}
+  </div>
+  <details>
+    <summary>{{ t("lock.change") }}</summary>
+    <form id="lockCode">
+      {{ code_field("current", t("lock.current")) }}
+      {{ code_field("code", t("lock.choose")) }}
+      {{ code_field("repeat", t("lock.repeat")) }}
+      <button class="primary">{{ t("admin.save") }}</button>
+    </form>
+  </details>
+  {% else %}
+  <form id="lockCode">
+    {{ code_field("code", t("lock.choose")) }}
+    {{ code_field("repeat", t("lock.repeat")) }}
+    <button class="primary">{{ t("admin.save") }}</button>
+  </form>
+  {% endif %}
+  <p id="lockError" class="err small" role="alert"></p>
+</section>
+{% if has_code %}
+<dialog id="lockAsk" class="editor" aria-labelledby="lockAskTitle">
+  <form id="lockAskForm">
+    <h1 id="lockAskTitle" tabindex="-1">{{ t("lock.off_title") }}</h1>
+    {{ code_field("code", t("lock.code")) }}
+    <p id="lockAskError" class="err small" role="alert"></p>
+    <div class="editor-actions">
+      <button type="button" class="small" id="lockAskCancel">{{ t("admin.cancel") }}</button>
+      <button class="primary">{{ t("admin.ok") }}</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
 <script src="/static/settings.js" defer></script>
+<script src="/static/settings-lock.js" defer></script>
 {% endblock %}

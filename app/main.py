@@ -688,8 +688,13 @@ def password_page(request: Request, next: str = "/"):
 def settings_page(request: Request, user: str = Depends(require_user)):
     with db() as con:
         chosen = home.get_theme(con, user)
+        has_code = applock.get(con, user) is not None
+        locked = applock.locked_slugs(con, user)
+    lockable = [{"slug": a["slug"], "title": a["title"], "locked": a["slug"] in locked}
+                for a in list_artifacts(user) if a["kind"] != "link"]
     return templates.TemplateResponse(request, "settings.html", {
-        "site": SITE_NAME, "user": user, "admin": is_admin(user), "chosen": chosen})
+        "site": SITE_NAME, "user": user, "admin": is_admin(user), "chosen": chosen,
+        "has_code": has_code, "lockable": lockable})
 
 
 @app.post("/password", response_class=HTMLResponse)
@@ -1416,6 +1421,71 @@ def prefs_seen(request: Request, user: str = Depends(api_user)):
     with db() as con:
         home.mark_seen(con, user, [a["slug"] for a in list_artifacts(user)])
     return {"ok": True}
+
+
+def _require_code(user: str, code: object) -> None:
+    """The user's code, or 429 while they are blocked and 403 when it is wrong. Shares the limit with the code screen."""
+    checked = check_code(user, code)
+    if checked.ok:
+        return
+    if checked.wait:
+        raise HTTPException(429, i18n.t("lock.err.blocked", minutes=ceil(checked.wait / 60)))
+    raise HTTPException(403, i18n.t("lock.err.wrong"))
+
+
+async def _lock_body(request: Request) -> dict:
+    _require_json(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Send a JSON object")
+    return body
+
+
+@app.post("/api/lock/code")
+async def lock_code(request: Request, user: str = Depends(api_user)):
+    """Choose the user's code, or change it. A new code locks every app again, on every device."""
+    body = await _lock_body(request)
+    current, code, repeat = body.get("current"), body.get("code"), body.get("repeat")
+    if current is not None and not isinstance(current, str):
+        raise HTTPException(400, 'Send {"current"?: "0000", "code": "0000", "repeat": "0000"}')
+    # form and match first: a typo costs no attempt
+    if not applock.valid_code(code) or not isinstance(repeat, str):
+        raise HTTPException(400, i18n.t("lock.err.format"))
+    if code != repeat:
+        raise HTTPException(400, i18n.t("lock.err.mismatch"))
+    with db() as con:
+        has_code = applock.get(con, user) is not None
+    if has_code:
+        _require_code(user, current)
+        if code == current:
+            raise HTTPException(400, i18n.t("lock.err.same"))
+    with db() as con:
+        applock.set_code(con, user, code, must_change=False)
+    return {"ok": True}
+
+
+@app.post("/api/lock/apps")
+async def lock_apps(request: Request, user: str = Depends(api_user)):
+    """Turn the code on for an app, which needs nothing, or off, which needs the code."""
+    body = await _lock_body(request)
+    slug, on, code = body.get("slug"), body.get("on"), body.get("code")
+    if not isinstance(slug, str) or not isinstance(on, bool) or not (code is None or isinstance(code, str)):
+        raise HTTPException(400, 'Send {"slug": "...", "on": true|false, "code"?: "0000"}')
+    if not any(a["slug"] == slug and a["kind"] != "link" for a in list_artifacts(user)):
+        raise HTTPException(404)
+    if on:
+        with db() as con:
+            if applock.get(con, user) is None:
+                raise HTTPException(400, i18n.t("lock.err.no_code"))
+            applock.set_locked(con, user, slug, True)
+        return {"ok": True, "on": True}
+    _require_code(user, code)
+    with db() as con:
+        applock.set_locked(con, user, slug, False)
+    return {"ok": True, "on": False}
 
 
 @app.get("/api/data/{app_name}")
