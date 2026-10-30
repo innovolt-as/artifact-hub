@@ -1,3 +1,4 @@
+import re
 import sqlite3
 
 import pytest
@@ -75,6 +76,18 @@ def test_css_follows_the_choice(client):
     css = client.get("/static/hub.css").text
     assert ':root[data-theme="dark"]' in css and ':root:not([data-theme="light"])' in css
     assert ':root[data-theme="light"]' in css and "color-scheme: light dark" in css
+
+
+def _tokens(css, selector):
+    block = css[css.index(selector + " {"):]
+    return dict(re.findall(r"(--[\w-]+):\s*([^;]+);", block[:block.index("}")]))
+
+
+def test_the_two_dark_blocks_declare_the_same_tokens(client):
+    css = client.get("/static/hub.css").text
+    device = _tokens(css, ':root:not([data-theme="light"])')
+    chosen = _tokens(css, ':root[data-theme="dark"]')
+    assert device == chosen and "--ok" in device
 
 
 def test_bad_stored_theme_text_is_auto(hub, user_client):
