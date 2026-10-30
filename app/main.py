@@ -348,6 +348,13 @@ def require_unlocked(request: Request, user: str, slug: str) -> None:
         raise _locked_error()
 
 
+def require_unlocked_to_manage(request: Request, user: str, slug: str) -> None:
+    """For the admin actions: a link card is no app, so a lock that outlived the app at its address does not stop them."""
+    path = _meta_path(slug)
+    if not (path and path.name.endswith(".link.json")):
+        require_unlocked(request, user, slug)
+
+
 def check_code(user: str, code: str) -> applock.Check:
     return applock.check(db, user, code)
 
@@ -659,7 +666,7 @@ def logout(request: Request):
     resp = RedirectResponse("/login", status_code=302)
     resp.delete_cookie(COOKIE)
     for name in request.cookies:
-        if name.startswith(UNLOCK_PREFIX):
+        if name.startswith(UNLOCK_PREFIX) and SLUG_RE.match(name[len(UNLOCK_PREFIX):]):  # an illegal name would raise
             resp.delete_cookie(name)
     return resp
 
@@ -980,7 +987,8 @@ def _lock_open(user: str, slug: str, target: str, code_at: int) -> RedirectRespo
 
 @app.get("/lock/{slug}")
 def lock_page(slug: str, user: str = Depends(require_user)):
-    """A reload of a screen that came from the POST below, or the way back after a login."""
+    """What reaches the code screen's address by GET: the address bar, a restored home-screen app, the back button, a
+    login return. (A reload of the wrong-code screen re-sends the POST and never gets here.)"""
     return RedirectResponse(f"/a/{slug}/", status_code=302)
 
 
@@ -1427,11 +1435,11 @@ def prefs_seen(request: Request, user: str = Depends(api_user)):
     return {"ok": True}
 
 
-def _require_code(user: str, code: object) -> None:
+def _require_code(user: str, code: object) -> applock.Check:
     """The user's code, or 429 while they are blocked and 403 when it is wrong. Shares the limit with the code screen."""
     checked = check_code(user, code)
     if checked.ok:
-        return
+        return checked
     if checked.wait:
         raise HTTPException(429, i18n.t("lock.err.blocked", minutes=ceil(checked.wait / 60)))
     raise HTTPException(403, i18n.t("lock.err.wrong"))
@@ -1486,7 +1494,8 @@ async def lock_apps(request: Request, user: str = Depends(api_user)):
                 raise HTTPException(400, i18n.t("lock.err.no_code"))
             applock.set_locked(con, user, slug, True)
         return {"ok": True, "on": True}
-    _require_code(user, code)
+    if _require_code(user, code).must_change:  # a one-time code only chooses a new code
+        raise HTTPException(403, i18n.t("lock.err.pick_new"))
     with db() as con:
         applock.set_locked(con, user, slug, False)
     return {"ok": True, "on": False}
@@ -1857,7 +1866,7 @@ async def api_upload(
     target = _upload_slug(file.filename, slug)
     # only an existing app can be lost; with none at the address nothing is removed, and a surviving lock stays
     if who != "token" and _meta_path(target):
-        require_unlocked(request, who, target)
+        require_unlocked_to_manage(request, who, target)
     saved = _save_upload(file, slug, admin_only, title)
     return JSONResponse({"ok": True, "slug": saved, "url": f"{BASE_URL}/a/{saved}/"})
 
@@ -1868,7 +1877,7 @@ def api_delete(request: Request, slug: str = Form(...)):
     if not SLUG_RE.match(slug):
         raise HTTPException(400)
     if who != "token":
-        require_unlocked(request, who, slug)
+        require_unlocked_to_manage(request, who, slug)
     removed = False
     for p in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json", ARTIFACTS_DIR / f"{slug}.link.json"):
         if p.exists():
@@ -1895,7 +1904,7 @@ async def api_access(request: Request, user: str = Depends(require_admin)):
     meta_path = _meta_path(slug) if isinstance(slug, str) else None
     if not meta_path:
         raise HTTPException(404)
-    require_unlocked(request, user, slug)
+    require_unlocked_to_manage(request, user, slug)
     if level not in access.LEVELS:
         raise HTTPException(400, i18n.t("access.unknown", level=level))
     if not isinstance(people, list) or not all(isinstance(e, str) for e in people):
@@ -2187,7 +2196,7 @@ async def api_edit(
     if new_slug != slug and _meta_path(new_slug):
         raise HTTPException(409, i18n.t("err.address_taken", slug=new_slug))
     if new_slug != slug and who != "token":
-        require_unlocked(request, who, slug)  # before anything is written
+        require_unlocked_to_manage(request, who, slug)  # before anything is written
 
     icon_data, icon_ext = None, ""
     if icon and icon.filename:

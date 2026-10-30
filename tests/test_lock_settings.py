@@ -45,6 +45,12 @@ def test_settings_with_a_code_lists_my_apps(user_client, admin_client, apps):
     assert 'name="current"' in html
 
 
+def test_settings_with_a_code_and_no_apps_has_no_empty_box(user_client):
+    lock(USER, "notat")
+    html = user_client.get("/settings").text
+    assert 'name="current"' in html and "as-group" not in html
+
+
 def test_choose_a_code(user_client):
     r = user_client.post("/api/lock/code", json={"code": "0042", "repeat": "0042"})
     assert r.status_code == 200 and r.json() == {"ok": True}
@@ -183,3 +189,29 @@ def test_the_choice_is_per_user(user_client, admin_client, apps):
     lock(USER, "notat")
     assert user_client.get("/a/notat/").status_code == 423
     assert admin_client.get("/a/notat/").status_code == 200
+
+
+def test_a_one_time_code_cannot_turn_the_lock_off(user_client, apps):
+    lock(USER, "notat")
+    with main.db() as con:
+        one_time = applock.reset(con, USER)
+    r = _put(user_client, "notat", False, code=one_time)
+    assert r.status_code == 403 and i18n.t("lock.err.pick_new") in r.text
+    with main.db() as con:
+        assert applock.is_locked(con, USER, "notat")
+    assert _row(USER)["must_change"] == 1
+
+
+def test_a_normal_code_still_turns_the_lock_off(user_client, apps):
+    lock(USER, "notat")
+    assert _put(user_client, "notat", False, code="1234").status_code == 200
+    with main.db() as con:
+        assert not applock.is_locked(con, USER, "notat")
+
+
+def test_a_one_time_code_still_works_as_the_current_code(user_client, apps):
+    lock(USER, "notat")
+    with main.db() as con:
+        one_time = applock.reset(con, USER)
+    r = user_client.post("/api/lock/code", json={"current": one_time, "code": "9999", "repeat": "9999"})
+    assert r.status_code == 200 and _ok(USER, "9999")

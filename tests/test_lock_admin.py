@@ -226,4 +226,38 @@ def test_the_code_is_never_logged(hub, admin_client, user_client, caplog):
         code = admin_client.post("/api/people/lock-reset", json={"email": USER}).json()["code"]
         unlock(user_client, "notat", code)
         unlock(user_client, "notat", "7351")
-    assert code not in caplog.text and "7351" not in caplog.text
+    lines = [r.getMessage() for r in caplog.records]  # not caplog.text: its line numbers can hold a code
+    assert not any(code in line or "7351" in line for line in lines)
+
+
+def _stuck_link(admin_client):
+    """A link card at the address of a deleted locked app: the lock survives, the card is not an app."""
+    unlock(admin_client, "notat")
+    admin_client.post("/api/delete", data={"slug": "notat"})
+    r = admin_client.post("/api/link", data={"title": "Notat", "url": "https://example.com"})
+    assert r.status_code == 200 and r.json()["slug"] == "notat"
+    with main.db() as con:
+        assert applock.is_locked(con, ADMIN, "notat")
+    return make_client(ADMIN)  # a new device: no unlock cookie
+
+
+def test_a_link_card_at_a_surviving_lock_can_be_managed(locked, admin_client):
+    c = _stuck_link(admin_client)
+    assert c.post("/api/access", json={"slug": "notat", "level": "admin", "people": []}).status_code == 200
+    assert edit(c, new_slug="notat2").status_code == 200
+    assert c.post("/api/delete", data={"slug": "notat2"}).status_code == 200
+
+
+def test_a_link_card_at_a_surviving_lock_can_be_deleted(locked, admin_client):
+    c = _stuck_link(admin_client)
+    assert c.post("/api/delete", data={"slug": "notat"}).status_code == 200
+
+
+def test_upload_over_a_link_card_at_a_surviving_lock(locked, admin_client):
+    c = _stuck_link(admin_client)
+    assert post_upload(c).status_code != 423
+
+
+def test_the_data_of_a_deleted_locked_app_stays_shut_under_a_link_card(locked, admin_client):
+    c = _stuck_link(admin_client)
+    assert c.get("/api/data/notat").status_code == 423

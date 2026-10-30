@@ -237,6 +237,13 @@ def test_logout_clears_the_unlocks(user_client, locked):
     assert len(deleted) == 1 and "Max-Age=0" in deleted[0]
 
 
+def test_logout_survives_a_cookie_name_it_cannot_answer(user_client, locked):
+    unlock(user_client, "notat")
+    r = user_client.post("/logout", headers={"Cookie": "hub_unlock_x y=1; hub_unlock_notat=zz"})
+    assert r.status_code in (302, 303)
+    assert any(c.startswith("hub_unlock_notat=") for c in r.headers.get_list("set-cookie"))
+
+
 # ---------------------------------------------------------------- /lock/{slug}
 @pytest.mark.parametrize("target, location", [
     ("/a/notat/sub/page.html?x=1", "/a/notat/sub/page.html?x=1"),

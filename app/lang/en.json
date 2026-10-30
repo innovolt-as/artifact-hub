@@ -218,6 +218,7 @@
   "lock.err.no_code": "Choose a code first.",
   "lock.err.no_code_for": "That person has no code.",
   "lock.err.not_yourself": "You cannot reset your own code here. Use the tool on the server.",
+  "lock.err.pick_new": "A one-time code can only be used to choose a new code. Open a locked app, or change the code in settings.",
   "lock.err.same": "Choose a different code from the one-time code.",
   "lock.err.wrong": "Wrong code.",
   "lock.heading": "Code lock",

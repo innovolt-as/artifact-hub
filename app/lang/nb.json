@@ -218,6 +218,7 @@
   "lock.err.no_code": "Velg en kode først.",
   "lock.err.no_code_for": "Personen har ingen kode.",
   "lock.err.not_yourself": "Du kan ikke nullstille din egen kode her. Bruk verktøyet på serveren.",
+  "lock.err.pick_new": "Engangskoden kan bare brukes til å velge ny kode. Åpne en låst app, eller bytt kode i innstillingene.",
   "lock.err.same": "Velg en annen kode enn engangskoden.",
   "lock.err.wrong": "Feil kode.",
   "lock.heading": "Kodelås",

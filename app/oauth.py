@@ -267,8 +267,11 @@ def consent_submit(request: Request, req: str = Form(""), decision: str = Form("
         if not client:
             return _page(request, user, 400, error=i18n.t("oauth.expired"))
         c = hub.check_code(user, code)
-        if not c.ok:
-            message = i18n.t("lock.err.blocked", minutes=ceil(c.wait / 60)) if c.wait else i18n.t("lock.err.wrong")
+        if not c.ok or c.must_change:  # a one-time code only chooses a new code
+            if c.ok:
+                message = i18n.t("lock.err.pick_new")
+            else:
+                message = i18n.t("lock.err.blocked", minutes=ceil(c.wait / 60)) if c.wait else i18n.t("lock.err.wrong")
             return _page(request, user, 403, req=req, client_name=client.client_name or client.client_id,
                          needs_code=True, code_error=message)
     taken = _take(req)

@@ -85,3 +85,16 @@ def test_existing_tokens_still_work(issued_token, locked):
                      headers={"Accept": "application/json, text/event-stream",
                               "Authorization": f"Bearer {issued_token}"})
     assert r.status_code == 200
+
+
+def test_a_one_time_code_does_not_give_access_and_the_request_lives(admin_client, pending_req, locked):
+    with main.db() as con:
+        one_time = applock.reset(con, ADMIN)
+    r = _post(admin_client, pending_req, one_time)
+    assert r.status_code == 403 and i18n.t("lock.err.pick_new") in r.text and 'name="code"' in r.text
+    assert _requests() == 1
+    with main.db() as con:
+        assert applock.get(con, ADMIN)["must_change"] == 1
+    admin_client.post("/api/lock/code", json={"current": one_time, "code": "4321", "repeat": "4321"})
+    r = _post(admin_client, pending_req, "4321")
+    assert r.status_code == 303 and "code=" in r.headers["location"]

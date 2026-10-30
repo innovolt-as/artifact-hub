@@ -23,11 +23,13 @@
   <h2>{{ t("lock.heading") }}</h2>
   <p class="muted small">{{ t("lock.hint") }}</p>
   {% if has_code %}
+  {% if lockable %}
   <div class="as-group">
     {% for a in lockable %}
     <label class="set"><span>{{ a.title }}</span><input type="checkbox" role="switch" data-slug="{{ a.slug }}"{% if a.locked %} checked{% endif %}><span class="sw" aria-hidden="true"></span></label>
     {% endfor %}
   </div>
+  {% endif %}
   <details>
     <summary>{{ t("lock.change") }}</summary>
     <form id="lockCode">
