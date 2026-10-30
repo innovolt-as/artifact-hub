@@ -757,6 +757,9 @@ def index(request: Request, user: str = Depends(require_user)):
         prefs = home.get_prefs(con, user)
         mine = [a for a in apps if a["slug"] in prefs["apps"]]  # only the apps this user has chosen
         stats = home.visit_stats(con, user)
+        locked = applock.locked_slugs(con, user)
+    for a in apps:
+        a["code_locked"] = a["slug"] in locked
     summaries: dict[str, str] = {}
     if prefs["view"] == "cards":
         with db() as con:  # a new connection: the recipes read through doc_get/doc_list, which open their own
@@ -817,7 +820,8 @@ def card_lines(con: sqlite3.Connection, user: str, apps: list[dict], tz: str | N
     """The line for each app's card: its recipe's, else the stored hub/summary. A recipe that fails falls back to
     the stored line only if that was written today (in the viewer's zone); an older one would be stale."""
     now = time.time() if now is None else now
-    real = [a for a in apps if a["kind"] != "link"]
+    locked = applock.locked_slugs(con, user)  # a locked app's line is never read, run or shown
+    real = [a for a in apps if a["kind"] != "link" and a["slug"] not in locked]
     stored = home.summaries(con, user, [a["slug"] for a in real], {a["slug"] for a in real if a["data"] == "shared"})
     out: dict[str, str] = {}
     for a in real:

@@ -203,6 +203,7 @@
   "js.hub.unknown_op": "Unknown operator: {op}",
   "locale": "en-GB",
   "lock.back": "Back to the front page",
+  "lock.card": "Needs a code",
   "lock.change": "Change code",
   "lock.choose": "Choose code",
   "lock.code": "Code",

@@ -10,7 +10,8 @@
     {{ icon(a) }}
     <span class="txt">
       <h2>{{ a.title }}</h2>
-      {% if view == 'cards' and summary %}<p class="summary">{{ summary }}</p>{% endif %}
+      {% if view == 'cards' and a.code_locked %}<p class="summary locked" title="{{ t('lock.card') }}" aria-label="{{ t('lock.card') }}">🔒</p>
+      {% elif view == 'cards' and summary %}<p class="summary">{{ summary }}</p>{% endif %}
     </span>
   </a>
   {% if view == 'cards' %}

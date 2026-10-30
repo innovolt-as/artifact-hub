@@ -203,6 +203,7 @@
   "js.hub.unknown_op": "Ukjent operator: {op}",
   "locale": "no-NO",
   "lock.back": "Til forsiden",
+  "lock.card": "Krever kode",
   "lock.change": "Bytt kode",
   "lock.choose": "Velg kode",
   "lock.code": "Kode",
