@@ -217,3 +217,8 @@ def test_glow_values_and_stacking():
 def test_app_page_gets_fixed_banner(admin_client, upload):
     upload(admin_client, "a.html", "<html><head><title>A</title></head><body><p>x</p></body></html>")
     assert "data-fixed" in admin_client.get("/a/a/").text
+
+
+def test_anchors_land_under_the_fixed_banner():
+    # zero specificity and not !important, so an app's own scroll-padding-top wins; 0 without the banner
+    assert ":where(html){scroll-padding-top:var(--hub-banner-h,0px)}" in banner.CSS_HOST.replace(" ", "")

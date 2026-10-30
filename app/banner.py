@@ -9,7 +9,8 @@ The server puts it right after <body>. A small script right behind it then moves
 body or body margins cannot move it), makes it position:fixed at the top (data-fixed), and puts an empty
 <hub-banner-space> after it that holds its place in the flow. The space is pulled up over any space above it (e.g.
 :root safe-area padding, which the banner has itself). The banner's height is published as --hub-banner-h on :root,
-so an app's own sticky bar can sit right under it. Without JS it simply stays in the flow where the server put it.
+so an app's own sticky bar can sit right under it, and is the page's scroll-padding-top, so anchors land under it.
+Without JS it simply stays in the flow where the server put it.
 """
 from __future__ import annotations
 
@@ -33,6 +34,8 @@ CSS_HOST = (
     "margin:0 !important}"
     # empty stand-in in the flow, as tall as the fixed banner
     "hub-banner-space{display:block;height:var(--hub-banner-h,0px)}"
+    # anchors and scrollIntoView stop under the fixed banner; zero specificity, so an app's own value wins
+    ":where(html){scroll-padding-top:var(--hub-banner-h,0px)}"
     # The background is !important and cannot be animated, so the glow is an overlay (opacity only, no layout).
     # pull.js sets data-glow="ok"|"fail" for a moment.
     "hub-banner::after{content:'';position:absolute;inset:0;opacity:0;pointer-events:none}"
