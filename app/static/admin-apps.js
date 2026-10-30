@@ -92,9 +92,11 @@
     if (row) open(row.closest('li'));
   });
   $('asClose').onclick = () => sheet.close();
-  sheet.addEventListener('click', e => {  // the backdrop, unless this is the second click of the double click that opened it
-    if (e.target === sheet && performance.now() - openedAt > 350) sheet.close();
-  });
+  // The second click of the double click that opened the sheet lands in it, and must not close it or change a setting
+  sheet.addEventListener('click', e => {
+    if (performance.now() - openedAt < 350) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
+  sheet.addEventListener('click', e => { if (e.target === sheet) sheet.close(); });  // the backdrop
   sheet.addEventListener('close', () => {
     // The tapped row may have been replaced since, so the browser cannot always put the focus back by itself
     const li = rowOf(current);

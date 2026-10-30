@@ -116,3 +116,9 @@ def test_a_redirect_counts_as_logged_out(client, admin_client):
     assert r.status_code == 302 and "/login" in r.headers["location"]
     assert "r.redirected" in client.get("/static/admin-apps.js").text
     assert '"loggedOut": "Ikke innlogget"' in admin_client.get("/admin").text
+
+
+def test_clicks_just_after_open_are_ignored_inside_the_sheet(client):
+    # the second click of a double click on a row lands in the sheet, and on a switch it would change a setting
+    js = client.get("/static/admin-apps.js").text
+    assert "stopPropagation" in js and "e.preventDefault(); e.stopPropagation();" in js
