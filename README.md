@@ -21,6 +21,7 @@ It is one FastAPI process with SQLite and plain files, behind Caddy, meant for o
 - **Versions.** The last 10 versions of every app are kept when it is replaced.
 - **Shared data** for apps whose content is the same for everyone, such as a digest a scheduled Claude agent
   writes every morning. Each user still gets a private corner in it.
+- **A code lock** you can switch on per app, so someone who borrows your logged-in phone cannot open it.
 - **Link cards** for apps that run somewhere else, next to the hosted ones.
 - **English or Norwegian** interface (`HUB_LANG`). Another language is one JSON file.
 
@@ -143,6 +144,34 @@ person using it, plus the [shared data](docs/APPS.md#shared-data) of apps that h
 
 Passwords, login links and connector tokens are stored as hashes. App data is stored as plain text. To report a
 vulnerability, see [SECURITY.md](SECURITY.md).
+
+### Code lock
+
+Logins last 30 days, so whoever holds your logged-in phone is you as far as the hub knows. The code lock puts a code
+in front of the apps you pick. It stops someone who borrows your phone for a few minutes or hours and does not know
+the code, even if they can read your e-mail. It does not stop a hostile app, whoever runs the server, anyone with
+the database, or Claude through the connector, which is on purpose.
+
+The code is four digits, checked on the server and stored as a hash. It is not encryption: app data stays plain text
+on the server. Five wrong tries in a row block that person's code for 15 minutes. An app stays open while it is on
+screen and for 10 minutes after, and each app is unlocked separately on each device. Link cards cannot be locked.
+
+Known limits:
+
+- Whatever an app keeps in `localStorage`, IndexedDB or a service worker cache is outside the lock.
+- Anyone who holds your phone can ask the Claude app on it about your data.
+- The lock is yours alone. Other people with access to a [shared-data](docs/APPS.md#shared-data) app still see it.
+- A borrowed admin phone can invite new people. They see apps marked *Everyone* and their shared data, never your
+  personal data.
+- An app using a different name in the key/value API than its address is not covered, and neither is its data after
+  a rename. See [docs/APPS.md](docs/APPS.md#code-lock).
+- An unlocked app on screen stays open as long as the screen is on.
+- Four digits can be seen over your shoulder, and whoever has the database can crack the hash.
+
+A forgotten code is reset on the server, with `docker compose exec hub python -m app.applock reset <e-mail>`. It
+prints a one-time code that can only be used to choose a new one. For someone else, an admin can press *Reset code*
+on the People tab instead. An admin cannot reset their own code there, so a borrowed admin phone cannot get past the
+lock. There is no way back by e-mail, for the same reason.
 
 ## Development
 

@@ -11,6 +11,11 @@
 - A settings page at `/settings` for everyone who is logged in, reached through the e-mail address in the top bar
   (a small person icon on phones). *Appearance* is *Automatic*, *Light* or *Dark*, and applies to the hub's own pages
   only, not to apps, the banner or the login page.
+- A code lock per app. Choose a four-digit code in the *Code lock* section of the settings page and switch on the apps
+  that should ask for it, so someone who borrows your logged-in phone cannot open them. The connector still reaches
+  locked apps. See "Security model" in the README.
+- `python -m app.applock reset <e-mail>` gives someone who has forgotten their code a one-time code, and
+  `python -m app.applock list` shows who has a code and how many apps they have locked.
 
 ### Changed
 

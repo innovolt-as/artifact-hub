@@ -84,6 +84,19 @@ and calls are ordinary same-origin `fetch` calls, so the login cookie comes alon
 Writes need `Content-Type: application/json`. Limits: 512 KB per value, and 5000 keys and 25 MB per user per app.
 Use the app's name (its slug) as `<app>`.
 
+## Code lock
+
+Everyone can lock apps behind a four-digit code on the settings page. An app has to do nothing for this: the hub
+shows the code screen before the app loads, keeps the app's pages, files and storage APIs shut until the code is
+entered, and reloads the page when the lock closes. Link cards cannot be locked.
+
+- **Keep sensitive data on the server.** The lock covers `window.claude.use("db")` and the key/value API. It does not
+  cover what an app puts in `localStorage`, IndexedDB or a service worker cache.
+- **Use the app's address as its name** in the key/value API (`/api/data/<app>`). The lock goes by that name, so data
+  under another name is not covered. After the app is renamed, its data stays under the old name.
+- **Save text as it is typed.** A locked app opens for 10 minutes after the last time it was on screen, then reloads
+  to the code screen. Anything not saved by then is lost.
+
 ## A line on the front-page card
 
 In the card view, an app can show one line of text under its name, such as a count or today's total. The best way
