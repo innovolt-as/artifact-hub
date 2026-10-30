@@ -3,31 +3,63 @@
 {% block title %}{{ t("nav.admin") }} · {{ site }}{% endblock %}
 {% block body %}
 {% with tab = 'apps' %}{% include "_admin_tabs.html" %}{% endwith %}
-<section class="card">
-  <h1>{{ t('admin.artifacts_heading') }}</h1>
-  <table class="list">
-    <tbody>
-    {% for a in artifacts %}
-    <tr data-slug="{{ a.slug }}">
-      <td class="icon-cell">{{ icon(a, "icon icon-sm") }}</td>
-      <td><a href="{{ a.url }}" {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>{{ a.title }}</a>
-          <span class="muted small">{{ a.slug }} · {{ t('admin.kind_' + a.kind) }}</span>
-          {% if a.slug in warned %}<p class="claude-warn err small">⚠ {{ t('admin.claude_warning') }} {{ t('admin.claude_warning_fix') }}</p>{% endif %}</td>
-      <td class="right">
-        <button class="small edit" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}"
-                data-kind="{{ a.kind }}" data-url="{{ a.url if a.kind == 'link' else '' }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}">{{ t("admin.edit") }}</button>
-        {% if a.kind != 'link' %}<button class="small banner" data-slug="{{ a.slug }}" title="{{ t('admin.banner_title') }}">{{ t('admin.banner_on') if a.banner else t('admin.banner_off') }}</button>
-        <button class="small datamode" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-shared="{{ '1' if a.data == 'shared' else '0' }}" title="{{ t('admin.data_title') }}">{{ t('admin.data_shared') if a.data == 'shared' else t('admin.data_personal') }}</button>{% endif %}
-        <button class="small access" data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-level="{{ a.access }}"
-                data-people='{{ a.people|tojson }}'{% if a.slug in filled %} data-claude="1"{% endif %} title="{{ t('admin.access_title') }}">{{ a.access_label }}</button>
-        <button class="small danger del" data-slug="{{ a.slug }}">{{ t("admin.delete") }}</button>
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  <ul id="log" class="log"></ul>
-</section>
+<h1 class="vh" id="appsHeading" tabindex="-1">{{ t('admin.tab_apps') }}</h1>
+<label class="asearch">
+  <span aria-hidden="true">🔍</span>
+  <input type="search" id="appSearch" placeholder="{{ t('admin.search') }}" aria-label="{{ t('admin.search') }}" autocomplete="off">
+</label>
+<p id="appCount" class="acount small muted" role="status" hidden></p>
+<ul class="alist" id="appList">
+  {% for a in artifacts %}
+  <li data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}" data-kind="{{ a.kind }}"
+      data-kindlabel="{{ t('admin.kind_' + a.kind) }}" data-url="{{ a.url }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}"
+      data-level="{{ a.access }}" data-label="{{ a.access_label }}" data-people='{{ a.people|tojson }}'
+      data-shared="{{ '1' if a.data == 'shared' else '0' }}" data-banner="{{ '1' if a.banner else '0' }}"
+      data-claude="{{ '1' if a.slug in filled else '0' }}" data-warned="{{ '1' if a.slug in warned else '0' }}">
+    <button type="button" class="arow">
+      {{ icon(a, "icon icon-sm") }}
+      <span class="txt"><b>{{ a.title }}</b><small>{{ a.access_label }}
+        {%- if a.data == 'shared' %} · {{ t('admin.meta_shared') }}{% endif %}
+        {%- if not a.banner %} · {{ t('admin.meta_no_banner') }}{% endif %}
+        {%- if a.kind == 'link' %} · {{ t('admin.kind_link') }}{% endif %}</small>
+        {%- if a.slug in warned %}<span class="claude-warn err small">⚠ {{ t('admin.claude_warning') }}</span>{% endif %}</span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>
+  </li>
+  {% else %}
+  <li class="aempty">{{ t('admin.no_apps') }} <a href="/admin/upload">{{ t('admin.upload') }}</a></li>
+  {% endfor %}
+</ul>
+<p id="appNone" class="muted" hidden>{{ t('admin.search_none') }}</p>
+<ul id="log" class="log"></ul>
+
+<dialog id="appSheet" class="sheet" aria-labelledby="asTitle">
+  <div class="view" data-view="main">
+    <div class="as-top">
+      <span id="asIcon"></span>
+      <div class="txt">
+        <h1 id="asTitle" tabindex="-1" autofocus></h1>
+        <p id="asAddress"></p>
+        <a id="asOpen">{{ t('admin.open_app') }}</a>
+      </div>
+      <button type="button" id="asClose" aria-label="{{ t('admin.close') }}">✕</button>
+    </div>
+    <p id="asWarn" class="err small" hidden>⚠ {{ t('admin.claude_warning') }} {{ t('admin.claude_warning_fix') }}</p>
+    <div class="as-group">
+      <button type="button" class="set" id="asEdit"><span>{{ t('admin.name_icon') }}</span><em aria-hidden="true">›</em></button>
+      <button type="button" class="set" id="asAccess"><span>{{ t('admin.access') }}</span><em><span id="asAccessLabel"></span> <span aria-hidden="true">›</span></em></button>
+    </div>
+    <div id="asSwitches">
+      <div class="as-group">
+        <label class="set"><span>{{ t('admin.shared_data') }}</span><input type="checkbox" role="switch" id="asData"><span class="sw" aria-hidden="true"></span></label>
+        <label class="set"><span>{{ t('admin.banner_top') }}</span><input type="checkbox" role="switch" id="asBanner"><span class="sw" aria-hidden="true"></span></label>
+      </div>
+      <p class="as-hint">{{ t('admin.data_hint') }}</p>
+    </div>
+    <p id="asError" class="err small" role="alert"></p>
+    <button type="button" id="asDelete">{{ t('admin.delete_app') }}</button>
+  </div>
+</dialog>
 
 <dialog id="accessDlg" class="editor">
   <form id="accessForm" method="dialog">

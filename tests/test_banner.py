@@ -157,11 +157,15 @@ def test_banner_off_survives_reupload(hub, admin_client, upload):
     assert hub._read_meta(hub._meta_path("a"))["banner"] is False
 
 
-def test_admin_shows_banner_button_not_on_links(admin_client, upload):
+def test_admin_row_carries_the_banner_state(admin_client, upload):
     upload(admin_client, "a.html", "<body>x</body>")
+    upload(admin_client, "b.html", "<body>x</body>")
+    admin_client.post("/api/toggle-banner", data={"slug": "a"})
     admin_client.post("/api/link", data={"title": "L", "url": "https://example.com"})
     page = admin_client.get("/admin").text
-    assert page.count('class="small banner"') == 1
+    assert page.count('id="asBanner"') == 1  # one switch in the sheet; the script hides it for link cards
+    assert page.count('data-banner="0"') == 1 and page.count("uten banner") == 1
+    assert page.count('data-kind="link"') == 1
 
 
 # ---------------------------------------------------------------- final review fixes

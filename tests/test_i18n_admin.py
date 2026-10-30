@@ -50,7 +50,10 @@ def test_admin_pages_en(hub, make_page, admin_client, english, pw_mode):
         assert r.status_code == 200
         assert_no_norwegian(r.text)
     body = admin_client.get("/admin").text
-    assert "Upload" in body and "Delete" in body and "Everyone" in body
+    assert "Upload" in body and "Delete app" in body and "Everyone" in body
+    for text in ("Search apps", "Name and icon", "Access", "Shared data", "Banner at the top", "Open the app ↗"):
+        assert text in body
+    assert 'aria-label="Close"' in body
     assert "password: must be changed" in admin_client.get("/admin/people").text
 
 

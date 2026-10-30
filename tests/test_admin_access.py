@@ -50,13 +50,14 @@ def test_known_people(hub, make_page, admin_client):
     assert hub.known_people() == ["gammel@test.no", "ny@test.no", "user@test.no", "venn@test.no"]
 
 
-def test_admin_page_access_buttons_and_people(hub, make_page, admin_client):
+def test_admin_page_shows_access_and_people(hub, make_page, admin_client):
     make_page("p", "people", ["venn@test.no"])
     make_page("q", "admin")
     make_page("r")
     admin_client.post("/api/people/invite", json={"email": "ny@test.no"})
     html = admin_client.get("/admin").text
     assert "👥 1 person" in html and "🔒 Bare meg" in html and "🌍 Alle" in html
+    assert 'data-level="people"' in html and """data-people='["venn@test.no"]'""" in html
     assert "toggle-private" not in html and "🌐 delt" not in html
     people = admin_client.get("/admin/people").text
     people = people[people.find('id="people"'):]

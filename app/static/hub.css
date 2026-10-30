@@ -6,10 +6,10 @@
   --radius: 12px; --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --bar: #5b86f0; }
+  :root:not([data-theme="light"]) { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --danger: #f0735f; --bar: #5b86f0; }
 }
 :root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"] { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --bar: #5b86f0; color-scheme: dark; }
+:root[data-theme="dark"] { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --danger: #f0735f; --bar: #5b86f0; color-scheme: dark; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--font); }
 a { color: inherit; text-decoration: none; }
@@ -125,7 +125,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .pinmenu button:hover { background: var(--bg); }
 
 /* "Velg apper": the big card on an empty front page, the small button under the apps, and the list.
-   The list is a bottom sheet on phones and a centred dialog on wider screens. */
+   .sheet is a bottom sheet on phones and a centred dialog on wider screens; the admin page's #appSheet uses it too. */
 .addcard { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding: 40px 20px; border: 2px dashed var(--line); border-radius: 18px; background: var(--card); color: var(--fg); font: inherit; text-align: center; cursor: pointer; }
 .addcard:hover { border-color: var(--accent); }
 .addcard .plus { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; background: var(--accent); color: var(--accent-fg); font-size: 38px; line-height: 1; }
@@ -139,26 +139,26 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .sheet[open] { display: flex; flex-direction: column; }
 .sheet::backdrop { background: rgb(0 0 0 / .4); }
 .sheet-in { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.sheet header { padding: 18px 18px 8px; }
-.sheet h1 { font-size: 19px; margin: 0; outline: none; }  /* takes focus when opened, so no tick shows a focus ring */
-.sheet header p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
-.sheet ul { list-style: none; margin: 0; padding: 4px 8px; overflow: auto; min-height: 0; flex: 1; overscroll-behavior: contain; }
-.sheet li label { position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 12px; cursor: pointer; }
-.sheet li label:hover { background: var(--bg); }
-.sheet input[type=checkbox] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
-.sheet .icon { --size: 44px; }
-.sheet .txt { flex: 1; min-width: 0; }
-.sheet .txt b { display: block; font-size: 15.5px; font-weight: 650; overflow-wrap: anywhere; }
-.sheet .txt small { display: block; color: var(--muted); font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; }
-.sheet .new { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); font-size: 11px; font-weight: 700; vertical-align: 2px; }
-.sheet .lockmark { font-size: 12px; }
+#picker header { padding: 18px 18px 8px; }
+#picker h1 { font-size: 19px; margin: 0; outline: none; }  /* takes focus when opened, so no tick shows a focus ring */
+#picker header p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+#picker ul { list-style: none; margin: 0; padding: 4px 8px; overflow: auto; min-height: 0; flex: 1; overscroll-behavior: contain; }
+#picker li label { position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 12px; cursor: pointer; }
+#picker li label:hover { background: var(--bg); }
+#picker input[type=checkbox] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+#picker .icon { --size: 44px; }
+#picker .txt { flex: 1; min-width: 0; }
+#picker .txt b { display: block; font-size: 15.5px; font-weight: 650; overflow-wrap: anywhere; }
+#picker .txt small { display: block; color: var(--muted); font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; }
+#picker .new { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); font-size: 11px; font-weight: 700; vertical-align: 2px; }
+#picker .lockmark { font-size: 12px; }
 .tick { width: 26px; height: 26px; flex: none; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; }
-.sheet input:checked ~ .tick { background: var(--accent); border-color: var(--accent); }
-.sheet input:checked ~ .tick::after { content: "✓"; color: var(--accent-fg); font-size: 15px; font-weight: 700; }
-.sheet input:focus-visible ~ .tick { outline: 2px solid var(--accent); outline-offset: 2px; }
-.sheet .none { margin: 8px 18px 16px; color: var(--muted); }
-.sheet footer { padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
-.sheet footer button { width: 100%; padding: 13px; font-size: 16px; }
+#picker input:checked ~ .tick { background: var(--accent); border-color: var(--accent); }
+#picker input:checked ~ .tick::after { content: "✓"; color: var(--accent-fg); font-size: 15px; font-weight: 700; }
+#picker input:focus-visible ~ .tick { outline: 2px solid var(--accent); outline-offset: 2px; }
+#picker .none { margin: 8px 18px 16px; color: var(--muted); }
+#picker footer { padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+#picker footer button { width: 100%; padding: 13px; font-size: 16px; }
 @media (max-width: 640px) {
   .sheet { width: 100%; max-width: 100%; max-height: 86vh; margin: auto 0 0; border-radius: 18px 18px 0 0; }
 }
@@ -178,23 +178,9 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .log { list-style: none; padding: 0; margin: 12px 0 0; font-size: 14px; }
 .log .ok { color: var(--ok); } .log .err { color: var(--danger); }
 
-table.list { width: 100%; border-collapse: collapse; }
-table.list td { padding: 10px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
-table.list td a { font-weight: 600; }
-table.list td span.small { display: block; }
-td.right { text-align: right; white-space: nowrap; }
 button.small { font: inherit; font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); cursor: pointer; margin-left: 6px; }
 button.danger { color: var(--danger); }
 code { font-size: 13px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
-td.icon-cell { width: 48px; }
-table.list td a { overflow-wrap: anywhere; }
-/* Phones: the action buttons go on their own line under the name, so rows never get wider than the screen */
-@media (max-width: 560px) {
-  table.list tr { display: grid; grid-template-columns: 48px minmax(0, 1fr); border-top: 1px solid var(--line); padding: 4px 0; }
-  table.list td { border-top: 0; }
-  table.list td.right { grid-column: 1 / -1; text-align: left; white-space: normal; padding-top: 0; }
-  table.list td.right button.small { margin: 4px 6px 0 0; }
-}
 
 .editor { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); padding: 24px; width: min(440px, calc(100vw - 32px)); }
 /* Text fields are 16px: iOS zooms in on smaller ones when they get focus, and stays zoomed after.
@@ -229,6 +215,7 @@ dialog { overscroll-behavior: contain; }
 .tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
 .tabs a { padding: 8px 14px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 600; font-size: 15px; }
 .tabs a[aria-current="page"] { color: var(--fg); border-bottom-color: var(--accent); }
+@media (max-width: 480px) { .tabs { gap: 2px; } .tabs a { padding: 8px 11px; font-size: 14px; } }  /* all four on one line */
 .kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0 24px; }
 .kpi { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
 .kpi span { display: block; font-size: 13px; color: var(--muted); }
@@ -261,3 +248,54 @@ dialog { overscroll-behavior: contain; }
 .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -4px; }
 .setrow { display: flex; justify-content: space-between; align-items: center; min-height: 44px; margin-top: 16px; padding: 0 4px; border-top: 1px solid var(--line); color: var(--fg); }
 .setrow span { color: var(--muted); }
+
+/* ---------------------------------------------------------------- admin: the app list */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.asearch { display: flex; align-items: center; gap: 8px; min-height: 44px; margin-bottom: 10px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.asearch:focus-within { border-color: var(--accent); }
+.asearch input { flex: 1; min-width: 0; min-height: 42px; padding: 0; border: 0; outline: none; appearance: none; background: none; color: var(--fg); font: inherit; font-size: 16px; }  /* 16px: see .editor */
+.asearch input::placeholder { color: var(--muted); opacity: 1; }
+.acount { margin: 0 2px 8px; }
+.alist { list-style: none; margin: 0; padding: 0; overflow: hidden; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+.alist li { margin-top: -1px; border-top: 1px solid var(--line); }  /* the line above the top row stays clipped, whichever row the search leaves on top */
+.aempty { padding: 16px 12px; color: var(--muted); }
+.aempty a { color: var(--accent); }
+.arow { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 10px 12px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.arow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (hover: hover) { .arow:hover { background: var(--bg); } }
+.arow .txt { flex: 1; min-width: 0; }
+.arow b { display: block; font-size: 15px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.arow small { display: block; color: var(--muted); font-size: 12.5px; line-height: 1.35; overflow-wrap: anywhere; }
+.arow .claude-warn { display: block; margin: 2px 0 0; min-height: 0; line-height: 1.35; }
+.chev { flex: none; color: var(--muted); font-size: 20px; line-height: 1; }
+
+/* ---------------------------------------------------------------- admin: the settings sheet for one app */
+#appSheet [hidden] { display: none; }
+.view { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+.as-top { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 6px; }
+#asIcon { display: flex; flex: none; }
+#asIcon .icon { --size: 52px; }
+.as-top .txt { flex: 1; min-width: 0; }
+.as-top h1 { margin: 0; font-size: 18px; font-weight: 650; line-height: 1.25; outline: none; overflow-wrap: anywhere; }  /* takes focus when opened: no focus ring on the first row */
+.as-top p { margin: 1px 0 0; color: var(--muted); font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
+#asOpen { display: inline-flex; align-items: center; min-height: 44px; margin: -6px 0 -10px; color: var(--accent); font-size: 14px; }
+#asClose { flex: none; width: 44px; height: 44px; margin: -10px -10px 0 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 18px; cursor: pointer; }
+.as-group { margin-top: 10px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); }
+.set { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 48px; padding: 8px 12px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--fg); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.set:first-child { border-top: 0; }
+.set:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.set em { min-width: 0; color: var(--muted); font-size: 14px; font-style: normal; text-align: right; }
+.set input { position: absolute; right: 12px; width: 46px; height: 28px; margin: 0; opacity: 0; cursor: pointer; }
+.sw { position: relative; flex: none; width: 46px; height: 28px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 45%, var(--card)); transition: background .15s; }
+.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px rgb(0 0 0 / .25); transition: transform .15s; }
+.set input:checked + .sw { background: var(--accent); }
+.set input:checked + .sw::after { transform: translateX(18px); background: var(--accent-fg); }
+.set input:focus-visible + .sw { outline: 2px solid var(--accent); outline-offset: 2px; }
+.as-hint { margin: 6px 2px 0; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+#asError { margin: 0; min-height: 0; }
+#asError:not(:empty) { margin-top: 10px; }
+#asDelete { display: block; width: 100%; min-height: 48px; margin-top: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: none; color: var(--danger); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+@media (max-width: 640px) and (prefers-reduced-motion: no-preference) {
+  #appSheet[open] { animation: sheet-up .24s cubic-bezier(.2, .8, .2, 1); }
+}
+@keyframes sheet-up { from { transform: translateY(100%); } }

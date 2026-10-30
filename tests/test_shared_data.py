@@ -147,10 +147,10 @@ def test_data_mode_only_for_admins_and_apps(hub, make_page, admin_client, user_c
     assert admin_client.get("/api/data-mode", params={"slug": "nope"}).status_code == 404
 
 
-def test_admin_page_has_the_data_button(hub, make_page, admin_client):
+def test_admin_page_has_the_data_switch(hub, make_page, admin_client):
     make_page("radar")
     html = admin_client.get("/admin").text
-    assert 'class="small datamode"' in html and 'data-slug="radar"' in html
+    assert 'id="asData"' in html and 'data-slug="radar"' in html and 'data-shared="0"' in html
 
 
 def test_warning_rule(hub, make_page):
@@ -177,7 +177,7 @@ def test_admin_page_shows_the_warning(hub, make_page, admin_client):
         shared.record_write(con, "finn", "admin@test.no")
         shared.record_write(con, "mine", "admin@test.no")
     html = admin_client.get("/admin").text
-    assert html.count('<p class="claude-warn') == 1
+    assert html.count('class="claude-warn') == 1
     assert "Claude fyller denne appen med dine personlige data." in html
     assert html.count('data-claude="1"') == 2  # the access dialog warns before "mine" is shared
 

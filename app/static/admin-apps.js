@@ -1,40 +1,138 @@
-// The Apps tab: the list's buttons and the edit, access and shared-data dialogs.
+// The Apps tab: the list, the search, the settings sheet per app, and the edit, access and shared-data dialogs.
 (() => {
   const { T, $, fmt, postJson, failText } = window.Admin;
-  const log = $('log');
+  const sheet = $('appSheet');
+  let current = null;  // the slug of the app in the sheet
 
-  function note(msg, ok = true) {
+  const rows = () => [...$('appList').querySelectorAll('li[data-slug]')];
+  const rowOf = slug => rows().find(li => li.dataset.slug === slug);
+
+  // An error shows in the sheet while it is open, otherwise under the list
+  function fail(msg) {
+    if (sheet.open) { $('asError').textContent = msg; return; }
     const li = document.createElement('li');
-    li.textContent = msg; li.className = ok ? 'ok' : 'err';
-    log.prepend(li);
+    li.textContent = `✗ ${msg}`; li.className = 'err';
+    $('log').prepend(li);
+  }
+  // A network failure reads like a failed response, so each caller has one error path
+  const reach = p => p.catch(() => ({ ok: false, status: 0, json: async () => ({ detail: T.netError }) }));
+  const why = r => r.status === 404 ? T.appGone : failText(r);
+  function postSlug(url, slug) {
+    const fd = new FormData(); fd.append('slug', slug);
+    return reach(fetch(url, { method: 'POST', body: fd }));
   }
 
-  async function post(url, slug) {
-    const fd = new FormData(); fd.append('slug', slug);
-    const r = await fetch(url, { method: 'POST', body: fd });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); note(`✗ ${j.detail || r.status}`, false); return false; }
+  // --- search
+  function search() {
+    const q = $('appSearch').value.trim().toLowerCase();
+    const all = rows();
+    for (const li of all) li.hidden = !(li.dataset.title + ' ' + li.dataset.slug).toLowerCase().includes(q);
+    const shown = all.filter(li => !li.hidden).length;
+    $('appCount').hidden = !q;
+    $('appCount').textContent = fmt(T.searchCount, { shown, total: all.length });
+    $('appList').hidden = all.length > 0 && !shown;
+    $('appNone').hidden = !$('appList').hidden;
+  }
+  $('appSearch').addEventListener('input', search);
+  search();  // the browser may have kept the text from before a reload
+
+  // --- the list follows the hub without a page load
+  let refreshes = 0;
+  async function refresh() {
+    const mine = ++refreshes;
+    let doc = null;
+    try {
+      const r = await fetch('/admin', { cache: 'no-store' });
+      if (r.ok) doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+    } catch { return false; }
+    const fresh = doc && doc.getElementById('appList');
+    if (!fresh) return false;  // an error, or logged out: /admin then ends on the login page
+    if (mine !== refreshes) return true;  // a newer refresh is on its way, and an older answer must not win
+    known = JSON.parse(doc.getElementById('known').textContent);  // a person just added to one app, for the next
+    $('appList').replaceChildren(...fresh.childNodes);
+    search();
+    if (sheet.open) {
+      const li = rowOf(current);
+      if (li) render(li); else sheet.close();
+    }
     return true;
   }
-  document.querySelectorAll('.del').forEach(b => b.onclick = async () => {
-    if (!confirm(fmt(T.confirmDelete, { slug: b.dataset.slug }))) return;
-    if (await post('/api/delete', b.dataset.slug)) b.closest('tr').remove();
+  const saved = async () => { if (!await refresh()) fail(T.refreshFailed); };
+
+  // --- the sheet
+  function render(li) {
+    const d = li.dataset, link = d.kind === 'link';
+    $('asIcon').replaceChildren(li.querySelector('.icon').cloneNode(true));
+    $('asTitle').textContent = d.title;
+    $('asAddress').textContent = `${d.url} · ${d.kindlabel}`;
+    $('asOpen').href = d.url;
+    $('asOpen').target = link ? '_blank' : '';
+    $('asOpen').rel = link ? 'noopener' : '';
+    $('asWarn').hidden = d.warned !== '1';
+    $('asAccessLabel').textContent = d.label;
+    $('asSwitches').hidden = link;
+    $('asData').checked = d.shared === '1';
+    $('asBanner').checked = d.banner === '1';
+  }
+  function open(li) {
+    current = li.dataset.slug;
+    $('asError').textContent = '';
+    render(li);
+    sheet.showModal();
+  }
+  $('appList').addEventListener('click', e => {
+    const row = e.target.closest('.arow');
+    if (row) open(row.closest('li'));
   });
-  document.querySelectorAll('.banner').forEach(b => b.onclick = async () => {
-    if (await post('/api/toggle-banner', b.dataset.slug)) location.reload();
+  $('asClose').onclick = () => sheet.close();
+  sheet.addEventListener('click', e => { if (e.target === sheet) sheet.close(); });  // the backdrop
+  sheet.addEventListener('close', () => {
+    // The tapped row may have been replaced since, so the browser cannot always put the focus back by itself
+    const li = rowOf(current);
+    current = null;
+    if (li && !li.hidden) li.querySelector('.arow').focus();
+    else $('appsHeading').focus({ preventScroll: true });  // the row is gone: the list stays where it is
   });
+
+  // One save at a time: a tap on a switch while one runs does nothing
+  let busy = false;
+  for (const box of [$('asData'), $('asBanner')]) box.addEventListener('click', e => { if (busy) e.preventDefault(); });
+  // work() saves and returns the response, or null when a dialog takes over from here
+  async function flip(box, work) {
+    busy = true;
+    $('asError').textContent = '';
+    const r = await work();
+    if (r && r.ok) await saved();
+    else if (r) { box.checked = !box.checked; fail(await why(r)); }
+    busy = false;
+  }
+  $('asBanner').addEventListener('change', e => flip(e.target, () => postSlug('/api/toggle-banner', current)));
+
+  $('asDelete').onclick = async () => {
+    const slug = current, btn = $('asDelete');
+    if (!confirm(fmt(T.confirmDelete, { slug }))) return;
+    $('asError').textContent = '';
+    btn.disabled = true;
+    const r = await postSlug('/api/delete', slug);
+    btn.disabled = false;
+    if (!r.ok) return fail(await why(r));
+    rowOf(slug)?.remove();
+    sheet.close();
+    await saved();
+  };
 
   // --- edit dialog: name, address, emoji, image
   const ed = $('editor');
   const f = $('editForm');
-  let current = null, objectUrl = null;
+  let editing = null, objectUrl = null;
 
   function preview() {
     const pv = $('pvIcon');
-    pv.style.setProperty('--hue', current.hue);
+    pv.style.setProperty('--hue', editing.hue);
     pv.replaceChildren();
     const file = $('edIcon').files[0];
     if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
-    const src = file ? (objectUrl = URL.createObjectURL(file)) : ($('edRemove').checked ? '' : current.icon);
+    const src = file ? (objectUrl = URL.createObjectURL(file)) : ($('edRemove').checked ? '' : editing.icon);
     const el = document.createElement(src ? 'img' : 'span');
     if (src) { el.src = src; el.alt = ''; }
     else if ($('edEmoji').value.trim()) { el.className = 'emoji'; el.textContent = $('edEmoji').value.trim(); }
@@ -42,38 +140,39 @@
     pv.append(el);
   }
 
-  document.querySelectorAll('.edit').forEach(b => b.onclick = () => {
-    current = b.dataset;
+  $('asEdit').onclick = () => {
+    editing = rowOf(current).dataset;
+    const link = editing.kind === 'link';
     f.reset();
-    $('edTitle').value = current.title;
-    $('edSlug').value = current.slug;
-    $('edEmoji').value = current.emoji;
-    $('edSlugRow').hidden = current.kind === 'link';   // link cards have an external URL instead
-    $('edUrlRow').hidden = current.kind !== 'link';
-    $('edUrl').value = current.url;
-    $('edRemoveRow').hidden = !current.icon;
+    $('edTitle').value = editing.title;
+    $('edSlug').value = editing.slug;
+    $('edEmoji').value = editing.emoji;
+    $('edSlugRow').hidden = link;   // link cards have an external URL instead
+    $('edUrlRow').hidden = !link;
+    $('edUrl').value = link ? editing.url : '';
+    $('edRemoveRow').hidden = !editing.icon;
     $('edError').textContent = '';
     preview();
     ed.showModal();
-  });
+  };
   ['edTitle', 'edEmoji', 'edIcon', 'edRemove'].forEach(id => $(id).addEventListener('input', preview));
   $('edCancel').onclick = () => ed.close();
 
   f.addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(f);
-    fd.append('slug', current.slug);
+    fd.append('slug', current);
     if (!$('edIcon').files.length) fd.delete('icon');
-    const r = await fetch('/api/edit', { method: 'POST', body: fd });
-    if (r.ok) return location.reload();
-    const j = await r.json().catch(() => ({}));
-    $('edError').textContent = j.detail || fmt(T.errorStatus, { status: r.status });
+    const r = await reach(fetch('/api/edit', { method: 'POST', body: fd }));
+    if (!r.ok) { $('edError').textContent = await why(r); return; }
+    current = (await r.json()).slug;  // the address may be new
+    ed.close();
+    await saved();
   });
 
   // --- access dialog: everyone, the checked people, or only me (the list is kept whatever is chosen)
   const acDlg = $('accessDlg'), acForm = $('accessForm');
-  const known = JSON.parse($('known').textContent);
-  let acSlug = null, acClaude = false;
+  let known = JSON.parse($('known').textContent), acClaude = false;
 
   function personRow(email, checked) {
     const li = document.createElement('li');
@@ -94,18 +193,18 @@
   const showPeople = () => { $('acPeople').hidden = acForm.level.value !== 'people'; showWarn(); };
   $('acList').addEventListener('change', showWarn);
 
-  document.querySelectorAll('.access').forEach(b => b.onclick = () => {
-    acSlug = b.dataset.slug;
-    acClaude = b.dataset.claude === '1';
-    const mine = JSON.parse(b.dataset.people);
-    $('acTitle').textContent = b.dataset.title;
-    acForm.level.value = b.dataset.level;
+  $('asAccess').onclick = () => {
+    const d = rowOf(current).dataset;
+    acClaude = d.claude === '1';
+    const mine = JSON.parse(d.people);
+    $('acTitle').textContent = d.title;
+    acForm.level.value = d.level;
     $('acList').replaceChildren(...[...new Set([...mine, ...known])].sort().map(e => personRow(e, mine.includes(e))));
     $('acNew').value = '';
     $('acError').textContent = '';
     showPeople();
     acDlg.showModal();
-  });
+  };
   acForm.querySelectorAll('input[name=level]').forEach(r => r.onchange = showPeople);
 
   function addPerson() {
@@ -128,28 +227,19 @@
     e.preventDefault();
     if (!addPerson()) return;  // an address typed but not added yet still counts
     const people = [...$('acList').querySelectorAll('input:checked')].map(cb => cb.value);
-    const r = await postJson('/api/access', { slug: acSlug, level: acForm.level.value, people });
-    if (r.ok) return location.reload();
-    $('acError').textContent = await failText(r);
+    const r = await reach(postJson('/api/access', { slug: current, level: acForm.level.value, people }));
+    if (!r.ok) { $('acError').textContent = await why(r); return; }
+    acDlg.close();
+    await saved();
   });
 
   // --- shared data: everyone who can see the app reads it, only admins change it (app/shared.py)
   const shDlg = $('shareDlg');
-  let shSlug = null;
-  async function setData(slug, shared, copy) {
-    const r = await postJson('/api/data-mode', { slug, shared, copy });
-    if (r.ok) return location.reload();
-    shDlg.close();
-    note(`✗ ${await failText(r)}`, false);
-  }
-  document.querySelectorAll('.datamode').forEach(b => b.onclick = async () => {
-    if (b.dataset.shared === '1') return setData(b.dataset.slug, false, false);
-    const r = await fetch('/api/data-mode?slug=' + encodeURIComponent(b.dataset.slug));
-    if (!r.ok) return note(`✗ ${await failText(r)}`, false);
-    const p = await r.json();
+  const setData = (shared, copy) => reach(postJson('/api/data-mode', { slug: current, shared, copy }));
+
+  function showShare(p) {
     const canCopy = p.docs > 0 && !p.shared_exists;
-    shSlug = b.dataset.slug;
-    $('shTitle').textContent = b.dataset.title;
+    $('shTitle').textContent = rowOf(current).dataset.title;
     $('shMine').textContent = fmt(T.shareMine, { collections: Object.entries(p.collections).map(([c, n]) => `${c} (${n})`).join(', ') });
     $('shMine').hidden = !canCopy;
     $('shOthers').textContent = fmt(T.shareOthers, { n: p.others });
@@ -158,8 +248,25 @@
     $('shCopy').hidden = !canCopy;
     $('shEmpty').textContent = canCopy ? T.shareEmpty : T.shareOn;
     shDlg.showModal();
-  });
+  }
+  $('asData').addEventListener('change', e => flip(e.target, async () => {
+    if (!e.target.checked) return setData(false, false);
+    const slug = current;
+    const r = await reach(fetch('/api/data-mode?slug=' + encodeURIComponent(slug)));
+    if (!r.ok) return r;
+    const p = await r.json();
+    if (current === slug) showShare(p);  // unless the sheet was closed while this was on its way
+    return null;
+  }));
+  async function share(copy) {
+    const r = await setData(true, copy);
+    if (r.ok) await saved();
+    shDlg.close();
+    if (!r.ok) fail(await why(r));
+  }
+  $('shCopy').onclick = () => share(true);
+  $('shEmpty').onclick = () => share(false);
   $('shCancel').onclick = () => shDlg.close();
-  $('shCopy').onclick = () => setData(shSlug, true, true);
-  $('shEmpty').onclick = () => setData(shSlug, true, false);
+  // However the dialog closes (Cancel, Esc, a save), the switch says what the app has now
+  shDlg.addEventListener('close', () => { $('asData').checked = rowOf(current)?.dataset.shared === '1'; });
 })();

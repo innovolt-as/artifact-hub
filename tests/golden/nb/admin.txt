@@ -9,40 +9,35 @@ Apper
 Last opp
 Personer
 Statistikk
-Artifacts
+Apper
+🔍
+@placeholder: Søk i apper
+@aria-label: Søk i apper
 B
 Bare admin
-admin-app · side
-Rediger
-@title: Hub-stripa øverst i appen
-▭ banner
-@title: Hvem appens data tilhører: hver bruker (personlige) eller alle som ser appen (felles)
-data: personlige
-@title: Hvem som har tilgang
 🔒 Bare meg
-Slett
+›
 F
 For alle
-alle · side
-Rediger
-@title: Hub-stripa øverst i appen
-▭ banner
-@title: Hvem appens data tilhører: hver bruker (personlige) eller alle som ser appen (felles)
-data: personlige
-@title: Hvem som har tilgang
 🌍 Alle
-Slett
+›
 F
 For noen
-folk · side
-Rediger
-@title: Hub-stripa øverst i appen
-▭ banner
-@title: Hvem appens data tilhører: hver bruker (personlige) eller alle som ser appen (felles)
-data: personlige
-@title: Hvem som har tilgang
 👥 1 person
-Slett
+›
+Ingen apper passer
+Åpne appen ↗
+@aria-label: Lukk
+✕
+⚠ Claude fyller denne appen med dine personlige data. De andre som har tilgang, ser ikke dette innholdet. Skru på felles data hvis innholdet er likt for alle, eller sett appen til bare meg.
+Navn og ikon
+›
+Tilgang
+›
+Felles data
+Banner øverst
+Felles data: alle med tilgang ser det samme. Du får se hva som kopieres før det skjer.
+Slett app
 Tilgang:
 Alle som kan logge inn
 Bestemte personer
