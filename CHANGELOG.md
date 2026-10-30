@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.3.0 (unreleased)
+
+### New
+
+- Card recipes: an app can put a `<script data-hub-card>` in its page that turns its data into the line on its
+  front-page card. The hub runs it on the server in a separate, killable process with a short deadline. See
+  "A line on the front-page card" in `docs/APPS.md`.
+- The front page refreshes in place when you come back to it, and blinks the cards whose line changed.
+- Pull to refresh moves the content with your finger, keeps the header still and glows green when it is done.
+- A sticky top row on the front page.
+- Hold and drag a favourite to change the order. The order is saved.
+
+### Changed
+
+- The star, the view switch and "Choose apps" no longer reload the page.
+- The front page no longer reloads by itself after 5 minutes.
+- The banner in apps now always stays fixed at the top. An app with its own sticky top bar should place it with
+  `top: var(--hub-banner-h, 0px)`; see `docs/APPS.md`.
+- Card recipes run in V8 through `mini-racer` 0.14.1, so the image gets bigger (about 22 MB compressed).
+
 ## v1.2.0 (2026-10-27)
 
 ### New
