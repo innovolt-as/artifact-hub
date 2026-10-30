@@ -148,6 +148,16 @@ def set_pin(con: sqlite3.Connection, email: str, slug: str, pinned: bool) -> lis
     return pins
 
 
+def set_pin_order(con: sqlite3.Connection, email: str, order: list[str]) -> list[str]:
+    """Reorder the pins: pinned slugs in `order` first (no duplicates, unknown ones ignored), then the
+    pinned slugs `order` left out, in their old order."""
+    old = get_prefs(con, email)["pins"]
+    pins = [s for s in dict.fromkeys(order) if s in old]
+    pins += [s for s in old if s not in pins]
+    _put(con, email, "pins", pins)
+    return pins
+
+
 # ---------------------------------------------------------------- the apps each user has chosen
 def start(con: sqlite3.Connection, email: str, visible: list[str], *, admin: bool) -> None:
     """The first time: an admin gets every app they can see (their front page looks as before); anyone

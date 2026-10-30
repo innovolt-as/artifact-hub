@@ -610,3 +610,23 @@ def test_recipe_in_personal_app_does_not_see_other_users(hub, user_client):
     _recipe_page(hub, "privat", recipe)
     _put_doc(hub, "privat", "andre@test.no", "a", "x", {"x": 1})
     assert "ikke sett</p>" in user_client.get("/").text
+
+
+def test_pin_order_keeps_unknown_out_and_missing_last(hub):
+    with hub.db() as con:
+        for s in ("a", "b", "c"):
+            hub.home.set_pin(con, "x@t.no", s, True)
+        assert hub.home.set_pin_order(con, "x@t.no", ["c", "zz", "a", "c"]) == ["c", "a", "b"]
+        assert hub.home.get_prefs(con, "x@t.no")["pins"] == ["c", "a", "b"]
+
+
+def test_prefs_pins_api(hub, user_client, client):
+    hub.save_page("a", PAGE, create=True, private=False)
+    hub.save_page("b", PAGE, create=True, private=False)
+    for s in ("a", "b"):
+        user_client.post("/api/prefs/pin", json={"slug": s, "pinned": True})
+    r = user_client.post("/api/prefs/pins", json={"order": ["b", "a"]})
+    assert r.status_code == 200 and r.json() == {"ok": True, "pins": ["b", "a"]}
+    assert user_client.post("/api/prefs/pins", json={"order": "a"}).status_code == 400
+    assert user_client.post("/api/prefs/pins", json={"order": [1]}).status_code == 400
+    assert client.post("/api/prefs/pins", json={"order": ["a"]}).status_code == 401

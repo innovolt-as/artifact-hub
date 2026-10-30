@@ -1187,6 +1187,19 @@ async def prefs_pin(request: Request, user: str = Depends(api_user)):
     return {"ok": True, "pins": pins}
 
 
+@app.post("/api/prefs/pins")
+async def prefs_pins(request: Request, user: str = Depends(api_user)):
+    """Save the order of the user's favourites."""
+    _require_json(request)
+    body = await request.json()
+    order = body.get("order") if isinstance(body, dict) else None
+    if not isinstance(order, list) or not all(isinstance(s, str) for s in order):
+        raise HTTPException(400, 'Send {"order": ["slug", ...]}')
+    with db() as con:
+        pins = home.set_pin_order(con, user, order)
+    return {"ok": True, "pins": pins}
+
+
 @app.post("/api/prefs/apps")
 async def prefs_apps(request: Request, user: str = Depends(api_user)):
     """Add an app to, or take it off, the user's front page."""
