@@ -649,3 +649,9 @@ def test_home_js_hooks(client):
     for hook in ("hubRefresh", "hub:menu", "hub:idle", "/api/prefs/tz", "pageshow", "DOMParser"):
         assert hook in js
     assert "STALE_MS" not in js and "location.reload" not in js
+
+
+def test_drag_js_hooks(client):
+    js = client.get("/static/drag.js").text
+    for hook in ("#fav", "/api/prefs/pins", "hub:menu", "hub:idle", "hubDrag", "pointerdown", "passive: false"):
+        assert hook in js

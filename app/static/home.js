@@ -6,7 +6,7 @@
 //   window.hubRefresh() -> Promise<boolean>  true when the page was updated, false when fetching it failed
 //   "hub:menu" on document, detail {li, x, y} opens the pin/unpin menu (drag.js: long press on a favourite)
 //   "hub:idle" on document                    a drag or the menu is done, so a waiting refresh may run
-//   <html data-hub-drag>                      set by drag.js while a favourite is being dragged
+//   <html data-hub-drag="1">                  set by drag.js while a favourite is being dragged
 (function () {
   const root = document.documentElement;
   const picker = document.getElementById("picker");
@@ -110,7 +110,8 @@
     });
 
   async function run(quiet) {
-    await idle();
+    // Busy again by the time this resumes, e.g. drag.js opens the menu as it lets go: wait on
+    do { await idle(); } while (busy());
     fetching = true;
     let doc;
     try {
@@ -121,7 +122,7 @@
       return false;
     }
     if (!doc.getElementById("home")) return false; // e.g. the login page after the session ran out
-    await idle(); // don't move cards under a finger: something may have started while fetching
+    do { await idle(); } while (busy()); // don't move cards under a finger: something may have started while fetching
     try {
       apply(doc, quiet);
     } catch (e) {

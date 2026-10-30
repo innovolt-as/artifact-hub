@@ -76,7 +76,8 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .app.blink a { animation: blink 700ms ease-in-out; }
 @keyframes blink { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 40% { box-shadow: 0 0 0 4px var(--accent); border-color: var(--accent); } }
 .app.lifted { z-index: 5; transition: none; }
-.app.lifted a { transform: scale(1.04); box-shadow: 0 12px 30px -8px rgb(0 0 0 / .35); }
+.app.lifted a, .grid .app.lifted a:hover { transform: scale(1.04); box-shadow: 0 12px 30px -8px rgb(0 0 0 / .35); }
+#fav .app a, #fav .app img { -webkit-user-drag: none; } /* drag.js moves favourites, not the system's link drag */
 .app.sliding { transition: transform .2s; }
 .dot { position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--card); }
 .lock, .ext { position: absolute; top: 8px; font-size: 12px; color: var(--muted); }
