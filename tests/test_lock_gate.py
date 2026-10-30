@@ -5,6 +5,7 @@ import time
 import zipfile
 
 import pytest
+from fastapi.routing import APIRoute
 
 from app import applock, home, i18n
 from tests.conftest import lock, make_client, unlock
@@ -340,3 +341,92 @@ def test_new_code_opens_the_app(hub, user_client, page):
     other_device = make_client(USER)
     assert unlock(other_device, "notat", code).status_code == 423
     assert unlock(other_device, "notat", new).status_code == 303
+
+
+# ---------------------------------------------------------------- the data routes
+GATED = {
+    ("GET", "/api/store/{slug}"),
+    ("GET", "/api/store/{slug}/c"), ("GET", "/api/store/{slug}/d"),
+    ("PUT", "/api/store/{slug}/d"), ("DELETE", "/api/store/{slug}/d"),
+    ("GET", "/api/data/{app_name}"), ("POST", "/api/data/{app_name}/_batch"),
+    ("GET", "/api/data/{app_name}/{key:path}"), ("PUT", "/api/data/{app_name}/{key:path}"),
+    ("DELETE", "/api/data/{app_name}/{key:path}"),
+    ("GET", "/a/{slug}/{path:path}"),
+}
+EXEMPT = {("GET", "/a/{slug}")}  # the bare redirect
+SECRET = {"note": "Secret"}
+
+
+def _fill(method, template):
+    """(method, url, kwargs) for a route, with example values for notat."""
+    url = (template.replace("{slug}", "notat").replace("{app_name}", "notat")
+           .replace("{key:path}", "k").replace("{path:path}", "index.html"))
+    if url.endswith("/c"):
+        url += "?path=a"
+    elif url.endswith("/d"):
+        url += "?path=a/b"
+    kwargs = {"headers": {"content-type": "application/json"}}
+    if method == "PUT":
+        kwargs["content"] = '{"value": "x"}' if "/api/data/" in url else '{"note": "new"}'
+    elif method == "POST":
+        kwargs["content"] = '{"set": {"k2": "x"}}'
+    return method, url, kwargs
+
+
+def _rows(hub):
+    with hub.db() as con:
+        return ([tuple(r) for r in con.execute("SELECT * FROM docs ORDER BY 1,2,3,4")],
+                [tuple(r) for r in con.execute("SELECT * FROM app_data ORDER BY 1,2,3")])
+
+
+@pytest.fixture
+def stored(hub, locked):
+    """Locked notat with a document and a key/value row that both say Secret."""
+    hub.doc_set("notat", USER, "a/b", SECRET)
+    with hub.db() as con:
+        con.execute("INSERT INTO app_data(email, app, key, value, updated) VALUES(?,?,?,?,?)",
+                    (USER, "notat", "k", '"Secret"', 1))
+
+
+def test_every_route_is_in_the_table(hub):
+    seen = {(m, r.path) for r in hub.app.routes if isinstance(r, APIRoute)
+            and r.path.startswith(("/a/", "/api/store/", "/api/data/")) for m in r.methods - {"HEAD"}}
+    assert seen == GATED | EXEMPT
+
+
+@pytest.mark.parametrize("method, template", sorted(GATED))
+def test_every_gated_route_refuses(hub, user_client, stored, method, template):
+    before = _rows(hub)
+    method, url, kwargs = _fill(method, template)
+    r = user_client.request(method, url, **kwargs)
+    assert r.status_code == 423 and r.headers["cache-control"] == "no-store"
+    assert "Secret" not in r.text
+    assert _rows(hub) == before
+
+
+@pytest.mark.parametrize("method, template", sorted(GATED))
+def test_every_gated_route_opens_after_unlock(user_client, stored, method, template):
+    unlock(user_client, "notat")
+    method, url, kwargs = _fill(method, template)
+    assert user_client.request(method, url, **kwargs).status_code != 423
+
+
+def test_other_users_data_routes_notice_nothing(hub, admin_client, page):
+    page("notat")
+    lock(USER, "notat")
+    hub.doc_set("notat", ADMIN, "a/b", SECRET)
+    assert admin_client.get("/api/store/notat/d?path=a/b").json() == {"data": SECRET}
+    assert admin_client.put("/api/data/notat/k", json={"value": 1}).status_code == 200
+    assert admin_client.get("/api/data/notat/k").json()["value"] == 1
+
+
+def test_a_write_behind_the_lock_is_not_saved(hub, user_client, locked):
+    r = user_client.put("/api/store/notat/d?path=a/b", json=SECRET)
+    assert r.status_code == 423
+    assert hub.doc_get("notat", USER, "a/b") is None
+
+
+def test_polling_does_not_renew_the_lock(user_client, locked):
+    unlock(user_client, "notat")
+    r = user_client.get("/api/store/notat/c?path=a")
+    assert r.status_code == 200 and "set-cookie" not in r.headers

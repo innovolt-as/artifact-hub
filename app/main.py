@@ -1039,8 +1039,14 @@ def _deep_merge(base: dict, patch: dict) -> dict:
     return out
 
 
+def store_user(slug: str, request: Request, user: str = Depends(require_user)) -> str:
+    """require_user, and 423 while the app is locked for this user and not opened on this device."""
+    require_unlocked(request, user, slug)
+    return user
+
+
 @app.get("/api/store/{slug}/c")
-def store_list(slug: str, path: str, user: str = Depends(require_user)):
+def store_list(slug: str, path: str, user: str = Depends(store_user)):
     collection, _ = _split_path(path, want_doc=False)
     owner, collection = _store_scope(slug, user, collection)
     if owner is None:
@@ -1054,7 +1060,7 @@ def store_list(slug: str, path: str, user: str = Depends(require_user)):
 
 
 @app.get("/api/store/{slug}/d")
-def store_get(slug: str, path: str, user: str = Depends(require_user)):
+def store_get(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
     owner, collection = _store_scope(slug, user, collection)
     if owner is None:
@@ -1068,7 +1074,7 @@ def store_get(slug: str, path: str, user: str = Depends(require_user)):
 
 
 @app.put("/api/store/{slug}/d")
-async def store_set(slug: str, path: str, request: Request, merge: bool = False, user: str = Depends(require_user)):
+async def store_set(slug: str, path: str, request: Request, merge: bool = False, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
     owner, collection = _store_scope(slug, user, collection, write=True)
     body = await request.body()
@@ -1098,7 +1104,7 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
 
 
 @app.delete("/api/store/{slug}/d")
-def store_delete(slug: str, path: str, user: str = Depends(require_user)):
+def store_delete(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
     owner, collection = _store_scope(slug, user, collection, write=True)
     with db() as con:
@@ -1109,7 +1115,7 @@ def store_delete(slug: str, path: str, user: str = Depends(require_user)):
 
 
 @app.get("/api/store/{slug}")
-def store_dump(slug: str, user: str = Depends(require_user)):
+def store_dump(slug: str, user: str = Depends(store_user)):
     """Everything you can read in one artifact, as {collection: {doc_id: data}} — a backup."""
     try:
         with db() as con:
@@ -1265,6 +1271,12 @@ def api_user(request: Request) -> str:
     return user
 
 
+def data_user(app_name: str, request: Request, user: str = Depends(api_user)) -> str:
+    """api_user, and 423 while the app is locked for this user and not opened on this device."""
+    require_unlocked(request, user, app_name)
+    return user
+
+
 def _check_app_key(app_name: str, key: str | None = None) -> None:
     if not SLUG_RE.match(app_name):
         raise HTTPException(400, i18n.t("store.bad_app"))
@@ -1394,7 +1406,7 @@ def prefs_seen(request: Request, user: str = Depends(api_user)):
 
 
 @app.get("/api/data/{app_name}")
-def data_list(app_name: str, prefix: str = "", user: str = Depends(api_user)):
+def data_list(app_name: str, prefix: str = "", user: str = Depends(data_user)):
     _check_app_key(app_name)
     like = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
     with db() as con:
@@ -1406,7 +1418,7 @@ def data_list(app_name: str, prefix: str = "", user: str = Depends(api_user)):
 
 
 @app.post("/api/data/{app_name}/_batch")
-async def data_batch(app_name: str, request: Request, user: str = Depends(api_user)):
+async def data_batch(app_name: str, request: Request, user: str = Depends(data_user)):
     _check_app_key(app_name)
     _require_json(request)
     body = await request.json()
@@ -1430,7 +1442,7 @@ async def data_batch(app_name: str, request: Request, user: str = Depends(api_us
 
 
 @app.get("/api/data/{app_name}/{key:path}")
-def data_get(app_name: str, key: str, user: str = Depends(api_user)):
+def data_get(app_name: str, key: str, user: str = Depends(data_user)):
     _check_app_key(app_name, key)
     with db() as con:
         r = con.execute("SELECT value, updated FROM app_data WHERE email=? AND app=? AND key=?", (user, app_name, key)).fetchone()
@@ -1440,7 +1452,7 @@ def data_get(app_name: str, key: str, user: str = Depends(api_user)):
 
 
 @app.put("/api/data/{app_name}/{key:path}")
-async def data_put(app_name: str, key: str, request: Request, user: str = Depends(api_user)):
+async def data_put(app_name: str, key: str, request: Request, user: str = Depends(data_user)):
     _check_app_key(app_name, key)
     _require_json(request)
     body = await request.json()
@@ -1459,7 +1471,7 @@ async def data_put(app_name: str, key: str, request: Request, user: str = Depend
 
 
 @app.delete("/api/data/{app_name}/{key:path}")
-def data_delete(app_name: str, key: str, request: Request, user: str = Depends(api_user)):
+def data_delete(app_name: str, key: str, request: Request, user: str = Depends(data_user)):
     _check_app_key(app_name, key)
     with db() as con:
         con.execute("DELETE FROM app_data WHERE email=? AND app=? AND key=?", (user, app_name, key))
