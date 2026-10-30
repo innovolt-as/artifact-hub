@@ -209,12 +209,20 @@ def picker(apps: list[dict], chosen: list[str], seen: list[str] | None) -> list[
 
 
 # ---------------------------------------------------------------- summaries
+def card_line(text: object) -> str | None:
+    """The line a card shows for `text` (a recipe's result or a stored summary): trimmed and cut at SUMMARY_MAX
+    characters; None when that leaves nothing or it is not a string."""
+    if not isinstance(text, str):
+        return None
+    return text.strip()[:SUMMARY_MAX] or None
+
+
 def _text(raw: str) -> str | None:
     try:
         text = json.loads(raw).get("text")
     except (ValueError, AttributeError):
         return None
-    return text.strip()[:SUMMARY_MAX] if isinstance(text, str) and text.strip() else None
+    return card_line(text)
 
 
 class Summary(NamedTuple):

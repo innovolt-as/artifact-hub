@@ -112,6 +112,47 @@ def test_failed_message_is_one_short_line():
     assert _run("function hubCard(){ throw new Error('x'.repeat(500)) }").error == "failed: Error: " + "x" * 193
 
 
+class _Lines:
+    """The worker's stdout, recording the longest line the server read from it."""
+
+    def __init__(self, f):
+        self.f, self.longest = f, 0
+
+    def fileno(self):
+        return self.f.fileno()
+
+    def readline(self, *a):
+        line = self.f.readline(*a)
+        self.longest = max(self.longest, len(line))
+        return line
+
+    def close(self):
+        self.f.close()
+
+
+def test_huge_answer_is_cut_in_the_worker():  # the server never reads a line of megabytes
+    _run("function hubCard(){ return 'up' }")
+    pid = cards._worker.proc.pid
+    lines = cards._worker.proc.stdout = _Lines(cards._worker.proc.stdout)
+    r = _run("function hubCard(){ return 'x'.repeat(3e7) }")
+    assert r.error is None and r.text == "x" * 1000
+    assert _run("function hubCard(){ throw new Error('x'.repeat(1e7)) }").error == "failed: Error: " + "x" * 193
+    assert lines.longest < 2000 and cards._worker.proc.pid == pid
+
+
+def test_worker_with_a_huge_line_is_killed(monkeypatch, tmp_path):  # whatever the worker sends, the server reads little
+    big = tmp_path / "big.py"
+    big.write_text("import sys\nprint('{\"ready\": true}', flush=True)\n"
+                   "for _ in sys.stdin:\n    print('{\"text\": \"' + 'x' * 5_000_000 + '\"}', flush=True)\n")
+    cards._worker.stop()
+    monkeypatch.setattr(cards, "WORKER", big)
+    try:
+        assert _run("function hubCard(){ return 'x' }") == cards.CardResult(None, "failed: worker")
+        assert cards._worker.proc is None
+    finally:
+        cards._worker.stop()  # never leave this worker to the next test
+
+
 def test_lone_surrogate_becomes_question_mark():  # it could not be sent as UTF-8 on the front page
     assert _run("function hubCard(){ return 'a\\ud800b' }").text == "a?b"
 

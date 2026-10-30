@@ -745,7 +745,7 @@ def card_lines(con: sqlite3.Connection, user: str, apps: list[dict], tz: str | N
             if s and cards.day_of(s.at, tz) != cards.today(tz, now)[0]:
                 s = None
         else:
-            text = (r.text or "").strip()[:home.SUMMARY_MAX]
+            text = home.card_line(r.text)
             s = home.Summary(text, int(now)) if text else None
         if s:
             out[slug] = s.text

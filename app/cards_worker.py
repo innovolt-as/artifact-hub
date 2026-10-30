@@ -5,7 +5,8 @@ One JSON line in and one out per job, over stdin/stdout:
   out: {"text": str|null} | {"need": [["doc"|"col", path], ...]} | {"error": code, "message"?: str}
 Every job gets a fresh V8 context, so nothing carries over from one recipe run to the next. The process writes
 {"ready": true} once V8 is loaded, before the first job. A recipe stuck after an `await` cannot be stopped from
-here (the promise wait never times out), so the parent kills the process when a job overruns.
+here (the promise wait never times out), so the parent kills the process when a job overruns. "text" and "message"
+are cut to CUT characters here, so a recipe that returns or throws megabytes never makes the parent read them.
 
 Standalone on purpose: it imports nothing from the app and is started with `python -I`.
 """
@@ -19,6 +20,7 @@ from py_mini_racer import JSEvalException, JSOOMException, JSPromise, JSPromiseE
 
 SHIM = Path(__file__).with_name("cards_shim.js").read_text(encoding="utf-8")
 INPUT = ("docs", "cols", "today", "now", "tz")
+CUT = 1000  # characters of a line or an error message passed on; a card shows 140
 
 
 def _first_line(e: Exception) -> str:
@@ -26,6 +28,16 @@ def _first_line(e: Exception) -> str:
 
 
 def run(job: dict) -> dict:
+    """The answer to one job, with "text" and "message" cut to CUT characters."""
+    answer = _run(job)
+    if isinstance(answer, dict):
+        for key in ("text", "message"):
+            if isinstance(answer.get(key), str):
+                answer[key] = answer[key][:CUT]
+    return answer
+
+
+def _run(job: dict) -> dict:
     end = time.monotonic() + job["time_limit"]
 
     def left() -> float:

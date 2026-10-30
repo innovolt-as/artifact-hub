@@ -145,7 +145,9 @@ def build_mcp() -> MCPServer:
             result = hub.card_result(user, slug, tz)
         except hub.HubError as e:
             return _error(str(e))
-        card = None if result is None else {"error": result.error} if result.error else {"text": result.text}
+        # the line exactly as the front page shows it (blank is null), or the recipe's error
+        card = (None if result is None else {"error": result.error} if result.error
+                else {"text": hub.home.card_line(result.text)})
         return json.dumps({"slug": slug, "title": info.get("title", ""), "description": info.get("description", ""),
                            "emoji": info.get("emoji", ""), "kind": info.get("kind", ""), "html": html, "card": card},
                           ensure_ascii=False)

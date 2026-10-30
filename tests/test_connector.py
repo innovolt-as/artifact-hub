@@ -102,6 +102,18 @@ def test_get_app_shows_card_line_or_error(mcp, token, hub):
     assert card("none") is None
 
 
+def test_get_app_card_is_the_line_the_card_shows(mcp, token):  # trimmed, cut at 140, blank is no line
+    page = "<!doctype html><html><head><title>T</title></head><body>{}</body></html>"
+    recipes = {"blank": "'   '", "long": "'  ' + 'y'.repeat(200)", "padded": "'  tre \\n'"}
+    for slug, value in recipes.items():
+        call(mcp, token, "create_app", slug=slug, title=slug,
+             html=page.format(f"<script data-hub-card>function hubCard() {{ return {value}; }}</script>"))
+    card = lambda slug: json.loads(text(call(mcp, token, "get_app", slug=slug)))["card"]  # noqa: E731
+    assert card("blank") == {"text": None}
+    assert card("long") == {"text": "y" * 140}
+    assert card("padded") == {"text": "tre"}
+
+
 def test_create_existing_returns_error_text(mcp, token):
     call(mcp, token, "create_app", slug="hei", html=PAGE, title="Hei")
     res = call(mcp, token, "create_app", slug="hei", html=PAGE, title="Hei")

@@ -25,6 +25,7 @@ MEMORY_LIMIT = 32 * 1024 * 1024
 MAX_ROUNDS = 5
 MAX_READS = 50  # paths one round may ask for
 START_LIMIT = 10.0  # seconds a new worker may take to load V8; not counted in any recipe's time
+LINE_MAX = 1 << 20  # characters read of one answer line; the worker cuts its strings far below this
 WORKER = Path(__file__).with_name("cards_worker.py")
 CODES = ("timeout", "memory", "no_function", "not_text")  # the worker's error codes besides "failed"
 BROKEN = {"error": "failed", "message": "worker"}  # the worker died or did not answer with a JSON object
@@ -68,9 +69,16 @@ class _Worker:
             self.proc = None
 
     def _answer(self, deadline: float) -> object:
-        """The worker's next line as JSON; None when nothing came by `deadline`. ValueError at EOF or garbage."""
+        """The worker's next line as JSON; None when nothing came by `deadline`. ValueError at EOF, garbage or a line
+        longer than LINE_MAX, whose rest is never read (the worker is then killed)."""
         ready, _, _ = select.select([self.proc.stdout], [], [], max(deadline - time.monotonic(), 0))
-        return json.loads(self.proc.stdout.readline()) if ready else None
+        if not ready:
+            return None
+        line = self.proc.stdout.readline(LINE_MAX + 1)
+        if len(line) > LINE_MAX:
+            raise ValueError("answer line too long")
+        return json.loads(line)
+
 
     def ask(self, job: dict, deadline: float) -> dict:
         """Run one job. A worker that is late, dead or answers garbage is killed."""
