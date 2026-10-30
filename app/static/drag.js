@@ -3,17 +3,19 @@
  *
  * Holding a favourite still for HOLD ms lifts it (.lifted in hub.css: a little larger, with a shadow). It then
  * follows the pointer, and the other favourites slide aside (.sliding) to show where it will land: the slot whose
- * centre is nearest the pointer. Letting go glides it there, moves the node in the DOM and saves the whole order
- * (POST /api/prefs/pins). If saving fails, the favourites glide back and the usual alert shows. Letting go without
+ * centre is nearest the pointer. Letting go saves the whole order at once (POST /api/prefs/pins, with keepalive, so
+ * opening an app right after the drop doesn't lose it), glides the favourite there and moves the node in the DOM.
+ * If saving fails, the favourites glide back once it has landed and the usual alert shows. Letting go without
  * having moved opens the pin/unpin menu in the icon view (hub:menu, handled by home.js) and does nothing in the
  * list view, where the star is. A short tap still opens the app, and moving more than SLOP px before the hold is up
  * is a scroll, not a drag. The right mouse button keeps its own menu (home.js).
  *
  * From the lift until the favourite has landed, <html data-hub-drag="1"> is set: home.js holds back a refresh (it
  * would swap the cards under the finger), pull.js doesn't pull, and a non-passive touchmove listener keeps the
- * page from scrolling. Every lift ends by clearing the flag and sending "hub:idle" (home.js waits for it with no
- * timeout): after a drop, a cancelled drag (pointercancel, lost capture, page hidden) or an exception. The click
- * that follows a lift is swallowed, so letting go never opens the app.
+ * page from scrolling. Every lift ends in end(), exactly once, which clears the flag and sends "hub:idle" (home.js
+ * waits for it with no timeout). A drop leads there, and so does a cancel (pointercancel, lost capture, the page
+ * hidden or left); both still get there if something in them throws. The click that follows a lift is swallowed,
+ * so letting go never opens the app.
  *
  * The slots are measured once, at the lift. Moving only writes transforms.
  */
@@ -109,7 +111,9 @@
     const d = drag;
     d.x = x;
     d.y = y;
-    const px = x + d.sx, py = y + d.sy; // page coordinates, so a mouse wheel scroll is no move
+    // Page coordinates: when the page scrolls under a still pointer (a mouse wheel, say), the card stays under the
+    // pointer and so moves on the page, which counts as moving it
+    const px = x + d.sx, py = y + d.sy;
     if (!d.moved && Math.hypot(px - d.x0, py - d.y0) > SLOP) d.moved = true;
     d.li.style.transform = translate(px - d.x0, py - d.y0);
     let to = d.to, best = Infinity;
@@ -126,14 +130,17 @@
   // ------------------------------------------------------------------ land
   // Always the last step of a lift: drag styles off at once, flag cleared, waiting refreshes told
   function end(d) {
-    for (const n of d.items) {
-      n.classList.remove("lifted", "sliding");
-      n.style.transform = "";
+    try {
+      for (const n of d.items) {
+        n.classList.remove("lifted", "sliding");
+        n.style.transform = "";
+      }
+      d.touched.removeEventListener("touchmove", still);
+    } finally {
+      if (drag === d) drag = null;
+      delete root.dataset.hubDrag;
+      document.dispatchEvent(new Event("hub:idle"));
     }
-    d.touched.removeEventListener("touchmove", still);
-    if (drag === d) drag = null;
-    delete root.dataset.hubDrag;
-    document.dispatchEvent(new Event("hub:idle"));
   }
   // Let the glide that was just started play, then run `then` and end the lift whatever happens
   function settle(d, then) {
@@ -149,9 +156,9 @@
 
   function drop(d) {
     swallow = performance.now() + 1000;
+    d.done = true; // no second drop or cancel for this lift; end() follows exactly once, below or after the glide
     if (!d.moved) {
       // A long press. The menu opens before the flag is cleared, so a refresh waiting for hub:idle sees it open.
-      d.done = true;
       try {
         if (d.ul.classList.contains("grid")) {
           document.dispatchEvent(new CustomEvent("hub:menu", { detail: { li: d.li, x: d.x, y: d.y } }));
@@ -161,41 +168,56 @@
       }
       return;
     }
-    const o = order(d);
-    d.li.classList.add("sliding");
-    d.li.style.transform = offset(d, d.li, places(d, o).get(d.li));
-    settle(d, () => {
-      if (d.to === d.from) return;
+    try {
+      const o = order(d);
       const before = d.items.map((n) => n.dataset.slug);
-      for (const n of o) d.ul.append(n); // end() then takes the transforms off in the same frame: nothing jumps
-      save(o.map((n) => n.dataset.slug), before);
-    });
+      const n = d.to === d.from ? 0 : ++saves;
+      const sent = n ? save(o.map((x) => x.dataset.slug)) : null; // now, not after the glide
+      d.li.classList.add("sliding");
+      d.li.style.transform = offset(d, d.li, places(d, o).get(d.li));
+      settle(d, () => {
+        if (!sent) return;
+        for (const x of o) d.ul.append(x); // end() then takes the transforms off in the same frame: nothing jumps
+        sent.then((ok) => { if (!ok) unsaved(n, before); }); // runs after end(), once this lift is over
+      });
+    } catch (e) {
+      end(d); // the glide was never set up, so nothing else will land it
+      throw e;
+    }
   }
 
   function cancel(d) {
     swallow = performance.now() + 1000;
-    for (const n of d.items) {
-      n.classList.add("sliding");
-      n.style.transform = "";
+    d.done = true;
+    try {
+      for (const n of d.items) {
+        n.classList.add("sliding");
+        n.style.transform = "";
+      }
+    } finally {
+      settle(d, () => {}); // glide back, then end()
     }
-    settle(d, () => {});
   }
 
   // ------------------------------------------------------------------ save
-  function save(slugs, before) {
-    const n = ++saves;
-    fetch("/api/prefs/pins", {
+  // The whole order; resolves to whether the hub kept it. keepalive: the request still goes out when an app is
+  // opened right after the drop.
+  function save(slugs) {
+    return fetch("/api/prefs/pins", {
       method: "POST",
       credentials: "same-origin",
+      keepalive: true,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ order: slugs }),
-    }).then((r) => {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-    }).catch(() => {
-      // A later save sends the whole order again, and a favourite held right now must not move under the finger
-      if (n === saves && !drag) restore(before);
-      setTimeout(() => alert(JSON.parse(document.getElementById("__hub_strings").textContent).save_failed), SETTLE);
-    });
+    }).then((r) => r.ok, () => false);
+  }
+
+  // Save number n failed, and its favourite has landed
+  function unsaved(n, before) {
+    // A later save sends the whole order again, and a favourite held right now, or pressed and about to lift, must
+    // not move under the finger
+    if (n === saves && !drag && !press) restore(before);
+    setTimeout(() => alert(JSON.parse(document.getElementById("__hub_strings").textContent).save_failed), SETTLE);
   }
 
   // Back to the order before the drop, gliding. Found by slug: a refresh may have swapped the cards meanwhile.

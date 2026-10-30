@@ -198,6 +198,11 @@
     menu.style.left = Math.max(8, Math.min(innerWidth - w - 8, x - w / 2)) + "px";
     menu.style.top = Math.max(8, Math.min(innerHeight - hgt - 8, y + 8)) + "px";
   }
+  // A finger or a button going down anywhere else closes the menu (not only a click), so an open menu never holds
+  // back the refresh of a pull that starts outside it
+  const outside = (e) => { if (menu && !menu.contains(e.target)) closeMenu(); };
+  document.addEventListener("pointerdown", outside, true);
+  document.addEventListener("touchstart", outside, { capture: true, passive: true });
   // drag.js owns the long press on favourites and asks for the menu when one was let go without moving
   document.addEventListener("hub:menu", (e) => {
     const d = e.detail || {};

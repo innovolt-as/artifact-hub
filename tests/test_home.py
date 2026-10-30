@@ -675,5 +675,5 @@ def test_home_js_hooks(client):
 
 def test_drag_js_hooks(client):
     js = client.get("/static/drag.js").text
-    for hook in ("#fav", "/api/prefs/pins", "hub:menu", "hub:idle", "hubDrag", "pointerdown", "passive: false"):
+    for hook in ("#fav", "/api/prefs/pins", "hub:menu", "hub:idle", "hubDrag", "pointerdown", "passive: false", "keepalive"):
         assert hook in js
