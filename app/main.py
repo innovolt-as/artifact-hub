@@ -38,7 +38,7 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from jinja2 import pass_context
 
-from app import access, banner, cards, home, i18n, loginmail, mail, passwd, shared, versions
+from app import access, applock, banner, cards, home, i18n, loginmail, mail, passwd, shared, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -221,6 +221,8 @@ with db() as con:
     shared.create_tables(con)
     # Password hashes for LOGIN_MODE=password (app/passwd.py)
     passwd.ensure_table(con)
+    # App code lock: codes, locked apps and the attempt limit (app/applock.py)
+    applock.create_tables(con)
     if password_mode() and not any(passwd.get(con, e) for e in ADMIN_EMAILS):
         log.warning("LOGIN_MODE=password but no admin has a password yet — run: "
                     "docker compose exec hub python -m app.passwd set <admin e-mail>")

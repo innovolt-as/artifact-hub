@@ -90,6 +90,8 @@
   "auth.invalid": "The link is invalid or has expired. Ask for a new one.",
   "banner.back": "Back to {site}",
   "cli.is_set": "set",
+  "cli.lock_no_code": "{email} has no code",
+  "cli.lock_reset": "One-time code for {email}: {code}. It is not shown again.",
   "cli.mismatch": "Passwords do not match",
   "cli.must_change": "must be changed",
   "cli.not_allowed": "Note: {email} is not allowed to log in (ADMIN_EMAILS/ALLOWED_*/invited)",

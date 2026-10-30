@@ -90,6 +90,8 @@
   "auth.invalid": "Lenken er ugyldig eller utløpt. Be om en ny.",
   "banner.back": "Tilbake til {site}",
   "cli.is_set": "satt",
+  "cli.lock_no_code": "{email} har ingen kode",
+  "cli.lock_reset": "Engangskode for {email}: {code}. Den vises ikke igjen.",
   "cli.mismatch": "Passordene er ulike",
   "cli.must_change": "må byttes",
   "cli.not_allowed": "Merk: {email} er ikke tillatt å logge inn (ADMIN_EMAILS/ALLOWED_*/invitert)",

@@ -43,7 +43,7 @@ def _clean():
     with main.db() as con:
         for table in ("magic_tokens", "logins", "docs", "app_data",
                       "oauth_clients", "oauth_requests", "oauth_codes", "oauth_tokens", "visits", "prefs", "invites", "passwords",
-                      "claude_writes"):
+                      "claude_writes", "app_codes", "app_locks"):
             con.execute(f"DELETE FROM {table}")
     main._ip_sends.clear()
     yield
