@@ -1,6 +1,7 @@
 Koble til Claude · Artifact Hub
 Artifact Hub
 user@test.no
+@aria-label: Innstillinger
 Logg ut
 Kan ikke koble til
 Bare administratorer kan koble Claude til denne huben.

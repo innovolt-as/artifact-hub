@@ -2,6 +2,7 @@ Statistikk · Artifact Hub
 Artifact Hub
 Admin
 admin@test.no
+@aria-label: Innstillinger
 Logg ut
 @aria-label: Admin
 Apper

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ t("settings.title") }} · {{ site }}{% endblock %}
+{% block body %}
+<section class="card settings">
+  <h1>{{ t("settings.title") }}</h1>
+  <fieldset class="seg" data-failed="{{ t('settings.save_failed') }}">
+    <legend>{{ t("settings.theme") }}</legend>
+    <div class="opts">
+    {% for v in ["auto", "light", "dark"] %}
+    <label><input type="radio" name="theme" value="{{ v }}"{% if chosen == v %} checked{% endif %}><span>{{ t("settings.theme_" ~ v) }}</span></label>
+    {% endfor %}
+    </div>
+  </fieldset>
+  <p id="settingsError" class="err small" role="alert"></p>
+  {% if pw_mode() %}
+  <a class="setrow" href="/password">{{ t("nav.change_password") }} <span>›</span></a>
+  {% endif %}
+</section>
+<script src="/static/settings.js" defer></script>
+{% endblock %}

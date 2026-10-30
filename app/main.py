@@ -139,7 +139,7 @@ def _theme(ctx) -> str:
     try:
         with db() as con:
             return home.get_theme(con, user)
-    except sqlite3.Error:
+    except (sqlite3.Error, ValueError):  # ValueError: the stored text is not JSON
         return "auto"
 
 
@@ -627,6 +627,14 @@ def password_page(request: Request, next: str = "/"):
             if passwd.get(con, current_user(request)) is None:
                 return _password_form(request, False, safe_next(next), no_password=True)
     return _password_form(request, bool(pending), safe_next(next))
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, user: str = Depends(require_user)):
+    with db() as con:
+        chosen = home.get_theme(con, user)
+    return templates.TemplateResponse(request, "settings.html", {
+        "site": SITE_NAME, "user": user, "admin": is_admin(user), "chosen": chosen})
 
 
 @app.post("/password", response_class=HTMLResponse)

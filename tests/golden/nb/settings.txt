@@ -1,0 +1,10 @@
+Innstillinger · Artifact Hub
+Artifact Hub
+user@test.no
+@aria-label: Innstillinger
+Logg ut
+Innstillinger
+Utseende
+Automatisk
+Lys
+Mørk
