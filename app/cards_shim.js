@@ -8,6 +8,14 @@
  * recipe again with them. __hubRun(input) returns the answer as a JSON string:
  *   {"text": string|null} | {"need": [["doc"|"col", path], ...]} | {"error": code, "message"?: string}
  */
+
+// The memory limit only covers the V8 heap, and buffer memory lives outside it: the recipe gets no way to make one.
+for (const name of ["ArrayBuffer", "SharedArrayBuffer", "DataView", "WebAssembly", "Atomics",
+  "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array",
+  "Float16Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array"]) {
+  delete globalThis[name];
+}
+
 const __hubRun = (() => {
   const MISSING = Symbol("missing"); // thrown by a read whose data the job does not carry
   const META = Object.freeze({ fromCache: false, hasPendingWrites: false });

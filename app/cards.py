@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 TIME_LIMIT = 0.25  # seconds for all rounds of one recipe together
 MEMORY_LIMIT = 32 * 1024 * 1024
 MAX_ROUNDS = 5
+MAX_READS = 50  # paths one round may ask for
 START_LIMIT = 10.0  # seconds a new worker may take to load V8; not counted in any recipe's time
 WORKER = Path(__file__).with_name("cards_worker.py")
 CODES = ("timeout", "memory", "no_function", "not_text")  # the worker's error codes besides "failed"
@@ -47,10 +48,13 @@ class _Worker:
         if self.proc is not None and self.proc.poll() is None:
             return True
         self.stop()  # a worker that died on its own
-        self.proc = subprocess.Popen([sys.executable, "-I", str(WORKER)], stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
-        if self._answer(time.monotonic() + START_LIMIT) == {"ready": True}:
-            return True
+        try:
+            self.proc = subprocess.Popen([sys.executable, "-I", str(WORKER)], stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+            if self._answer(time.monotonic() + START_LIMIT) == {"ready": True}:
+                return True
+        except (OSError, ValueError):  # could not be started, or exited before it was ready
+            pass
         self.stop()
         return False
 
@@ -107,7 +111,8 @@ def run_recipe(source: str, read: Callable[[str, str], object], *, today: str, n
     """Run the recipe `source` (it defines hubCard) and return its line or an error code.
 
     read("doc", path) gives the document's data or None, read("col", path) gives [{"id", "data"}]; anything it
-    raises makes the result "bad_path".
+    raises makes the result "bad_path". The reads count against TIME_LIMIT, and a round that asks for more than
+    MAX_READS paths gives "too_many_reads".
     """
     docs: dict[str, object] = {}
     cols: dict[str, object] = {}
@@ -116,13 +121,20 @@ def run_recipe(source: str, read: Callable[[str, str], object], *, today: str, n
             return CardResult(None, "failed: worker")
         deadline = time.monotonic() + TIME_LIMIT  # the clock starts once the worker is up
         for _ in range(MAX_ROUNDS):
+            if time.monotonic() >= deadline:  # the reads used up the time; the worker is idle and stays
+                return CardResult(None, "timeout")
             job = {"source": source, "docs": docs, "cols": cols, "today": today, "now": now_ms, "tz": tz,
-                   "time_limit": max(deadline - time.monotonic(), 0), "memory_limit": MEMORY_LIMIT}
+                   "time_limit": deadline - time.monotonic(), "memory_limit": MEMORY_LIMIT}
             answer = _worker.ask(job, deadline)
             if "need" not in answer:
                 return _result(answer)
+            need = answer["need"]
+            if isinstance(need, list) and len(need) > MAX_READS:
+                return CardResult(None, "too_many_reads")
             try:
-                for kind, path in answer["need"]:
+                for kind, path in need:
+                    if time.monotonic() >= deadline:
+                        return CardResult(None, "timeout")
                     if kind not in ("doc", "col") or not isinstance(path, str):
                         raise ValueError(kind)
                     (docs if kind == "doc" else cols)[path] = read(kind, path)

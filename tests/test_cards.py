@@ -1,5 +1,8 @@
 """Card recipes: app JavaScript run in a killable V8 worker to compute the line on the front page card."""
 import time
+from pathlib import Path
+
+import pytest
 
 from app import cards
 
@@ -111,3 +114,59 @@ def test_failed_message_is_one_short_line():
 
 def test_lone_surrogate_becomes_question_mark():  # it could not be sent as UTF-8 on the front page
     assert _run("function hubCard(){ return 'a\\ud800b' }").text == "a?b"
+
+
+def test_slow_reads_stop_at_the_deadline():  # reads count against the time; the idle worker is not killed
+    _run("function hubCard(){ return 'up' }")
+    pid, calls = cards._worker.proc.pid, []
+
+    def read(kind, path):
+        calls.append(path)
+        time.sleep(0.05)
+        return {"v": 1}
+
+    src = "async function hubCard({db}) { await Promise.all([...Array(20).keys()].map(i => db.doc('x/' + i).get())) }"
+    t = time.monotonic()
+    assert cards.run_recipe(src, read, today="2026-10-28", now_ms=0, tz="UTC").error == "timeout"
+    assert time.monotonic() - t < 0.5 and len(calls) < 20
+    assert cards._worker.proc is not None and cards._worker.proc.pid == pid
+
+
+def test_too_many_paths_in_one_round():
+    calls = []
+
+    def read(kind, path):
+        calls.append(path)
+
+    src = (f"async function hubCard({{db}}) {{ await Promise.all([...Array({cards.MAX_READS + 1}).keys()]"
+           ".map(i => db.doc('x/' + i).get())); return 'all read' }")
+    assert cards.run_recipe(src, read, today="2026-10-28", now_ms=0, tz="UTC").error == "too_many_reads"
+    assert calls == []
+
+
+GONE = ("ArrayBuffer", "SharedArrayBuffer", "DataView", "WebAssembly", "Atomics", "Int8Array", "Uint8Array",
+        "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float16Array", "Float32Array",
+        "Float64Array", "BigInt64Array", "BigUint64Array")
+
+
+def test_no_buffers_outside_the_heap():  # the memory limit only covers the V8 heap
+    r = _run("function hubCard(){ return String(new Uint8Array(300e6).fill(1).length) }")
+    assert r.text is None and r.error
+    src = "function hubCard(){ return [" + ", ".join(f"typeof {n}" for n in GONE) + "].join() }"
+    assert _run(src).text == ",".join(["undefined"] * len(GONE))
+
+
+def test_kernel_picks_the_worker_under_memory_pressure():
+    _run("function hubCard(){ return 'up' }")
+    adj = Path(f"/proc/{cards._worker.proc.pid}/oom_score_adj")
+    if not adj.exists():
+        pytest.skip("no /proc here")
+    assert adj.read_text().strip() == "1000"
+
+
+def test_worker_that_does_not_start_gives_an_error(monkeypatch, tmp_path):
+    cards._worker.stop()
+    monkeypatch.setattr(cards, "WORKER", tmp_path / "missing.py")  # exits before it is ready
+    assert _run("function hubCard(){ return 'x' }") == cards.CardResult(None, "failed: worker")
+    monkeypatch.setattr(cards.sys, "executable", str(tmp_path / "no-python"))  # cannot be started at all
+    assert _run("function hubCard(){ return 'x' }") == cards.CardResult(None, "failed: worker")

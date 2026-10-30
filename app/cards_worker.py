@@ -9,6 +9,7 @@ here (the promise wait never times out), so the parent kills the process when a 
 
 Standalone on purpose: it imports nothing from the app and is started with `python -I`.
 """
+import contextlib
 import json
 import sys
 import time
@@ -50,6 +51,8 @@ def run(job: dict) -> dict:
 
 
 def main() -> None:
+    with contextlib.suppress(OSError):  # Linux: under memory pressure the kernel kills this worker, not the server
+        Path("/proc/self/oom_score_adj").write_text("1000")
     with MiniRacer() as ctx:  # load V8 now, outside any recipe's time
         ctx.eval(SHIM)
     print(json.dumps({"ready": True}), flush=True)
