@@ -6,8 +6,10 @@ which the app's CSS can still match (e.g. `* { ... }`). It resets the host with 
 !important rule from the page also beats :host rules inside the shadow root, so the host's whole look lives here.
 
 The server puts it right after <body>. A small script right behind it then moves it out of <body> (so a flex/grid
-body or body margins cannot move it) and pulls it up over any space above it (e.g. :root safe-area padding, which
-the banner has itself). Without JS it simply stays where the server put it.
+body or body margins cannot move it), makes it position:fixed at the top (data-fixed), and puts an empty
+<hub-banner-space> after it that holds its place in the flow. The space is pulled up over any space above it (e.g.
+:root safe-area padding, which the banner has itself). The banner's height is published as --hub-banner-h on :root,
+so an app's own sticky bar can sit right under it. Without JS it simply stays in the flow where the server put it.
 """
 from __future__ import annotations
 
@@ -26,7 +28,18 @@ CSS_HOST = (
     "-webkit-text-size-adjust:100% !important;"
     "background:radial-gradient(500px 120px at 90% -60%,rgb(255 138 92 / .22),transparent 60%),"
     "linear-gradient(160deg,#0b1a33,#123566) !important}"
-    "@media print{hub-banner{display:none !important}}</style>"
+    # fixed at the top once the script has run (data-fixed); without JS it stays in the flow
+    "hub-banner[data-fixed]{position:fixed !important;top:0 !important;left:0 !important;right:0 !important;"
+    "margin:0 !important}"
+    # empty stand-in in the flow, as tall as the fixed banner
+    "hub-banner-space{display:block;height:var(--hub-banner-h,0px)}"
+    # The background is !important and cannot be animated, so the glow is an overlay (opacity only, no layout).
+    # pull.js sets data-glow="ok"|"fail" for a moment.
+    "hub-banner::after{content:'';position:absolute;inset:0;opacity:0;pointer-events:none}"
+    "hub-banner[data-glow=\"ok\"]::after{background:#3fd39c;animation:hub-glow 900ms ease-out}"
+    "hub-banner[data-glow=\"fail\"]::after{background:#e5484d;animation:hub-glow 900ms ease-out}"
+    "@keyframes hub-glow{0%{opacity:0}30%{opacity:.35}100%{opacity:0}}"
+    "@media print{hub-banner,hub-banner-space{display:none !important}}</style>"
 )
 
 _STYLE = """<style>
@@ -56,8 +69,11 @@ def _icon(app: dict) -> str:
 _PLACE = (
     "<script>(function(s){var b=s.previousElementSibling,h=document.documentElement;s.remove();"
     "if(!b||b.localName!=='hub-banner'||b.parentNode!==document.body)return;h.insertBefore(b,document.body);"
-    "function fit(){b.style.removeProperty('margin-top');var t=b.getBoundingClientRect().top+scrollY;"
-    "if(t>0.5)b.style.setProperty('margin-top',-t+'px','important')}"
+    "var p=document.createElement('hub-banner-space');b.after(p);b.setAttribute('data-fixed','');"
+    "function size(){h.style.setProperty('--hub-banner-h',b.offsetHeight+'px')}size();"
+    "if(window.ResizeObserver)new ResizeObserver(size).observe(b);"
+    "function fit(){p.style.removeProperty('margin-top');var t=p.getBoundingClientRect().top+scrollY;"
+    "if(t>0.5)p.style.setProperty('margin-top',-t+'px','important')}"
     "fit();addEventListener('resize',fit)})(document.currentScript)</script>"
 )
 

@@ -191,3 +191,29 @@ def test_inject_is_usable_on_its_own():
     out = banner.inject("<html><head></head><body><p>x</p></body></html>", "<!--head-->", banner.render(APP, "S"))
     assert out.index("<!--head-->") < out.index("<body>") < out.index("<hub-banner>") < out.index("<p>x")
     assert banner.inject("<body>x</body>", "<!--head-->", None) == "<!--head--><body>x</body>"
+
+
+# ---------------------------------------------------------------- fixed banner and glow hook
+def test_fixed_markup():
+    html = banner.inject("<html><head></head><body><p>x</p></body></html>", "<h>", banner.render(APP, "S"))
+    assert "data-fixed" in html and "hub-banner-space" in html and "--hub-banner-h" in html
+
+
+def test_css_has_fixed_glow_and_print_rules():
+    css = banner.CSS_HOST.replace(" ", "")
+    assert "hub-banner[data-fixed]{" in css and "position:fixed!important" in css
+    assert "hub-banner-space" in css and 'data-glow="ok"' in banner.CSS_HOST
+    assert "@mediaprint{hub-banner,hub-banner-space{display:none" in css
+
+
+def test_glow_values_and_stacking():
+    css = banner.CSS_HOST.replace(" ", "")
+    assert "#3fd39c" in css and "#e5484d" in css and "900ms" in css and ".35" in css
+    assert 'data-glow="fail"' in css
+    z = int(css.split("z-index:")[1].split("!")[0])
+    assert z > 10  # above the apps' body::before safe-area strip
+
+
+def test_app_page_gets_fixed_banner(admin_client, upload):
+    upload(admin_client, "a.html", "<html><head><title>A</title></head><body><p>x</p></body></html>")
+    assert "data-fixed" in admin_client.get("/a/a/").text

@@ -132,7 +132,8 @@ When the hub serves an HTML file from an app it adds:
 
 - **`hub.js`**, first in `<head>`, for the storage above.
 - **A banner** at the top: a dark strip with a back arrow, the hub's logo and the app's icon and name, linking to
-  the front page. It scrolls away with the page and is left out when printing. It sits in its own shadow DOM, so
+  the front page. It stays fixed at the top while the page scrolls (an empty placeholder of the same height keeps the content below
+  it) and is left out when printing. Its height is available as the CSS variable `--hub-banner-h`. It sits in its own shadow DOM, so
   the app's CSS and the banner's CSS do not affect each other. It only goes into pages the browser opens, not
   into HTML an app fetches with `fetch()` or shows in an iframe.
 - **Pull to refresh** in the home-screen app, where iOS has none. It only starts when the page is scrolled to the
@@ -142,6 +143,9 @@ When the hub serves an HTML file from an app it adds:
 
 ### Turning the banner off
 
+Apps with their own sticky top bar should place it under the banner with
+`top: var(--hub-banner-h, <your own value>)`; the variable is only set when the banner is there.
+
 The *banner* button on the admin page turns the banner off for one app (`"banner": false` in its meta). Turn it off
-for apps with a fixed top bar (`position: fixed; top: 0`), which the banner covers until you scroll, and for apps
-that do not scroll (`html, body { height: 100%; overflow: hidden }`), which lose their bottom edge.
+for apps that are exactly one screen tall (`100dvh`) or have a fixed top bar (`position: fixed; top: 0`), since
+the banner takes space from the first and covers the second.
