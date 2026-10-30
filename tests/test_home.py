@@ -565,14 +565,14 @@ def test_failed_recipe_falls_back_only_to_todays_line(hub, user_client):
 
 def test_recipe_sees_what_the_viewer_sees(hub, user_client):
     recipe = ("<script data-hub-card>async function hubCard({db}) { const out = []; "
-              "for (const p of ['a/common', 'data/users/user@test.no/mine', 'data/users/andre@test.no/theirs']) "
+              "for (const p of ['a/common', 'data/users/user@test.no/mine', 'data/users/andre@test.no/theirs', 'b/elsewhere']) "
               "{ const d = await db.doc(p).get(); out.push(d.exists ? 1 : 0); } return out.join(''); }</script>")
     _recipe_page(hub, "delt", recipe, shared=True)
     _put_doc(hub, "delt", "*", "a", "common", {"x": 1})
     _put_doc(hub, "delt", USER, "data/users/user@test.no", "mine", {"x": 1})
     _put_doc(hub, "delt", "andre@test.no", "data/users/andre@test.no", "theirs", {"x": 1})
-    _put_doc(hub, "annen", USER, "a", "common", {"x": 1})  # another app, same path
-    assert "110</p>" in user_client.get("/").text
+    _put_doc(hub, "annen", USER, "b", "elsewhere", {"x": 1})  # exists only in another app
+    assert "1100</p>" in user_client.get("/").text
 
 
 def test_icon_view_runs_no_recipes(hub, user_client, monkeypatch):
@@ -602,3 +602,11 @@ def test_bad_timezone_is_refused_and_ignored(hub, user_client):
     with hub.db() as con:
         hub.home._put(con, USER, "tz", "Ikke/Sone")
     assert user_client.get("/").status_code == 200
+
+
+def test_recipe_in_personal_app_does_not_see_other_users(hub, user_client):
+    recipe = ("<script data-hub-card>async function hubCard({db}) { const d = await db.doc('a/x').get(); "
+              "return d.exists ? 'sett' : 'ikke sett'; }</script>")
+    _recipe_page(hub, "privat", recipe)
+    _put_doc(hub, "privat", "andre@test.no", "a", "x", {"x": 1})
+    assert "ikke sett</p>" in user_client.get("/").text

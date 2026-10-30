@@ -103,17 +103,17 @@ async function hubCard({ db, today }) {
 `hubCard` gets `{ db, today, now, timeZone }` and returns a string, or `null` for no line (it may be `async`).
 
 - `db` is read-only: `db.doc(path).get()`, `db.collection(path).get()` and `.where(field, op, value)` on a
-  collection. It reads what the viewer sees in the app: personal data, or in an app with shared data the shared
+  collection (a collection read sees at most the 500 documents with the highest ids). It reads what the viewer sees in the app: personal data, or in an app with shared data the shared
   documents and the viewer's own branch.
 - `today` is the viewer's date as `YYYY-MM-DD`, `now` the time in milliseconds and `timeZone` the viewer's IANA zone
   (the hub learns it from the browser; until then it is the server's).
 - No DOM and no network, only plain functions. The recipe has 0.25 seconds for everything it does and 32 MB of memory;
-  one that takes longer, or throws, gives no line.
+  one that takes longer, or throws, fails (see below for what the card then shows).
 - The first `<script data-hub-card>` in the page counts. The line is trimmed and cut at 140 characters and shown as
   plain text. Claude can see what it gives with `get_app` (the `card` field).
 
-What wins: the recipe, when the app has one. If it fails, the card falls back to a `hub/summary` line, but only one
-written today; an older one would be stale, so the card then has no line.
+What wins: the recipe, when the app has one. If it fails, the card shows the stored `hub/summary` line only if it was
+written today in the viewer's time zone; an older one would be stale, so the card then has no line.
 
 For a line that cannot be computed from stored data, the app writes it to the document `hub/summary` instead:
 

@@ -740,7 +740,7 @@ def card_lines(con: sqlite3.Connection, user: str, apps: list[dict], tz: str | N
         if r is None:
             s = stored.get(slug)
         elif r.error:
-            log.warning("card recipe for %s failed: %s", slug, r.error)
+            log.warning("card recipe for %s failed: %s", slug, r.error.split(":", 1)[0])  # the code only, no document content
             s = stored.get(slug)
             if s and cards.day_of(s.at, tz) != cards.today(tz, now)[0]:
                 s = None

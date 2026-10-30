@@ -47,7 +47,7 @@ The hub's front page can show one line from each app on its card. Give the app a
 <script data-hub-card> block with a function hubCard({{ db, today, now, timeZone }}) that returns the line as a
 string (or null for none), e.g.
 <script data-hub-card>async function hubCard({{ db, today }}) {{ const d = await db.doc(`days/${{today}}`).get(); return d.exists ? d.data().kcal + " kcal" : null; }}</script>
-The recipe is read-only (db.doc(path).get(), db.collection(path).get() and .where(...)), has no network and no DOM,
+The recipe is read-only (db.doc(path).get(), db.collection(path).get() and .where(...); a collection read sees at most the 500 documents with the highest ids), has no network and no DOM,
 gets only plain functions, and has 0.25 s. today is the viewer's date as YYYY-MM-DD, now is milliseconds and timeZone
 the viewer's zone. The server runs it every time the front page is shown, so the line is always current, and get_app
 shows what it gives (the card field). Add one when the app has a natural headline number. Only a line that cannot be
