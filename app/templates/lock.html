@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_icon.html" import icon %}
+{% macro code_field(name, label, focus=False) -%}
+<input type="text" class="code" name="{{ name }}" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="{{ label }}" aria-label="{{ label }}"{% if focus %} autofocus{% endif %}>
+{%- endmacro %}
+{% block title %}{{ t("lock.title") }} · {{ site }}{% endblock %}
+{% block body %}
+<section class="card login lockscreen">
+  {{ icon(a) }}
+  <h1>{{ a.title }}</h1>
+  {% if code %}
+    <p class="muted">{{ t("lock.new_title") }}</p>
+    <p class="muted small">{{ t("lock.new_hint") }}</p>
+  {% else %}
+    <p class="muted">{{ t("lock.title") }}</p>
+  {% endif %}
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  <form method="post" action="/lock/{{ a.slug }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    {% if code %}
+    <input type="hidden" name="code" value="{{ code }}">
+    {{ code_field("new1", t("lock.new1"), focus=True) }}
+    {{ code_field("new2", t("lock.new2")) }}
+    <button class="primary">{{ t("lock.save") }}</button>
+    {% else %}
+    {{ code_field("code", t("lock.code"), focus=True) }}
+    <button class="primary">{{ t("lock.open") }}</button>
+    {% endif %}
+  </form>
+  <p class="lockback"><a href="/">{{ t("lock.back") }}</a></p>
+</section>
+<script src="/static/lock.js" defer></script>
+{% endblock %}

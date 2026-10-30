@@ -28,8 +28,9 @@ import threading
 import time
 import zipfile
 from html import escape
+from math import ceil
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -81,6 +82,7 @@ def password_mode() -> bool:
 MAGIC_TTL = 15 * 60               # seconds a magic link is valid
 SESSION_TTL = 30 * 24 * 3600      # seconds a session cookie lives
 COOKIE = "hub_session"
+UNLOCK_PREFIX = "hub_unlock_"     # + slug: one cookie per unlocked app (app/applock.py)
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 OPEN_SIGNUP = "*" in ALLOWED_DOMAINS  # ALLOWED_DOMAINS=* lets anyone with an e-mail log in
@@ -127,6 +129,7 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["pw_mode"] = lambda: password_mode()
 templates.env.globals.update(t=i18n.t, t_html=i18n.t_html, tn=i18n.tn, raw=i18n.raw, lang=lambda: i18n.LANG)
 signer = URLSafeTimedSerializer(SECRET_KEY, salt="session")
+unlock_signer = URLSafeTimedSerializer(SECRET_KEY, salt="app-unlock")
 
 
 @pass_context
@@ -300,6 +303,53 @@ def set_session(resp, email: str) -> None:
 
 def set_pending(resp, email: str, pw_at: int) -> None:
     _set_cookie(resp, {"email": email, "pw_change": True, "pw_at": pw_at}, PENDING_TTL)
+
+
+def set_unlock(resp, email: str, slug: str, code_at: int) -> None:
+    """Open `slug` on this device. `code_at` is the code's updated_at, so a new code shuts every unlock."""
+    resp.set_cookie(
+        UNLOCK_PREFIX + slug,
+        unlock_signer.dumps({"email": email, "slug": slug, "at": code_at}),
+        max_age=applock.UNLOCK_TTL,
+        httponly=True,
+        samesite="lax",
+        secure=BASE_URL.startswith("https://"),
+        path="/",
+    )
+
+
+def app_locked(user: str, slug: str) -> bool:
+    """The app has a lock for this user, whether or not it is open on this device."""
+    with db() as con:
+        return applock.is_locked(con, user, slug)
+
+
+def unlocked(request: Request, user: str, slug: str) -> bool:
+    """This device holds an unlock of `slug` for `user`, under the code as it is now and not older than UNLOCK_TTL."""
+    raw = request.cookies.get(UNLOCK_PREFIX + slug)
+    if not raw:
+        return False
+    with db() as con:
+        row = applock.get(con, user)
+    try:
+        data = unlock_signer.loads(raw, max_age=applock.UNLOCK_TTL)
+        return (row is not None and access.norm(data["email"]) == access.norm(user)
+                and data["slug"] == slug and data["at"] == row["updated_at"])
+    except (BadSignature, KeyError):
+        return False
+
+
+def _locked_error() -> HTTPException:
+    return HTTPException(423, i18n.t("lock.unlock_first"), headers={"Cache-Control": "no-store"})
+
+
+def require_unlocked(request: Request, user: str, slug: str) -> None:
+    if app_locked(user, slug) and not unlocked(request, user, slug):
+        raise _locked_error()
+
+
+def check_code(user: str, code: str) -> applock.Check:
+    return applock.check(db, user, code)
 
 
 def _pw_window(key: str) -> int:
@@ -605,9 +655,12 @@ def auth(token: str, next: str = "/"):
 
 
 @app.post("/logout")
-def logout():
+def logout(request: Request):
     resp = RedirectResponse("/login", status_code=302)
     resp.delete_cookie(COOKIE)
+    for name in request.cookies:
+        if name.startswith(UNLOCK_PREFIX):
+            resp.delete_cookie(name)
     return resp
 
 
@@ -814,6 +867,11 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     root, meta = found
     if not can_see(meta, user):
         raise HTTPException(404)
+    protected = app_locked(user, slug)
+    if protected and not unlocked(request, user, slug):
+        if request.headers.get("sec-fetch-dest", "document") == "document":
+            return _lock_screen(request, user, slug, request.url.path + (f"?{request.url.query}" if request.url.query else ""))
+        raise _locked_error()
     if path in ("", "index.html"):
         _log_visit(user, slug)
     # only a page the browser opens gets the banner, not HTML an app fetches or shows in an iframe
@@ -821,7 +879,7 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     if root.is_file():
         if path not in ("", "index.html"):
             raise HTTPException(404)
-        return _html_with_shim(root, slug, user, with_banner=with_banner)
+        return _html_with_shim(root, slug, user, with_banner=with_banner, locked=protected)
     target = (root / (path or "index.html")).resolve()
     if root.resolve() not in target.parents and target != root.resolve():
         raise HTTPException(404)
@@ -830,8 +888,9 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     if not target.is_file() or target.name == "meta.json":
         raise HTTPException(404)
     if target.suffix.lower() in (".html", ".htm"):
-        return _html_with_shim(target, slug, user, with_banner=with_banner)
-    return FileResponse(target)
+        return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected)
+    # a locked app's files must not outlive the unlock in the browser's cache
+    return FileResponse(target, headers={"Cache-Control": "no-store"} if protected else None)
 
 
 # Apps are used on phones and must never scroll sideways. iOS zooms in on inputs under 16px and
@@ -866,19 +925,88 @@ def open_link(slug: str, user: str = Depends(require_user)):
     return RedirectResponse(link["url"], status_code=302)
 
 
-def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool) -> HTMLResponse:
+def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool, locked: bool = False) -> HTMLResponse:
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
-    and the hub banner right after <body> unless the app has it turned off."""
+    and the hub banner right after <body> unless the app has it turned off. `locked` marks an app the viewer has
+    locked, so hub.js keeps its unlock alive."""
     html = path.read_text("utf-8", errors="replace")
     strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
     found = artifact_root(slug)
     data_shared = bool(found) and shared.is_shared(found[1])
-    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"></script>'.format(
-        escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings
+    tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"{}></script>'.format(
+        escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings,
+        ' data-lock="1"' if locked else ""
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
     html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------- routes: the code lock (app/applock.py)
+def _lock_next(slug: str, target: str) -> str:
+    """Where to go after the code: `target` if it stays inside this app, else the app's front."""
+    home_url = f"/a/{slug}/"
+    if safe_next(target) != target or not target.startswith(home_url):
+        return home_url
+    # a browser resolves .. in a redirect, also when it is written %2e%2e, and would leave the app
+    if ".." in unquote(target.split("?", 1)[0]).split("/"):
+        return home_url
+    return target
+
+
+def _lock_screen(request: Request, user: str, slug: str, next: str, *, error: str | None = None,
+                 code: str | None = None, status: int = 423):
+    """The code screen, sent instead of the app. `code` is the one-time code, on the step that picks a new one."""
+    a = [a for a in list_artifacts(user) if a["slug"] == slug][0]
+    return templates.TemplateResponse(request, "lock.html", {
+        "site": SITE_NAME, "user": user, "admin": is_admin(user), "a": a, "next": next, "error": error, "code": code,
+    }, status_code=status, headers={"Cache-Control": "no-store"})
+
+
+def _lock_open(user: str, slug: str, target: str, code_at: int) -> RedirectResponse:
+    resp = RedirectResponse(target, status_code=303, headers={"Cache-Control": "no-store"})
+    set_unlock(resp, user, slug, code_at)
+    return resp
+
+
+@app.get("/lock/{slug}")
+def lock_page(slug: str, user: str = Depends(require_user)):
+    """A reload of a screen that came from the POST below, or the way back after a login."""
+    return RedirectResponse(f"/a/{slug}/", status_code=302)
+
+
+@app.post("/lock/{slug}", response_class=HTMLResponse)
+def lock_submit(slug: str, request: Request, code: str = Form(""), next: str = Form(""), new1: str = Form(""),
+                new2: str = Form(""), user: str = Depends(require_user)):
+    found = artifact_root(slug)
+    if not found or not can_see(found[1], user):
+        raise HTTPException(404)
+    target = _lock_next(slug, next)
+    if not app_locked(user, slug):  # no check here: this must not be a way to test codes
+        return RedirectResponse(target, status_code=303)
+    checked = check_code(user, code)
+    if checked.wait > 0:
+        return _lock_screen(request, user, slug, target, error=i18n.t("lock.err.blocked", minutes=ceil(checked.wait / 60)))
+    if not checked.ok:
+        return _lock_screen(request, user, slug, target, error=i18n.t("lock.err.wrong"))
+    if not checked.must_change:
+        with db() as con:
+            return _lock_open(user, slug, target, applock.get(con, user)["updated_at"])
+    # a one-time code opens nothing: it only lets the user pick a new code, and the form sends it along each time
+    if not new1:
+        return _lock_screen(request, user, slug, target, code=code, status=200)
+    error = None
+    if not applock.valid_code(new1):
+        error = i18n.t("lock.err.format")
+    elif new1 != new2:
+        error = i18n.t("lock.err.mismatch")
+    elif new1 == code:
+        error = i18n.t("lock.err.same")
+    if error:
+        return _lock_screen(request, user, slug, target, error=error, code=code, status=200)
+    with db() as con:
+        at = applock.set_code(con, user, new1, must_change=False)
+    return _lock_open(user, slug, target, at)
 
 
 # ---------------------------------------------------------------- routes: document store (hub.js)

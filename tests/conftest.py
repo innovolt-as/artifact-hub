@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import main, passwd  # noqa: E402
+from app import applock, main, passwd  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -73,6 +73,19 @@ def set_pw(email: str, password: str, must_change: bool = False) -> int:
     """Store a password for `email`; returns updated_at."""
     with main.db() as con:
         return passwd.set_password(con, email, password, must_change=must_change)
+
+
+def lock(email: str, slug: str, code: str = "1234") -> None:
+    """Lock `slug` for `email`, who gets `code` unless they already have one."""
+    with main.db() as con:
+        if not applock.get(con, email):
+            applock.set_code(con, email, code)
+        applock.set_locked(con, email, slug, True)
+
+
+def unlock(client: TestClient, slug: str, code: str = "1234"):
+    """Send `code` from the app's code screen."""
+    return client.post(f"/lock/{slug}", data={"code": code, "next": f"/a/{slug}/"})
 
 
 @pytest.fixture

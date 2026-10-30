@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import set_pw
+from tests.conftest import lock, set_pw
 from tests.textutil import visible_text
 
 GOLDEN = Path(__file__).parent / "golden" / "nb"
@@ -138,6 +138,14 @@ def app_banner(admin_client, make_page, **_):
     return _ok(admin_client.get("/a/bannerapp/"))
 
 
+def lock_screen(user_client, make_page, **_):
+    make_page("notat", "all", title="Notater")
+    lock(USER, "notat")
+    r = user_client.get("/a/notat/")
+    assert r.status_code == 423
+    return r.text
+
+
 def auth_error(client, **_):
     r = client.get("/auth?token=bad")
     assert r.status_code == 400
@@ -147,7 +155,7 @@ def auth_error(client, **_):
 CASES = {f.__name__: f for f in (
     login, login_sent, login_password, login_password_error, password_change, password_no_password,
     password_error, home_empty, home_apps, home_notice, admin, admin_upload, admin_people, admin_password, settings, settings_password, stats, consent,
-    consent_error, app_banner, auth_error)}
+    consent_error, app_banner, lock_screen, auth_error)}
 JSON_CASES = {"auth_error"}
 
 

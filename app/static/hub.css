@@ -250,6 +250,16 @@ dialog { overscroll-behavior: contain; }
 .setrow { display: flex; justify-content: space-between; align-items: center; min-height: 44px; margin-top: 16px; padding: 0 4px; border-top: 1px solid var(--line); color: var(--fg); }
 .setrow span { color: var(--muted); }
 
+/* ---------------------------------------------------------------- the code lock */
+/* type=text, not password: a password field brings the keychain and the wrong keyboard. So the dots come from here. */
+.code { width: 100%; font: inherit; font-size: 24px; text-align: center; letter-spacing: .4em; -webkit-text-security: disc; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+.code::placeholder { font-size: 16px; letter-spacing: 0; }  /* the spacing is for the dots; a label would not fit */
+.lockscreen { text-align: center; }
+.lockscreen h1 { margin: 12px 0 0; overflow-wrap: anywhere; }
+.lockscreen p { margin: 4px 0 0; }
+.lockscreen form { flex-direction: column; }
+.lockback a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
+
 /* ---------------------------------------------------------------- admin: the app list */
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .asearch { display: flex; align-items: center; gap: 8px; min-height: 44px; margin-bottom: 10px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
