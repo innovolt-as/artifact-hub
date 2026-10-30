@@ -205,6 +205,21 @@ def test_other_admins_with_a_code_are_on_the_people_page(hub, admin_client, monk
     assert 'lockreset" data-email="admin2@test.no"' in admin_client.get("/admin/people").text
 
 
+def test_a_removed_person_with_a_code_is_not_on_the_people_page(hub, admin_client):
+    admin_client.post("/api/people/invite", json={"email": "ny@test.no"})
+    lock("ny@test.no", "notat")
+    assert 'data-email="ny@test.no"' in admin_client.get("/admin/people").text
+    assert admin_client.post("/api/people/remove", json={"email": "ny@test.no"}).status_code == 200
+    assert "ny@test.no" not in admin_client.get("/admin/people").text
+    assert code_hash("ny@test.no")  # the code stays, for a re-invitation
+
+
+def test_a_person_let_in_by_domain_with_a_code_is_on_the_people_page(hub, admin_client, monkeypatch):
+    monkeypatch.setattr(main, "ALLOWED_DOMAINS", {"firma.no"})
+    lock("ola@firma.no", "notat")
+    assert 'lockreset" data-email="ola@firma.no"' in admin_client.get("/admin/people").text
+
+
 def test_the_code_is_never_logged(hub, admin_client, user_client, caplog):
     lock(USER, "notat", "7351")
     with caplog.at_level(logging.INFO):

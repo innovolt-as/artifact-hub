@@ -1799,7 +1799,8 @@ def admin_people(request: Request, user: str = Depends(require_admin)):
         shown |= ADMIN_EMAILS - {access.norm(user)}  # other admins may need a password too
     with db() as con:
         coded = applock.emails(con)
-    shown |= coded - {access.norm(user)}  # an admin with a code may need it reset; your own is reset on the server
+    # anyone who may still log in and has a code (other admins too); your own is reset on the server
+    shown |= {e for e in coded if email_allowed(e)} - {access.norm(user)}
     people = [{"email": e, "invited": e in invited and e not in ALLOWED_EMAILS, "admin": e in ADMIN_EMAILS,
                "has_code": e in coded and e != access.norm(user)}
               for e in sorted(shown)]
