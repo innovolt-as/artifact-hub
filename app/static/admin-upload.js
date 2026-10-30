@@ -17,12 +17,12 @@
     const busy = note(fmt(T.uploading, { name: file.name }));
     const r = await reach(fetch('/api/upload', { method: 'POST', body: fd }));
     const j = await r.json().catch(() => ({}));
+    busy.remove();
     if (r.ok) {
       const link = document.createElement('a');
       link.href = link.textContent = j.url;
       note(`✓ ${file.name} → `).append(link);
     } else {
-      busy.remove();
       note(`✗ ${file.name}: ${j.detail || r.status}`, false);
     }
   }

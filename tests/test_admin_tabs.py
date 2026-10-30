@@ -134,7 +134,13 @@ def test_upload_and_link_notice_an_ended_session_or_a_lost_network(client):
     js = client.get("/static/admin-upload.js").text
     assert "await reach(fetch('/api/upload'" in js and "await reach(fetch('/api/link'" in js
     assert "await fetch(" not in js
-    assert "busy.remove();" in js  # the line saying the file is on its way goes when it did not get there
+
+
+def test_the_uploading_line_goes_whatever_the_answer(client):
+    # nothing reloads this tab, so a line left behind reads as still running, under a ✓ or an ✗
+    js = client.get("/static/admin-upload.js").text
+    assert js.count("busy.remove();") == 1
+    assert js.index("await reach(fetch('/api/upload'") < js.index("busy.remove();") < js.index("if (r.ok) {")
 
 
 def test_every_post_on_the_people_tab_notices_an_ended_session(client):
