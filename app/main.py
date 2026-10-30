@@ -1277,6 +1277,19 @@ def data_user(app_name: str, request: Request, user: str = Depends(api_user)) ->
     return user
 
 
+@app.post("/api/lock/{slug}/ping")
+def lock_ping(slug: str, request: Request, user: str = Depends(api_user)):
+    """hub.js of an open locked app: renew the unlock while the page is on screen. An expired one is not revived."""
+    resp = JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+    if not app_locked(user, slug):
+        return resp
+    if not unlocked(request, user, slug):
+        raise _locked_error()
+    with db() as con:
+        set_unlock(resp, user, slug, applock.get(con, user)["updated_at"])
+    return resp
+
+
 def _check_app_key(app_name: str, key: str | None = None) -> None:
     if not SLUG_RE.match(app_name):
         raise HTTPException(400, i18n.t("store.bad_app"))

@@ -196,6 +196,7 @@
   "js.hub.bad_col_path": "Ugyldig samlingssti: {path}",
   "js.hub.bad_doc_path": "Ugyldig dokumentsti: {path}",
   "js.hub.error_status": "Feil {status}",
+  "js.hub.locked": "Appen er låst",
   "js.hub.network": "Nettverksfeil",
   "js.hub.not_logged_in": "Ikke innlogget",
   "js.hub.save_args": "filename og data må være satt",

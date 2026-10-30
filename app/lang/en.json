@@ -196,6 +196,7 @@
   "js.hub.bad_col_path": "Invalid collection path: {path}",
   "js.hub.bad_doc_path": "Invalid document path: {path}",
   "js.hub.error_status": "Error {status}",
+  "js.hub.locked": "The app is locked",
   "js.hub.network": "Network error",
   "js.hub.not_logged_in": "Not logged in",
   "js.hub.save_args": "filename and data must be set",

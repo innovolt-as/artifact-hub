@@ -1,13 +1,15 @@
 """The code lock on /a/{slug}/: the gate, the code screen, /lock/{slug} and the unlock cookie."""
 import io
+import json
 import re
 import time
 import zipfile
+from pathlib import Path
 
 import pytest
 from fastapi.routing import APIRoute
 
-from app import applock, home, i18n
+from app import applock, home, i18n, main
 from tests.conftest import lock, make_client, unlock
 
 USER, ADMIN = "user@test.no", "admin@test.no"
@@ -430,3 +432,77 @@ def test_polling_does_not_renew_the_lock(user_client, locked):
     unlock(user_client, "notat")
     r = user_client.get("/api/store/notat/c?path=a")
     assert r.status_code == 200 and "set-cookie" not in r.headers
+
+
+# ---------------------------------------------------------------- the ping and the heartbeat
+
+def _at(monkeypatch, seconds, _start=time.time):
+    """Move the clock to `seconds` from now; a second call counts from the real now again, not from the first."""
+    now = _start()
+    monkeypatch.setattr(time, "time", lambda: now + seconds)
+
+
+def _with_cookie(value):
+    """A client with the unlock set by hand: the client's own jar would drop a cookie past its Max-Age."""
+    c = make_client(USER)
+    c.cookies.set("hub_unlock_notat", value)
+    return c
+
+
+def test_ping_renews_a_valid_unlock(user_client, locked, monkeypatch):
+    first = _cookie(unlock(user_client, "notat"))
+    _at(monkeypatch, 300)
+    r = _with_cookie(first).post("/api/lock/notat/ping")
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    assert r.headers["cache-control"] == "no-store"
+    renewed = _cookie(r)
+    _at(monkeypatch, 601)
+    assert _with_cookie(renewed).get("/a/notat/").status_code == 200
+    assert _with_cookie(first).get("/a/notat/").status_code == 423
+
+
+def test_ping_cannot_revive_an_expired_unlock(user_client, locked, monkeypatch):
+    value = _cookie(unlock(user_client, "notat"))
+    _at(monkeypatch, 601)
+    r = _with_cookie(value).post("/api/lock/notat/ping")
+    assert r.status_code == 423 and "set-cookie" not in r.headers
+    assert r.headers["cache-control"] == "no-store"
+
+
+def test_ping_without_an_unlock_is_423(user_client, locked):
+    r = user_client.post("/api/lock/notat/ping")
+    assert r.status_code == 423 and "set-cookie" not in r.headers
+
+
+def test_ping_after_the_lock_is_off_sets_nothing(user_client, locked):
+    with main.db() as con:
+        applock.set_locked(con, USER, "notat", False)
+    for slug in ("notat", "no-such-app"):
+        r = user_client.post(f"/api/lock/{slug}/ping")
+        assert r.status_code == 200 and r.json() == {"ok": True} and "set-cookie" not in r.headers
+
+
+def test_ping_logged_out_is_401(client, locked):
+    assert client.post("/api/lock/notat/ping").status_code == 401
+
+
+def test_the_page_of_an_unlocked_app_carries_data_lock(user_client, locked):
+    unlock(user_client, "notat")
+    assert HUB_JS.search(user_client.get("/a/notat/").text)
+
+
+def test_a_page_with_no_lock_has_no_data_lock(user_client, page):
+    page("fri")
+    html = user_client.get("/a/fri/").text
+    assert "/static/hub.js" in html and "data-lock" not in html
+
+
+def test_hub_js_handles_423_and_pings(client):
+    js = client.get("/static/hub.js").text
+    for needle in ("r.status === 423", "/ping", "visibilitychange", "pageshow"):
+        assert needle in js
+
+
+def test_the_lock_string_reaches_hub_js():
+    for lang in ("nb", "en"):
+        assert "js.hub.locked" in json.loads(Path(f"app/lang/{lang}.json").read_text())
