@@ -2,7 +2,6 @@ Innstillinger · Artifact Hub
 Artifact Hub
 user@test.no
 @aria-label: Innstillinger
-Logg ut
 Innstillinger
 Utseende
 Automatisk
@@ -15,3 +14,11 @@ Velg en kode på fire siffer, og slå på kode for appene du vil skjerme. Claude
 @placeholder: Gjenta kode
 @aria-label: Gjenta kode
 Lagre
+Konto
+Logg ut
+Slett mine data
+Slette dataene dine?
+Dette sletter alt du har lagret i alle apper, og det kan ikke angres. Felles data, innstillingene og kodelåsen din beholdes.
+Skriv SLETT for å bekrefte
+Avbryt
+Slett alt

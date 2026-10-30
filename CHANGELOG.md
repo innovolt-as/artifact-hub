@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.4.1 (unreleased)
+
+### New
+
+- *Delete my data* on the settings page removes everything you have stored in all apps. Shared data, your settings
+  and your code lock stay. It asks for your code, or for a typed word if you have no code.
+
+### Changed
+
+- The top bar has the front page's dark colour on every page.
+- *Log out* has moved from the top bar to the settings page.
+
+### Fixed
+
+- On an iPhone, the settings sheet on the admin page and the list of apps on the front page opened as a sliver at the
+  bottom of the screen, or not at all.
+- The stylesheet's address now changes with its content, so a browser picks up a new version after an upgrade.
+
 ## v1.4.0 (2026-10-30)
 
 ### New

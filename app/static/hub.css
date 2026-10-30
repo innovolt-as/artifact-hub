@@ -2,7 +2,7 @@
   color-scheme: light dark;
   --bg: #f6f5f1; --fg: #1d1c1a; --muted: #6e6a62; --card: #ffffff; --line: #e4e1da;
   --accent: #2f5fd1; --accent-fg: #fff; --danger: #b4321f; --ok: #227a4c;
-  --bar: #2f5fd1;
+  --bar: #2f5fd1; --topbar: linear-gradient(160deg, #0b1a33, #0f2a4d);
   --radius: 12px; --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
@@ -15,17 +15,16 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--
 a { color: inherit; text-decoration: none; }
 main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
 
-.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--card); }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: calc(14px + env(safe-area-inset-top)) 20px 14px; color: #f3f6fb; background: var(--topbar); }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.01em; }
 .brand img { display: block; }
 .top nav { display: flex; align-items: center; gap: 16px; font-size: 14px; min-width: 0; }
-@media (max-width: 480px) { .top { padding: 12px 16px; } .top .who { display: none; } }
-.top nav a.active { color: var(--accent); font-weight: 600; }
-.who { color: var(--muted); }
-.who-icon { display: none; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -10px -8px; color: var(--muted); }
-.topbar .who-icon { color: #a7b4ca; }
+@media (max-width: 480px) { .top { padding: calc(12px + env(safe-area-inset-top)) 16px 12px; } .top .who { display: none; } }
+.top nav a.active { color: #cfe0ff; font-weight: 600; }
+.top .who { color: #a7b4ca; }
+.who-icon { display: none; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -10px -8px; }
+.top .who-icon, .topbar .who-icon { color: #a7b4ca; }
 @media (max-width: 480px) { .top .who-icon, .topbar .who-icon { display: inline-flex; } }
-button.link { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 14px; padding: 0; }
 
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; }
 .card h1 { font-size: 20px; margin: 0 0 8px; }
@@ -38,7 +37,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 
 /* ---------------------------------------------------------------- front page */
 .topbar { position: sticky; top: 0; z-index: 20; color: #f3f6fb; padding: env(safe-area-inset-top) 0 8px;
-  background: linear-gradient(160deg, #0b1a33, #0f2a4d); }
+  background: var(--topbar); }
 .topbar .hero-row { padding-top: 14px; }
 .topbar::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; }
 .topbar.glow-ok::after { background: #3fd39c; animation: glow 900ms ease-out; }
@@ -47,7 +46,6 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .topbar .brand, .hero .brand { color: #f3f6fb; }
 .topbar nav a { color: #f3f6fb; }
 .topbar .who { color: #a7b4ca; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
-.topbar button.link { color: #cfe0ff; }
 .topbar nav { display: flex; align-items: center; gap: 14px; font-size: 14px; min-width: 0; }
 @media (max-width: 480px) { .topbar .who { display: none; } }
 .hero { color: #f3f6fb; padding: 14px 0 22px;
@@ -62,7 +60,6 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .hero .brand { color: #f3f6fb; }
 .hero nav { display: flex; align-items: center; gap: 14px; font-size: 14px; min-width: 0; }
 .hero nav a { color: #f3f6fb; }
-.hero button.link { color: #cfe0ff; }
 .hero-main { margin-top: 0; align-items: flex-end; flex-wrap: nowrap; }
 .hero h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
 .today { margin: 2px 0 0; color: #a7b4ca; font-size: 14px; }
@@ -139,11 +136,13 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .sheet { padding: 0; border: 0; border-radius: 18px; background: var(--card); color: var(--fg); width: min(440px, calc(100vw - 32px)); max-height: min(86vh, 720px); box-shadow: 0 10px 40px rgb(0 0 0 / .25); }
 .sheet[open] { display: flex; flex-direction: column; }
 .sheet::backdrop { background: rgb(0 0 0 / .4); }
-.sheet-in { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* flex: 1 1 auto here and in what a sheet holds, never flex: 1. Its basis of 0 made a sheet on an iPhone as tall as its
+   padding, at the bottom of the screen, because nothing else sets a sheet's height. */
+.sheet-in { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 #picker header { padding: 18px 18px 8px; }
 #picker h1 { font-size: 19px; margin: 0; outline: none; }  /* takes focus when opened, so no tick shows a focus ring */
 #picker header p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
-#picker ul { list-style: none; margin: 0; padding: 4px 8px; overflow: auto; min-height: 0; flex: 1; overscroll-behavior: contain; }
+#picker ul { list-style: none; margin: 0; padding: 4px 8px; overflow: auto; min-height: 0; flex: 1 1 auto; overscroll-behavior: contain; }
 #picker li label { position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 12px; cursor: pointer; }
 #picker li label:hover { background: var(--bg); }
 #picker input[type=checkbox] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
@@ -256,7 +255,12 @@ dialog { overscroll-behavior: contain; }
 /* type=text, not password: a password field brings the keychain and the wrong keyboard. So the dots come from here. */
 .code { width: 100%; font: inherit; font-size: 24px; text-align: center; letter-spacing: .4em; -webkit-text-security: disc; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
 .code::placeholder { font-size: 16px; letter-spacing: 0; }  /* the spacing is for the dots; a label would not fit */
-#lockCard h2 { margin: 0 0 4px; font-size: 18px; }
+#lockCard h2, #accountCard h2 { margin: 0 0 4px; font-size: 18px; }
+#accountCard .setrow { width: 100%; margin-top: 0; border: 0; border-bottom: 1px solid var(--line); background: none; font: inherit; text-align: left; cursor: pointer; }
+#accountCard .setrow.danger { border-bottom: 0; color: var(--danger); font-weight: 600; }
+#deleteDone { margin: 0; color: var(--ok); }
+#deleteAsk .code { min-height: 44px; }
+#deleteAsk button.primary { background: var(--danger); color: var(--accent-fg); }
 #lockCard .muted { margin: 0 0 4px; }
 #lockCard form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 #lockCard .code, #lockAsk .code { min-height: 44px; }
@@ -292,7 +296,7 @@ dialog { overscroll-behavior: contain; }
 
 /* ---------------------------------------------------------------- admin: the settings sheet for one app */
 #appSheet [hidden] { display: none; }
-.view { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+.view { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
 .as-top { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 6px; }
 #asIcon { display: flex; flex: none; }
 #asIcon .icon { --size: 52px; }
@@ -319,7 +323,7 @@ dialog { overscroll-behavior: contain; }
 /* the views in the sheet: the forms keep .editor without its box, and every target is 44 px, as in the main view */
 .sheet .editor { border: 0; width: auto; padding: 8px 18px 18px; background: none; }
 .sheet .editor, .sheet .editor form { display: flex; flex-direction: column; }
-.sheet .editor form { flex: 1; }
+.sheet .editor form { flex: 1 1 auto; }
 .sheet .editor p { overflow-wrap: anywhere; }
 .sheet .editor label.check { min-height: 44px; margin-top: 0; }
 .sheet .editor input:not([type=checkbox]):not([type=radio]) { min-height: 44px; }

@@ -127,6 +127,8 @@ class BrandedStatic(StaticFiles):
 app.mount("/static", BrandedStatic(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["pw_mode"] = lambda: password_mode()
+# In the stylesheet's address, so a browser fetches it again after an upgrade: /static sends no Cache-Control
+templates.env.globals["css_v"] = hashlib.sha256((BASE_DIR / "static" / "hub.css").read_bytes()).hexdigest()[:8]
 templates.env.globals.update(t=i18n.t, t_html=i18n.t_html, tn=i18n.tn, raw=i18n.raw, lang=lambda: i18n.LANG)
 signer = URLSafeTimedSerializer(SECRET_KEY, salt="session")
 unlock_signer = URLSafeTimedSerializer(SECRET_KEY, salt="app-unlock")
@@ -1499,6 +1501,28 @@ async def lock_apps(request: Request, user: str = Depends(api_user)):
     with db() as con:
         applock.set_locked(con, user, slug, False)
     return {"ok": True, "on": False}
+
+
+@app.post("/api/me/delete-data")
+async def delete_my_data(request: Request, user: str = Depends(api_user)):
+    """The user's own data in every app goes: documents, their branch of a shared app too, and key/value rows. Shared
+    data, settings and the code lock stay. Needs the code, or a typed word for someone who has no code."""
+    body = await _lock_body(request)
+    with db() as con:
+        has_code = applock.get(con, user) is not None
+    word = i18n.t("settings.delete_word")
+    if has_code:
+        if _require_code(user, body.get("code")).must_change:  # a one-time code only chooses a new code
+            raise HTTPException(403, i18n.t("lock.err.pick_new"))
+    elif not isinstance(body.get("confirm"), str) or body["confirm"].strip() != word:
+        raise HTTPException(400, i18n.t("settings.delete_type", word=word))
+    email = access.norm(user)
+    with db() as con:  # one transaction: all or nothing
+        docs = con.execute("DELETE FROM docs WHERE owner=?", (email,)).rowcount
+        keys = con.execute("DELETE FROM app_data WHERE lower(email)=?", (email,)).rowcount
+        con.execute("DELETE FROM claude_writes WHERE email=?", (email,))
+    log.info("Deleted the data of %s: %d documents, %d keys", email, docs, keys)
+    return {"ok": True, "docs": docs, "keys": keys}
 
 
 @app.get("/api/data/{app_name}")

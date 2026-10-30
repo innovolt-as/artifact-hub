@@ -3,7 +3,6 @@ Artifact Hub
 Admin
 admin@test.no
 @aria-label: Innstillinger
-Logg ut
 Gi Claude tilgang til å publisere apper i Artifact Hub?
 Claude
 ber om tilgang på vegne av admin@test.no. Den kan da opprette og oppdatere apper i huben.
