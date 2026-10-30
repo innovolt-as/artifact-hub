@@ -20,7 +20,7 @@ everyone".
 | Tool | |
 |---|---|
 | `list_apps` | All apps and link cards: slug, title, who has access, whether the data is personal or shared, whether it can be edited. |
-| `get_app` | The HTML of an app. |
+| `get_app` | The HTML of an app, and in `card` the line its [card recipe](APPS.md#a-line-on-the-front-page-card) gives right now, or the recipe's error, so Claude can check a recipe right after writing it. |
 | `create_app` | Publishes a new single-file app (`slug`, `html`, `title`, optional `description`, `emoji`, `private`, `shared_data`). |
 | `update_app` | Replaces the whole HTML of an app. |
 | `edit_app` | Small changes: a list of `{old, new}` replacements, applied all or nothing. |

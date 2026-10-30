@@ -125,7 +125,7 @@ artifact in the hub. See [docs/CONNECTOR.md](docs/CONNECTOR.md).
 An upload with the same name replaces the app and keeps its title, icon and access. You can also copy files
 straight into `data/artifacts/`; the hub reads the folder on every request.
 
-[docs/APPS.md](docs/APPS.md) covers the file layout, the storage APIs, the summary line on front-page cards and
+[docs/APPS.md](docs/APPS.md) covers the file layout, the storage APIs, the card line on the front page (recipe or `hub/summary`) and
 what the hub adds to every page.
 
 ## Security model

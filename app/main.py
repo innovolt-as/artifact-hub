@@ -37,7 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from app import access, banner, home, i18n, loginmail, mail, passwd, shared, versions
+from app import access, banner, cards, home, i18n, loginmail, mail, passwd, shared, versions
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -671,8 +671,10 @@ def index(request: Request, user: str = Depends(require_user)):
         prefs = home.get_prefs(con, user)
         mine = [a for a in apps if a["slug"] in prefs["apps"]]  # only the apps this user has chosen
         stats = home.visit_stats(con, user)
-        common = {a["slug"] for a in mine if a["data"] == "shared"}
-        summaries = home.summaries(con, user, [a["slug"] for a in mine], common) if prefs["view"] == "cards" else {}
+    summaries: dict[str, str] = {}
+    if prefs["view"] == "cards":
+        with db() as con:  # a new connection: the recipes read through doc_get/doc_list, which open their own
+            summaries = card_lines(con, user, mine, prefs["tz"])
     favs, top, rest = home.build_sections(mine, stats, prefs["pins"])
     available = home.picker(apps, prefs["apps"], prefs["seen"])
     now = time.localtime()  # fallback only; the page rewrites the date and greeting with the viewer's clock
@@ -681,8 +683,73 @@ def index(request: Request, user: str = Depends(require_user)):
         "index.html",
         {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "top": top, "rest": rest,
          "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
-         "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale")}},
+         "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale"), "tz": prefs["tz"] or ""}},
     )
+
+
+# ---------------------------------------------------------------- card recipes (app/cards.py)
+_RECIPE_RE = re.compile(r"<script\b[^>]*\bdata-hub-card\b[^>]*>(.*?)</script\s*>", re.I | re.S)
+_recipes: dict[Path, tuple[int, str | None]] = {}  # html file -> (st_mtime_ns, its recipe)
+
+
+def recipe_source(slug: str) -> str | None:
+    """The first <script data-hub-card> block of an app's HTML; None for link cards, unknown slugs and apps without one."""
+    found = artifact_root(slug)
+    if not found:
+        return None
+    path = found[0] if found[0].is_file() else found[0] / "index.html"
+    try:
+        mtime = path.stat().st_mtime_ns
+        cached = _recipes.get(path)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        m = _RECIPE_RE.search(path.read_text("utf-8", errors="replace"))
+    except OSError:
+        return None
+    _recipes[path] = (mtime, m.group(1) if m else None)
+    return _recipes[path][1]
+
+
+def card_result(user: str, slug: str, tz: str | None, now: float | None = None) -> cards.CardResult | None:
+    """Run the app's card recipe for this viewer; None if the app has none. The recipe reads through doc_get and
+    doc_list, so it sees exactly the documents the viewer sees in the app."""
+    source = recipe_source(slug)
+    if source is None:
+        return None
+    now = time.time() if now is None else now
+    day, zone = cards.today(tz, now)
+
+    def read(kind: str, path: str):
+        if kind == "doc":
+            return doc_get(slug, user, path)
+        return [{"id": i, "data": d} for i, d in doc_list(slug, user, path).items()]
+
+    return cards.run_recipe(source, read, today=day, now_ms=int(now * 1000), tz=zone)
+
+
+def card_lines(con: sqlite3.Connection, user: str, apps: list[dict], tz: str | None, now: float | None = None) -> dict[str, str]:
+    """The line for each app's card: its recipe's, else the stored hub/summary. A recipe that fails falls back to
+    the stored line only if that was written today (in the viewer's zone); an older one would be stale."""
+    now = time.time() if now is None else now
+    real = [a for a in apps if a["kind"] != "link"]
+    stored = home.summaries(con, user, [a["slug"] for a in real], {a["slug"] for a in real if a["data"] == "shared"})
+    out: dict[str, str] = {}
+    for a in real:
+        slug = a["slug"]
+        r = card_result(user, slug, tz, now)
+        if r is None:
+            s = stored.get(slug)
+        elif r.error:
+            log.warning("card recipe for %s failed: %s", slug, r.error.split(":", 1)[0])  # the code only, no document content
+            s = stored.get(slug)
+            if s and cards.day_of(s.at, tz) != cards.today(tz, now)[0]:
+                s = None
+        else:
+            text = home.card_line(r.text)
+            s = home.Summary(text, int(now)) if text else None
+        if s:
+            out[slug] = s.text
+    return out
 
 
 @app.get("/manifest.webmanifest")
@@ -1092,6 +1159,20 @@ async def prefs_view(request: Request, user: str = Depends(api_user)):
     return {"ok": True, "view": view}
 
 
+@app.post("/api/prefs/tz")
+async def prefs_tz(request: Request, user: str = Depends(api_user)):
+    """The browser tells the hub its time zone, so card recipes see the viewer's "today"."""
+    _require_json(request)
+    body = await request.json()
+    tz = body.get("tz") if isinstance(body, dict) else None
+    with db() as con:
+        try:
+            home.set_tz(con, user, tz)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+    return {"ok": True, "tz": tz}
+
+
 @app.post("/api/prefs/pin")
 async def prefs_pin(request: Request, user: str = Depends(api_user)):
     _require_json(request)
@@ -1103,6 +1184,19 @@ async def prefs_pin(request: Request, user: str = Depends(api_user)):
         raise HTTPException(404)
     with db() as con:
         pins = home.set_pin(con, user, slug, pinned)
+    return {"ok": True, "pins": pins}
+
+
+@app.post("/api/prefs/pins")
+async def prefs_pins(request: Request, user: str = Depends(api_user)):
+    """Save the order of the user's favourites."""
+    _require_json(request)
+    body = await request.json()
+    order = body.get("order") if isinstance(body, dict) else None
+    if not isinstance(order, list) or not all(isinstance(s, str) for s in order):
+        raise HTTPException(400, 'Send {"order": ["slug", ...]}')
+    with db() as con:
+        pins = home.set_pin_order(con, user, order)
     return {"ok": True, "pins": pins}
 
 

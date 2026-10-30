@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from typing import NamedTuple
+from zoneinfo import ZoneInfo
 
 from app import i18n
 from app.shared import SHARED
@@ -111,12 +113,14 @@ def _slugs(value) -> list[str]:
 
 
 def get_prefs(con: sqlite3.Connection, email: str) -> dict:
-    """view, pins, apps (chosen for the front page; [] when never chosen) and seen (None until the list
-    has been opened)."""
+    """view, pins, apps (chosen for the front page; [] when never chosen), seen (None until the list
+    has been opened) and tz (the viewer's time zone, None until the browser has told us)."""
     view = _get(con, email, "view", "icons")
     seen = _get(con, email, "seen", None)
+    tz = _get(con, email, "tz", None)
     return {"view": view if view in VIEWS else "icons", "pins": _slugs(_get(con, email, "pins", [])),
-            "apps": _slugs(_get(con, email, "apps", [])), "seen": None if seen is None else _slugs(seen)}
+            "apps": _slugs(_get(con, email, "apps", [])), "seen": None if seen is None else _slugs(seen),
+            "tz": tz if isinstance(tz, str) else None}
 
 
 def set_view(con: sqlite3.Connection, email: str, view: str) -> None:
@@ -125,10 +129,31 @@ def set_view(con: sqlite3.Connection, email: str, view: str) -> None:
     _put(con, email, "view", view)
 
 
+def set_tz(con: sqlite3.Connection, email: str, tz: str) -> None:
+    """Remember the viewer's IANA time zone (e.g. "Europe/Oslo"); ValueError if it is not one."""
+    try:
+        if not isinstance(tz, str) or len(tz) > 64:
+            raise ValueError(tz)
+        ZoneInfo(tz)
+    except (ValueError, OSError, KeyError):  # an unknown zone is a KeyError, a directory like "Europe" an OSError
+        raise ValueError(i18n.t("err.unknown_tz", tz=tz)) from None
+    _put(con, email, "tz", tz)
+
+
 def set_pin(con: sqlite3.Connection, email: str, slug: str, pinned: bool) -> list[str]:
     pins = [p for p in get_prefs(con, email)["pins"] if p != slug]
     if pinned:
         pins.append(slug)
+    _put(con, email, "pins", pins)
+    return pins
+
+
+def set_pin_order(con: sqlite3.Connection, email: str, order: list[str]) -> list[str]:
+    """Reorder the pins: pinned slugs in `order` first (no duplicates, unknown ones ignored), then the
+    pinned slugs `order` left out, in their old order."""
+    old = get_prefs(con, email)["pins"]
+    pins = [s for s in dict.fromkeys(order) if s in old]
+    pins += [s for s in old if s not in pins]
     _put(con, email, "pins", pins)
     return pins
 
@@ -184,16 +209,29 @@ def picker(apps: list[dict], chosen: list[str], seen: list[str] | None) -> list[
 
 
 # ---------------------------------------------------------------- summaries
+def card_line(text: object) -> str | None:
+    """The line a card shows for `text` (a recipe's result or a stored summary): trimmed and cut at SUMMARY_MAX
+    characters; None when that leaves nothing or it is not a string."""
+    if not isinstance(text, str):
+        return None
+    return text.strip()[:SUMMARY_MAX] or None
+
+
 def _text(raw: str) -> str | None:
     try:
         text = json.loads(raw).get("text")
     except (ValueError, AttributeError):
         return None
-    return text.strip()[:SUMMARY_MAX] if isinstance(text, str) and text.strip() else None
+    return card_line(text)
 
 
-def summaries(con: sqlite3.Connection, email: str, slugs: list[str], shared: set[str] = frozenset()) -> dict[str, str]:
-    """The newest non-empty summary per app, from the document store or the data API. Apps in `shared` have
+class Summary(NamedTuple):
+    text: str
+    at: int  # when it was stored (Unix seconds)
+
+
+def summaries(con: sqlite3.Connection, email: str, slugs: list[str], shared: set[str] = frozenset()) -> dict[str, Summary]:
+    """The newest non-empty summary per app and when it was stored, from the document store or the data API. Apps in `shared` have
     shared data (app/shared.py): their line is the shared document's, the same for everyone."""
     if not slugs:
         return {}
@@ -211,11 +249,11 @@ def summaries(con: sqlite3.Connection, email: str, slugs: list[str], shared: set
             ORDER BY at""",
         (*SUMMARY_DOC, email, *own, SHARED, *common, email, SUMMARY_KEY, *own),
     ).fetchall()
-    out: dict[str, str] = {}
+    out: dict[str, Summary] = {}
     for r in rows:  # oldest first, so the newest valid one is left standing
         text = _text(r["raw"])
         if text:
-            out[r["slug"]] = text
+            out[r["slug"]] = Summary(text, int(r["at"]))
     return out
 
 

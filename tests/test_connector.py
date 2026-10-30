@@ -90,6 +90,30 @@ def test_create_then_list_then_get(mcp, token, hub):
     assert (got["title"], got["emoji"], got["description"]) == ("Hei", "👋", "")
 
 
+def test_get_app_shows_card_line_or_error(mcp, token, hub):
+    page = "<!doctype html><html><head><title>T</title></head><body>{}</body></html>"
+    ok = "<script data-hub-card>function hubCard() { return 'tre'; }</script>"
+    bad = "<script data-hub-card>function hubCard() { throw new Error('au'); }</script>"
+    for slug, body in (("ok", ok), ("bad", bad), ("none", "")):
+        call(mcp, token, "create_app", slug=slug, html=page.format(body), title=slug)
+    card = lambda slug: json.loads(text(call(mcp, token, "get_app", slug=slug)))["card"]  # noqa: E731
+    assert card("ok") == {"text": "tre"}
+    assert card("bad")["error"].startswith("failed")
+    assert card("none") is None
+
+
+def test_get_app_card_is_the_line_the_card_shows(mcp, token):  # trimmed, cut at 140, blank is no line
+    page = "<!doctype html><html><head><title>T</title></head><body>{}</body></html>"
+    recipes = {"blank": "'   '", "long": "'  ' + 'y'.repeat(200)", "padded": "'  tre \\n'"}
+    for slug, value in recipes.items():
+        call(mcp, token, "create_app", slug=slug, title=slug,
+             html=page.format(f"<script data-hub-card>function hubCard() {{ return {value}; }}</script>"))
+    card = lambda slug: json.loads(text(call(mcp, token, "get_app", slug=slug)))["card"]  # noqa: E731
+    assert card("blank") == {"text": None}
+    assert card("long") == {"text": "y" * 140}
+    assert card("padded") == {"text": "tre"}
+
+
 def test_create_existing_returns_error_text(mcp, token):
     call(mcp, token, "create_app", slug="hei", html=PAGE, title="Hei")
     res = call(mcp, token, "create_app", slug="hei", html=PAGE, title="Hei")
@@ -262,6 +286,15 @@ def test_instructions_explain_shared_data_and_ask_first():
     from app import connector
     assert "shared_data" in connector.INSTRUCTIONS and "data/users/" in connector.INSTRUCTIONS
     assert "ask" in connector.INSTRUCTIONS.lower()
+
+
+def test_instructions_explain_rounds_errors_and_the_fixed_banner():
+    from app import cards, connector
+    text = connector.INSTRUCTIONS
+    assert "Promise.all" in text and f"{cards.MAX_ROUNDS} rounds" in text and f"{cards.MAX_READS} paths" in text
+    for code in (*cards.CODES, "too_many_reads", "bad_path", "failed: <message>"):
+        assert code in text, code
+    assert "top: var(--hub-banner-h, 0px)" in text
 
 
 def test_connector_writes_are_recorded(mcp, token, hub):

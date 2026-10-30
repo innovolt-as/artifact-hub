@@ -31,10 +31,26 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .small { font-size: 13px; }
 
 /* ---------------------------------------------------------------- front page */
+.topbar { position: sticky; top: 0; z-index: 20; color: #f3f6fb; padding: env(safe-area-inset-top) 0 8px;
+  background: linear-gradient(160deg, #0b1a33, #0f2a4d); }
+.topbar .hero-row { padding-top: 14px; }
+.topbar::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+.topbar.glow-ok::after { background: #3fd39c; animation: glow 900ms ease-out; }
+.topbar.glow-fail::after { background: #e5484d; animation: glow 900ms ease-out; }
+@keyframes glow { 0% { opacity: 0; } 25% { opacity: .35; } 100% { opacity: 0; } }
+.topbar .brand, .hero .brand { color: #f3f6fb; }
+.topbar nav a { color: #f3f6fb; }
+.topbar .who { color: #a7b4ca; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+.topbar button.link { color: #cfe0ff; }
+.topbar nav { display: flex; align-items: center; gap: 14px; font-size: 14px; min-width: 0; }
+@media (max-width: 480px) { .topbar .who { display: none; } }
 .hero { color: #f3f6fb; padding: 14px 0 22px;
   background: radial-gradient(700px 300px at 90% -20%, rgb(255 138 92 / .22), transparent 60%),
               radial-gradient(600px 340px at 0% 120%, rgb(63 211 156 / .16), transparent 60%),
               linear-gradient(160deg, #0b1a33, #123566); }
+/* Dark above the hero, so the gap a pull opens under the top bar is dark too (pull.js moves the hero down by at most
+   140px). At rest it is behind the top bar or above the page; a box-shadow is paint only, no layout or scrolling. */
+.hero { box-shadow: 0 -80px 0 80px #0b1a33; }
 .hero-in { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
 .hero-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .hero .brand { color: #f3f6fb; }
@@ -42,7 +58,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .hero nav a { color: #f3f6fb; }
 .hero .who { color: #a7b4ca; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
 .hero button.link { color: #cfe0ff; }
-.hero-main { margin-top: 22px; align-items: flex-end; flex-wrap: nowrap; }
+.hero-main { margin-top: 0; align-items: flex-end; flex-wrap: nowrap; }
 .hero h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
 .today { margin: 2px 0 0; color: #a7b4ca; font-size: 14px; }
 .today::first-letter { text-transform: uppercase; }
@@ -56,6 +72,13 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 #fav, #top { margin-bottom: 26px; }
 .app { position: relative; min-width: 0; }
 .app a { -webkit-touch-callout: none; }
+.cards .app a { user-select: none; -webkit-user-select: none; }
+.app.blink a { animation: blink 700ms ease-in-out; }
+@keyframes blink { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 40% { box-shadow: 0 0 0 4px var(--accent); border-color: var(--accent); } }
+.app.lifted { z-index: 5; transition: none; }
+.app.lifted a, .grid .app.lifted a:hover { transform: scale(1.04); box-shadow: 0 12px 30px -8px rgb(0 0 0 / .35); }
+#fav .app a, #fav .app img { -webkit-user-drag: none; } /* drag.js moves favourites, not the system's link drag */
+.app.sliding { transition: transform .2s; }
 .dot { position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--card); }
 .lock, .ext { position: absolute; top: 8px; font-size: 12px; color: var(--muted); }
 .ext { left: 10px; } .lock { right: 22px; }

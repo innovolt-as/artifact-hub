@@ -28,6 +28,9 @@ Use list_apps to find an app's slug. Use create_app only for a brand-new app; ne
 unless the app's current source is already in the conversation. Prefer edit_app for small changes.
 Only publish or change apps when the user explicitly asks you to.
 
+The hub puts a fixed banner at the top of every app page. Give a sticky or fixed top bar
+top: var(--hub-banner-h, 0px) (or var(--hub-banner-h, <its current top>)) so it sits right under the banner.
+
 Apps also keep data (what they read and write through window.claude.use("db")). By default an app's data is
 personal: list_app_data, get_app_data, set_app_data and delete_app_data reach the data of the user behind this
 connection only. An app can have shared data instead (list_apps shows "data": "shared"): then every document is
@@ -43,10 +46,25 @@ and say in the app's guide (meta/guide) what is shared and what is personal. upd
 switches an existing app; copy_my_data=true also copies the user's current documents into the shared data, where
 everyone with access sees them, so check them for personal content first.
 
-The hub's front page can show one line from each app on its card. An app sets it by writing the document
-hub/summary = {{"text": "<one short line, e.g. 93 hits ▼1>"}} (db.doc("hub/summary").set(...)) whenever the
-numbers it shows change. When you build or change an app, add or keep that line if the app has a natural
-headline number."""
+The hub's front page can show one line from each app on its card. Give the app a card recipe: a
+<script data-hub-card> block with a function hubCard({{ db, today, now, timeZone }}) that returns the line as a
+string (or null for none), e.g.
+<script data-hub-card>async function hubCard({{ db, today }}) {{ const d = await db.doc(`days/${{today}}`).get(); return d.exists ? d.data().kcal + " kcal" : null; }}</script>
+The recipe is read-only (db.doc(path).get(), and db.collection(path).get() with .where(...), .orderBy(...) and
+.limit(...); a collection read sees at most the 500 documents with the highest ids), has no network and no DOM, gets
+only plain functions, and has 0.25 s. today is the viewer's date as YYYY-MM-DD, now is milliseconds and timeZone the
+viewer's zone. Every read of a path the hub has not handed the recipe yet ends a round: the hub reads what that round
+asked for and runs the recipe again. There are at most {hub.cards.MAX_ROUNDS} rounds and {hub.cards.MAX_READS} paths
+per round, so read in parallel (Promise.all) or read a whole collection with where/orderBy/limit, not one document at
+a time in a loop with await (such a loop over seven days fails with too_many_reads). The server runs the recipe
+every time the front page is shown, so the line is always current. get_app shows what it gives in the card field:
+{{"text": <the line, or null>}}, or {{"error": <code>}} with the code timeout (over 0.25 s, reads included), memory
+(over 32 MB), no_function (no hubCard), not_text (returned something other than a string or null), too_many_reads
+(more rounds or paths than above), bad_path (asked for a path the hub cannot read) or failed: <message> (a syntax
+error or a throw). Add a recipe when the app has a natural headline number. Only a line that cannot be computed
+from the stored data is written by the app itself as the document hub/summary =
+{{"text": "<one short line, e.g. 93 hits ▼1>"}} (db.doc("hub/summary").set(...)); that is the fallback when there is
+no recipe or it fails."""
 
 
 class Edit(BaseModel):
@@ -121,7 +139,9 @@ def build_mcp() -> MCPServer:
     @mcp.tool(
         name="get_app",
         title="Get app source",
-        description="Return the current HTML source of an app (for a folder app: its index.html), with its title, description, emoji and kind. "
+        description="Return the current HTML source of an app (for a folder app: its index.html), with its title, description, emoji and kind, "
+        "and \"card\": the line its card recipe gives on the front page right now ({\"text\": <the line, or null for "
+        "none>}, {\"error\": <code>}, or null without a recipe). "
         "Call this before update_app or edit_app "
         "unless the app's current source is already in the conversation. Use list_apps to find the slug.",
         annotations=ToolAnnotations(readOnlyHint=True),
@@ -132,10 +152,17 @@ def build_mcp() -> MCPServer:
             user = _user()
             html = hub.page_source(slug)
             info = next((a for a in hub.list_artifacts(user) if a["slug"] == slug), {})
+            with hub.db() as con:
+                tz = hub.home.get_prefs(con, user)["tz"]
+            result = hub.card_result(user, slug, tz)
         except hub.HubError as e:
             return _error(str(e))
+        # the line exactly as the front page shows it (blank is null), or the recipe's error
+        card = (None if result is None else {"error": result.error} if result.error
+                else {"text": hub.home.card_line(result.text)})
         return json.dumps({"slug": slug, "title": info.get("title", ""), "description": info.get("description", ""),
-                           "emoji": info.get("emoji", ""), "kind": info.get("kind", ""), "html": html}, ensure_ascii=False)
+                           "emoji": info.get("emoji", ""), "kind": info.get("kind", ""), "html": html, "card": card},
+                          ensure_ascii=False)
 
     @mcp.tool(
         name="create_app",
