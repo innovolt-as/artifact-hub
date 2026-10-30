@@ -21,6 +21,7 @@
       }
       return { ok: r.ok, detail: typeof detail === "string" ? detail : "" };
     }).catch(() => ({ ok: false, detail: "" }));
+  window.hubPost = post;  // settings-account.js, which loads after this file
 
   const digits = (el) => { el.value = el.value.replace(/[^0-9]/g, ""); };
   card.addEventListener("input", (e) => { if (e.target.classList.contains("code")) digits(e.target); });

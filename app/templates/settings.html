@@ -48,6 +48,28 @@
   {% endif %}
   <p id="lockError" class="err small" role="alert"></p>
 </section>
+<section class="card settings" id="accountCard" data-failed="{{ t('settings.save_failed') }}" data-done="{{ t('settings.deleted') }}">
+  <h2>{{ t("settings.account") }}</h2>
+  <form method="post" action="/logout"><button class="setrow">{{ t("nav.logout") }}</button></form>
+  <button type="button" class="setrow danger" id="deleteData">{{ t("settings.delete_data") }}</button>
+  <p id="deleteDone" class="small" role="status"></p>
+</section>
+<dialog id="deleteAsk" class="editor" aria-labelledby="deleteTitle">
+  <form id="deleteForm">
+    <h1 id="deleteTitle" tabindex="-1">{{ t("settings.delete_title") }}</h1>
+    <p class="small">{{ t("settings.delete_hint") }}</p>
+    {% if has_code %}
+    <label>{{ t("settings.delete_code") }}{{ code_field("code", t("lock.code")) }}</label>
+    {% else %}
+    <label>{{ t("settings.delete_type", word=t("settings.delete_word")) }}<input type="text" name="confirm" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+    {% endif %}
+    <p id="deleteError" class="err small" role="alert"></p>
+    <div class="editor-actions">
+      <button type="button" class="small" id="deleteCancel">{{ t("admin.cancel") }}</button>
+      <button class="primary">{{ t("settings.delete_confirm") }}</button>
+    </div>
+  </form>
+</dialog>
 {% if has_code %}
 <dialog id="lockAsk" class="editor" aria-labelledby="lockAskTitle">
   <form id="lockAskForm">
@@ -63,4 +85,5 @@
 {% endif %}
 <script src="/static/settings.js" defer></script>
 <script src="/static/settings-lock.js" defer></script>
+<script src="/static/settings-account.js" defer></script>
 {% endblock %}
