@@ -49,6 +49,17 @@
       $('pwSet').disabled = true; $('pwNew').disabled = true;  // the dialog reloads the page when closed
     });
   }
+  document.querySelectorAll('.lockreset').forEach(b => b.onclick = async () => {
+    if (!confirm(fmt(T.confirmLockReset, { email: b.dataset.email }))) return;
+    const r = await reach(postJson('/api/people/lock-reset', { email: b.dataset.email }));
+    if (!r.ok) { $('peopleError').textContent = await failText(r); return; }
+    $('peopleError').textContent = '';
+    $('codeWho').textContent = b.dataset.email;
+    $('codeShown').textContent = (await r.json()).code;
+    $('codeDialog').showModal();
+  });
+  $('codeClose').onclick = () => $('codeDialog').close();
+  $('codeDialog').addEventListener('close', () => location.reload());  // the row is current again
   document.querySelectorAll('.unperson').forEach(b => b.onclick = async () => {
     if (!confirm(fmt(T.confirmRemove, { email: b.dataset.email }))) return;
     const r = await reach(postJson('/api/people/remove', { email: b.dataset.email }));

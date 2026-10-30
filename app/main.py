@@ -1579,6 +1579,11 @@ def _slugify(name: str) -> str:
     return s[:80] or "artifact"
 
 
+def _upload_slug(filename: str | None, slug: str | None) -> str:
+    """The address an upload lands on: the given slug, else the file name without its extension."""
+    return _slugify(slug or os.path.splitext(filename or "artifact")[0])
+
+
 def _new_app(slug: str) -> None:
     """A brand-new app goes straight onto the admins' front pages (others pick it from their list)."""
     with db() as con:
@@ -1586,9 +1591,8 @@ def _new_app(slug: str) -> None:
 
 
 def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: str | None) -> str:
-    filename = upload.filename or "artifact"
-    stem, ext = os.path.splitext(filename)
-    slug = _slugify(slug or stem)
+    ext = os.path.splitext(upload.filename or "artifact")[1]
+    slug = _upload_slug(upload.filename, slug)
     if not SLUG_RE.match(slug):
         raise HTTPException(400, i18n.t("err.invalid_name", name=slug))
     # a new version keeps the old name, emoji, private flag and banner switch (stored as false) unless overridden
@@ -1793,7 +1797,11 @@ def admin_people(request: Request, user: str = Depends(require_admin)):
     shown = (invited | ALLOWED_EMAILS) - ADMIN_EMAILS
     if password_mode():
         shown |= ADMIN_EMAILS - {access.norm(user)}  # other admins may need a password too
-    people = [{"email": e, "invited": e in invited and e not in ALLOWED_EMAILS, "admin": e in ADMIN_EMAILS}
+    with db() as con:
+        coded = applock.emails(con)
+    shown |= coded - {access.norm(user)}  # an admin with a code may need it reset; your own is reset on the server
+    people = [{"email": e, "invited": e in invited and e not in ALLOWED_EMAILS, "admin": e in ADMIN_EMAILS,
+               "has_code": e in coded and e != access.norm(user)}
               for e in sorted(shown)]
     if password_mode():
         with db() as con:
@@ -1844,16 +1852,22 @@ async def api_upload(
     title: str | None = Form(None),
     admin_only: bool = Form(False),
 ):
-    _upload_authorized(request)
+    who = _upload_authorized(request)
+    target = _upload_slug(file.filename, slug)
+    # only an existing app can be lost; with none at the address nothing is removed, and a surviving lock stays
+    if who != "token" and _meta_path(target):
+        require_unlocked(request, who, target)
     saved = _save_upload(file, slug, admin_only, title)
     return JSONResponse({"ok": True, "slug": saved, "url": f"{BASE_URL}/a/{saved}/"})
 
 
 @app.post("/api/delete")
 def api_delete(request: Request, slug: str = Form(...)):
-    _upload_authorized(request)
+    who = _upload_authorized(request)
     if not SLUG_RE.match(slug):
         raise HTTPException(400)
+    if who != "token":
+        require_unlocked(request, who, slug)
     removed = False
     for p in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json", ARTIFACTS_DIR / f"{slug}.link.json"):
         if p.exists():
@@ -1880,6 +1894,7 @@ async def api_access(request: Request, user: str = Depends(require_admin)):
     meta_path = _meta_path(slug) if isinstance(slug, str) else None
     if not meta_path:
         raise HTTPException(404)
+    require_unlocked(request, user, slug)
     if level not in access.LEVELS:
         raise HTTPException(400, i18n.t("access.unknown", level=level))
     if not isinstance(people, list) or not all(isinstance(e, str) for e in people):
@@ -1982,7 +1997,8 @@ def claude_warned(apps: list[dict]) -> set[str]:
 
 
 @app.get("/api/data-mode")
-def data_mode_preview(slug: str, user: str = Depends(require_admin)):
+def data_mode_preview(slug: str, request: Request, user: str = Depends(require_admin)):
+    require_unlocked(request, user, slug)
     try:
         return share_preview(slug, user)
     except HubError:
@@ -1996,6 +2012,7 @@ async def data_mode_set(request: Request, user: str = Depends(require_admin)):
     body = await request.json()
     if not isinstance(body, dict) or not isinstance(body.get("slug"), str) or not isinstance(body.get("shared"), bool):
         raise HTTPException(400, 'Send {"slug", "shared", "copy"}')
+    require_unlocked(request, user, body["slug"])
     try:
         copied = set_data_mode(body["slug"], body["shared"], copy_from=user if body.get("copy") is True else None)
     except HubError:
@@ -2088,6 +2105,20 @@ async def people_password(request: Request, user: str = Depends(require_admin)):
     return {"ok": True, "email": email}
 
 
+@app.post("/api/people/lock-reset")
+async def people_lock_reset(request: Request, user: str = Depends(require_admin)):
+    """A one-time app code for someone else, who must pick a new one. Never for your own: a lent admin phone
+    would otherwise walk past the lock."""
+    email = await _email_in(request)
+    if email == access.norm(user):
+        raise HTTPException(403, i18n.t("lock.err.not_yourself"))
+    with db() as con:
+        code = applock.reset(con, email)
+    if code is None:
+        raise HTTPException(404, i18n.t("lock.err.no_code_for"))
+    return {"ok": True, "code": code}
+
+
 @app.post("/api/people/remove")
 async def people_remove(request: Request, user: str = Depends(require_admin)):
     email = await _email_in(request)
@@ -2145,7 +2176,7 @@ async def api_edit(
     url: str = Form(""),
 ):
     """Rename (title and/or address) and set the icon of an artifact or link card."""
-    _upload_authorized(request)
+    who = _upload_authorized(request)
     meta_path = _meta_path(slug)
     if not meta_path:
         raise HTTPException(404)
@@ -2154,6 +2185,8 @@ async def api_edit(
         raise HTTPException(400, i18n.t("err.address_invalid", slug=new_slug))
     if new_slug != slug and _meta_path(new_slug):
         raise HTTPException(409, i18n.t("err.address_taken", slug=new_slug))
+    if new_slug != slug and who != "token":
+        require_unlocked(request, who, slug)  # before anything is written
 
     icon_data, icon_ext = None, ""
     if icon and icon.filename:
@@ -2192,6 +2225,7 @@ async def api_edit(
         with db() as con:  # users' stored data, choices and pins follow the artifact
             con.execute("UPDATE OR REPLACE docs SET slug=? WHERE slug=?", (new_slug, slug))
             home.rename(con, slug, new_slug)
+            applock.rename(con, slug, new_slug)
             shared.rename(con, slug, new_slug)
         log.info("Renamed artifact %s -> %s", slug, new_slug)
     return JSONResponse({"ok": True, "slug": new_slug})

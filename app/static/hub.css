@@ -190,6 +190,7 @@ code { font-size: 13px; background: var(--bg); padding: 1px 5px; border-radius: 
 html:has(dialog[open]) { overflow: hidden; }
 dialog { overscroll-behavior: contain; }
 .editor::backdrop { background: rgb(0 0 0 / .35); }
+.code-shown { font-size: 32px; font-weight: 700; letter-spacing: .3em; text-align: center; margin: 8px 0; font-variant-numeric: tabular-nums; }
 .editor h1 { font-size: 20px; margin: 0 0 12px; outline: none; }  /* takes focus when opened: no keyboard, no focus ring */
 .editor label { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 14px; font-weight: 600; }
 .editor label.check { flex-direction: row; font-weight: 400; }

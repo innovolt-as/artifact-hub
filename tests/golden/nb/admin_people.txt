@@ -17,3 +17,6 @@ ny@test.no
 Fjern
 user@test.no
 fra serveroppsettet
+Nullstill kode:
+Gi koden til personen nå. Den vises ikke igjen.
+Lukk
