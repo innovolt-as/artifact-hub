@@ -16,3 +16,10 @@ def test_pull_js_on_hub_pages(user_client, client):
 def test_pull_js_only_as_home_screen_app(client):
     js = client.get("/static/pull.js").text
     assert "navigator.standalone" in js and "display-mode: standalone" in js
+
+
+def test_pull_moves_content_not_header(client):
+    js = client.get("/static/pull.js").text
+    assert "data-pull-content" in js and "hubRefresh" in js and "passive: false" in js
+    assert "hub-pull-glow" in js and "hubDrag" in js
+    assert "navigator.standalone" in js  # still only in the home-screen app
