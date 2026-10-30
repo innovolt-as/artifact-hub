@@ -7,15 +7,17 @@
   const rows = () => [...$('appList').querySelectorAll('li[data-slug]')];
   const rowOf = slug => rows().find(li => li.dataset.slug === slug);
 
-  // An error shows in the sheet while it is open, otherwise under the list
-  function fail(msg) {
-    if (sheet.open) { $('asError').textContent = msg; return; }
+  // An error shows in the sheet of the app it is about, otherwise under the list
+  function fail(msg, slug = current) {
+    if (sheet.open && slug === current) { $('asError').textContent = msg; return; }
     const li = document.createElement('li');
-    li.textContent = `✗ ${msg}`; li.className = 'err';
+    li.textContent = `✗ ${slug ? slug + ': ' : ''}${msg}`; li.className = 'err';
     $('log').prepend(li);
   }
-  // A network failure reads like a failed response, so each caller has one error path
-  const reach = p => p.catch(() => ({ ok: false, status: 0, json: async () => ({ detail: T.netError }) }));
+  // A network failure, or the hub's redirect to the login page (fetch follows it and sees a 200), reads like a failed
+  // response, so each caller has one error path
+  const failed = (status, detail) => ({ ok: false, status, json: async () => ({ detail }) });
+  const reach = p => p.then(r => r.redirected ? failed(401, T.loggedOut) : r).catch(() => failed(0, T.netError));
   const why = r => r.status === 404 ? T.appGone : failText(r);
   function postSlug(url, slug) {
     const fd = new FormData(); fd.append('slug', slug);
@@ -42,7 +44,7 @@
     const mine = ++refreshes;
     let doc = null;
     try {
-      const r = await fetch('/admin', { cache: 'no-store' });
+      const r = await reach(fetch('/admin', { cache: 'no-store' }));
       if (r.ok) doc = new DOMParser().parseFromString(await r.text(), 'text/html');
     } catch { return false; }
     const fresh = doc && doc.getElementById('appList');
@@ -57,7 +59,10 @@
     }
     return true;
   }
-  const saved = async () => { if (!await refresh()) fail(T.refreshFailed); };
+  async function saved() {
+    $('asError').textContent = '';
+    if (!await refresh()) fail(T.refreshFailed);
+  }
 
   // --- the sheet
   function render(li) {
@@ -74,18 +79,22 @@
     $('asData').checked = d.shared === '1';
     $('asBanner').checked = d.banner === '1';
   }
+  let openedAt = 0;
   function open(li) {
     current = li.dataset.slug;
     $('asError').textContent = '';
     render(li);
     sheet.showModal();
+    openedAt = performance.now();
   }
   $('appList').addEventListener('click', e => {
     const row = e.target.closest('.arow');
     if (row) open(row.closest('li'));
   });
   $('asClose').onclick = () => sheet.close();
-  sheet.addEventListener('click', e => { if (e.target === sheet) sheet.close(); });  // the backdrop
+  sheet.addEventListener('click', e => {  // the backdrop, unless this is the second click of the double click that opened it
+    if (e.target === sheet && performance.now() - openedAt > 350) sheet.close();
+  });
   sheet.addEventListener('close', () => {
     // The tapped row may have been replaced since, so the browser cannot always put the focus back by itself
     const li = rowOf(current);
@@ -98,15 +107,21 @@
   let busy = false;
   for (const box of [$('asData'), $('asBanner')]) box.addEventListener('click', e => { if (busy) e.preventDefault(); });
   // work() saves and returns the response, or null when a dialog takes over from here
-  async function flip(box, work) {
+  async function flip(work) {
+    const slug = current;
     busy = true;
     $('asError').textContent = '';
-    const r = await work();
-    if (r && r.ok) await saved();
-    else if (r) { box.checked = !box.checked; fail(await why(r)); }
-    busy = false;
+    try {
+      const r = await work();
+      if (r && r.ok) await saved();
+      else if (r) {
+        const li = rowOf(current);  // the row knows what is saved, and by now the sheet may show another app
+        if (li) render(li);
+        fail(await why(r), slug);
+      }
+    } finally { busy = false; }
   }
-  $('asBanner').addEventListener('change', e => flip(e.target, () => postSlug('/api/toggle-banner', current)));
+  $('asBanner').addEventListener('change', () => flip(() => postSlug('/api/toggle-banner', current)));
 
   $('asDelete').onclick = async () => {
     const slug = current, btn = $('asDelete');
@@ -115,7 +130,7 @@
     btn.disabled = true;
     const r = await postSlug('/api/delete', slug);
     btn.disabled = false;
-    if (!r.ok) return fail(await why(r));
+    if (!r.ok) return fail(await why(r), slug);
     rowOf(slug)?.remove();
     sheet.close();
     await saved();
@@ -249,7 +264,7 @@
     $('shEmpty').textContent = canCopy ? T.shareEmpty : T.shareOn;
     shDlg.showModal();
   }
-  $('asData').addEventListener('change', e => flip(e.target, async () => {
+  $('asData').addEventListener('change', e => flip(async () => {
     if (!e.target.checked) return setData(false, false);
     const slug = current;
     const r = await reach(fetch('/api/data-mode?slug=' + encodeURIComponent(slug)));
@@ -259,10 +274,11 @@
     return null;
   }));
   async function share(copy) {
+    const slug = current;
     const r = await setData(true, copy);
     if (r.ok) await saved();
     shDlg.close();
-    if (!r.ok) fail(await why(r));
+    if (!r.ok) fail(await why(r), slug);
   }
   $('shCopy').onclick = () => share(true);
   $('shEmpty').onclick = () => share(false);

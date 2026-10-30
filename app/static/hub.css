@@ -215,7 +215,7 @@ dialog { overscroll-behavior: contain; }
 .tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
 .tabs a { padding: 8px 14px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 600; font-size: 15px; }
 .tabs a[aria-current="page"] { color: var(--fg); border-bottom-color: var(--accent); }
-@media (max-width: 480px) { .tabs { gap: 2px; } .tabs a { padding: 8px 11px; font-size: 14px; } }  /* all four on one line */
+@media (max-width: 480px) { .tabs { gap: 2px; } .tabs a { padding: 11px; font-size: 14px; } }  /* all four on one line, 44 px high */
 .kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0 24px; }
 .kpi { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
 .kpi span { display: block; font-size: 13px; color: var(--muted); }

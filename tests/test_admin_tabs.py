@@ -108,3 +108,11 @@ def test_picker_rules_stay_out_of_other_sheets(client):
     css = client.get("/static/hub.css").text
     assert "#picker input[type=checkbox]" in css
     assert ".sheet input[type=checkbox]" not in css
+
+
+def test_a_redirect_counts_as_logged_out(client, admin_client):
+    # fetch follows the hub's 302 to /login and sees a 200, so the script has to look for the redirect itself
+    r = client.post("/api/toggle-banner", data={"slug": "a"})
+    assert r.status_code == 302 and "/login" in r.headers["location"]
+    assert "r.redirected" in client.get("/static/admin-apps.js").text
+    assert '"loggedOut": "Ikke innlogget"' in admin_client.get("/admin").text
