@@ -33,8 +33,8 @@ The data tools let you, say, tell Claude what you had for lunch and have it log 
 folder (images, a service worker) stay as they are. Link cards can only be changed with `update_app_info`. The
 connector cannot delete apps.
 
-New apps from Claude are only visible to admins until you share them, either with the access button on the admin
-page or by asking Claude to set `private: false` (everyone who can log in). Sharing with specific people is done on
+New apps from Claude are only visible to admins until you share them, either under *Access* in the app's settings on
+the admin page or by asking Claude to set `private: false` (everyone who can log in). Sharing with specific people is done on
 the admin page. `private` leaves an existing list of people alone; it comes back if *Specific people* is chosen
 again.
 
