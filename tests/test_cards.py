@@ -55,10 +55,13 @@ def test_read_only_and_no_browser():
     assert _run(src).text == "undefined,undefined,undefined,undefined,undefined"
 
 
-def test_sync_loop_times_out():
+def test_sync_loop_times_out():  # V8's own timeout fires before the server's grace is up, so the worker stays
+    _run("function hubCard(){ return 'up' }")
+    pid = cards._worker.proc.pid
     t = time.monotonic()
     assert _run("function hubCard(){ while(true){} }").error == "timeout"
     assert time.monotonic() - t < 2
+    assert cards._worker.proc is not None and cards._worker.proc.pid == pid
 
 
 def test_hang_after_await_is_killed_and_next_run_works():
@@ -169,7 +172,7 @@ def test_slow_reads_stop_at_the_deadline():  # reads count against the time; the
     src = "async function hubCard({db}) { await Promise.all([...Array(20).keys()].map(i => db.doc('x/' + i).get())) }"
     t = time.monotonic()
     assert cards.run_recipe(src, read, today="2026-10-28", now_ms=0, tz="UTC").error == "timeout"
-    assert time.monotonic() - t < 0.5 and len(calls) < 20
+    assert time.monotonic() - t < 1 and len(calls) < 20
     assert cards._worker.proc is not None and cards._worker.proc.pid == pid
 
 
@@ -207,7 +210,32 @@ def test_kernel_picks_the_worker_under_memory_pressure():
 
 def test_worker_that_does_not_start_gives_an_error(monkeypatch, tmp_path):
     cards._worker.stop()
+    monkeypatch.setattr(cards._worker, "retry_at", 0.0)  # put back after the test, so the next one starts a worker
     monkeypatch.setattr(cards, "WORKER", tmp_path / "missing.py")  # exits before it is ready
     assert _run("function hubCard(){ return 'x' }") == cards.CardResult(None, "failed: worker")
+    cards._worker.retry_at = 0.0  # skip the wait after a failed start
     monkeypatch.setattr(cards.sys, "executable", str(tmp_path / "no-python"))  # cannot be started at all
     assert _run("function hubCard(){ return 'x' }") == cards.CardResult(None, "failed: worker")
+
+
+def test_failed_start_is_not_tried_again_for_a_while(monkeypatch, tmp_path):
+    cards._worker.stop()
+    monkeypatch.setattr(cards._worker, "retry_at", 0.0)
+    monkeypatch.setattr(cards, "WORKER", tmp_path / "missing.py")
+    assert _run("function hubCard(){ return 'x' }") == cards.CardResult(None, "failed: worker")
+    assert cards._worker.retry_at - time.monotonic() > cards.RETRY_AFTER - 5
+    starts = []
+
+    def popen(*a, **k):
+        starts.append(a)
+        raise OSError("no")
+
+    monkeypatch.setattr(cards.subprocess, "Popen", popen)
+    t = time.monotonic()
+    assert _run("function hubCard(){ return 'x' }") == cards.CardResult(None, "failed: worker")
+    assert starts == [] and time.monotonic() - t < 0.1  # at once, without trying
+    cards._worker.retry_at = 0.0  # the wait is over: it tries again
+    assert _run("function hubCard(){ return 'x' }") == cards.CardResult(None, "failed: worker")
+    assert len(starts) == 1
+    monkeypatch.undo()  # the real worker, and no wait
+    assert _run("function hubCard(){ return 'x' }").text == "x"

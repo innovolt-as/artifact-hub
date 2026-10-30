@@ -3,8 +3,9 @@
 The recipe runs in V8 (mini-racer) in a worker process (cards_worker.py), with a fresh context per run, a time
 limit for all rounds together and a memory limit. It reads through a read-only `db` (cards_shim.js) and only sees
 the data run_recipe hands it: a read of a path it does not have yet ends the round with the paths it needs, the
-caller's `read` fetches them, and the recipe runs again with them, at most MAX_ROUNDS times. A recipe that hangs
-after an `await` cannot be stopped inside V8, so a job that overruns gets the worker process killed.
+caller's `read` fetches them, and the recipe runs again with them, at most MAX_ROUNDS times. V8 stops a recipe that
+runs past the deadline itself and the worker answers "timeout"; one that hangs after an `await` cannot be stopped
+inside V8, so a job still running GRACE seconds after the deadline gets the worker process killed.
 """
 import contextlib
 import json
@@ -26,6 +27,8 @@ MAX_ROUNDS = 5
 MAX_READS = 50  # paths one round may ask for
 START_LIMIT = 10.0  # seconds a new worker may take to load V8; not counted in any recipe's time
 LINE_MAX = 1 << 20  # characters read of one answer line; the worker cuts its strings far below this
+GRACE = 0.05  # seconds past the deadline before a worker is killed, so V8's own timeout answers first and it stays
+RETRY_AFTER = 30.0  # seconds after a worker failed to start before the next try; meanwhile recipes fail at once
 WORKER = Path(__file__).with_name("cards_worker.py")
 CODES = ("timeout", "memory", "no_function", "not_text")  # the worker's error codes besides "failed"
 BROKEN = {"error": "failed", "message": "worker"}  # the worker died or did not answer with a JSON object
@@ -43,12 +46,16 @@ class _Worker:
     def __init__(self):
         self.lock = threading.Lock()
         self.proc: subprocess.Popen | None = None
+        self.retry_at = 0.0  # time.monotonic() before which no new start is tried
 
     def start(self) -> bool:
-        """Have a running worker that has loaded V8. False if it does not come up."""
+        """Have a running worker that has loaded V8. False if it does not come up, and then without trying again for
+        RETRY_AFTER seconds, so a worker that cannot start does not cost every recipe on the page a new try."""
         if self.proc is not None and self.proc.poll() is None:
             return True
         self.stop()  # a worker that died on its own
+        if time.monotonic() < self.retry_at:
+            return False
         try:
             self.proc = subprocess.Popen([sys.executable, "-I", str(WORKER)], stdin=subprocess.PIPE,
                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
@@ -57,6 +64,7 @@ class _Worker:
         except (OSError, ValueError):  # could not be started, or exited before it was ready
             pass
         self.stop()
+        self.retry_at = time.monotonic() + RETRY_AFTER
         return False
 
     def stop(self) -> None:
@@ -78,7 +86,6 @@ class _Worker:
         if len(line) > LINE_MAX:
             raise ValueError("answer line too long")
         return json.loads(line)
-
 
     def ask(self, job: dict, deadline: float) -> dict:
         """Run one job. A worker that is late, dead or answers garbage is killed."""
@@ -133,7 +140,7 @@ def run_recipe(source: str, read: Callable[[str, str], object], *, today: str, n
                 return CardResult(None, "timeout")
             job = {"source": source, "docs": docs, "cols": cols, "today": today, "now": now_ms, "tz": tz,
                    "time_limit": deadline - time.monotonic(), "memory_limit": MEMORY_LIMIT}
-            answer = _worker.ask(job, deadline)
+            answer = _worker.ask(job, deadline + GRACE)
             if "need" not in answer:
                 return _result(answer)
             need = answer["need"]
