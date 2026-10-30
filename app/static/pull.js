@@ -3,15 +3,16 @@
  *
  * Only when the hub runs as a home-screen app: iOS has no pull to refresh there, while a browser tab has its own.
  * It works like other iPhone apps. The bar on top stays still: the front page's .topbar, or the app banner
- * (hub-banner, which sits outside <body>). Only the content under it ([data-pull-content], or <body> in an app)
- * follows the finger, with rubber-band resistance, and a ring sits in the gap that opens. Letting go before ARM
- * slides the content back. Letting go after ARM holds it open while the ring spins, and then
+ * (hub-banner, which sits outside <body>). Only the content under it ([data-pull-content], or in an app the children
+ * of <body> that are not fixed, so a tab bar stays put) follows the finger, with rubber-band resistance, and a ring
+ * sits in the gap that opens. Letting go before ARM slides the content back. Letting go after ARM holds it open
+ * while the ring spins, and then
  *   - on the front page (window.hubRefresh from home.js) refreshes in place, slides back and glows the top bar
  *     green, or red when the refresh failed;
  *   - elsewhere reloads the page, and the new page glows the banner once (sessionStorage "hub-pull-glow").
  * While our pull is under way, touchmove prevents the default so iOS's own rubber band at the top doesn't run as
  * well. Only transform and opacity change per frame. The transform is removed again once the content is back, so
- * position: fixed in the apps works as before (while the content moves, fixed elements in an app move with it).
+ * position: fixed inside the moved elements works as before (while they move, such elements move with them).
  *
  * Starts only with the page scrolled to the very top, not while typing in a field, not on something fixed
  * (sheets, menus, tab bars), not inside a scroll area that is not at its top, not with two fingers, and not while a
@@ -41,6 +42,23 @@
     return null;
   }
 
+  // The elements that move. In an app these are the children of <body> that are not position: fixed, not <body>
+  // itself: a transformed <body> becomes the frame of everything fixed inside it, and a tab bar fixed at the bottom
+  // would land at the end of a tall page, out of sight. <body> itself only when it has text of its own (that text
+  // would stay behind) or a display: contents child (no box to move).
+  function parts(box) {
+    if (box !== document.body) return [box];
+    const kids = [];
+    for (const n of box.childNodes) {
+      if (n.nodeType === 3 && n.data.trim()) return [box];
+      if (n.nodeType !== 1) continue;
+      const cs = getComputedStyle(n);
+      if (cs.display === "contents") return [box];
+      if (cs.display !== "none" && cs.position !== "fixed") kids.push(n);
+    }
+    return kids.length ? kids : [box];
+  }
+
   function blocked(target) {
     if ((document.scrollingElement || document.documentElement).scrollTop > 0 || scrollY > 0) return true;
     const a = document.activeElement;
@@ -68,13 +86,13 @@
     glowTimer = setTimeout(off, GLOW);
   }
 
-  // Back after a pull in an app (or on a page without hubRefresh) reloaded it
+  // Back after a pull in an app (or on a page without hubRefresh) reloaded it: the same page, a moment ago
   try {
-    if (sessionStorage.getItem(FLAG)) {
-      sessionStorage.removeItem(FLAG);
-      glow(header(content()), true);
-    }
-  } catch (e) { /* no sessionStorage: no glow */ }
+    const raw = sessionStorage.getItem(FLAG);
+    sessionStorage.removeItem(FLAG);
+    const f = JSON.parse(raw);
+    if (f && f.path === location.pathname && Date.now() - f.t < 20000) glow(header(content()), true);
+  } catch (e) { /* no sessionStorage or a bad flag: no glow */ }
 
   // ------------------------------------------------------------------ the ring
   const ARROW = "M12 5v14M6 13l6 6 6-6", ARC = "M21 12a9 9 0 1 1-2.6-6.4";
@@ -98,14 +116,15 @@
 
   // ------------------------------------------------------------------ the content
   let state = "";  // "" at rest, "pull" following the finger, "back" sliding back, "busy" held open
-  let el = null, bar = null, saved = null, y = 0, timer = 0, gen = 0;
+  let moving = [], bar = null, saved = [], y = 0, timer = 0, gen = 0, leaving = false;
 
-  // The first move down: remember the content's own inline styles and put the ring under the bar
+  // The first move down: remember the moving elements' own inline styles and put the ring under the bar
   function begin() {
-    el = content();
-    bar = header(el);
-    saved = { attr: el.hasAttribute("style"), props: ["transform", "transition"].map((p) =>
-      [p, el.style.getPropertyValue(p), el.style.getPropertyPriority(p)]) };
+    const box = content();
+    bar = header(box);
+    moving = parts(box);
+    saved = moving.map((el) => ({ el, attr: el.hasAttribute("style"), props: ["transform", "transition"].map((p) =>
+      [p, el.style.getPropertyValue(p), el.style.getPropertyPriority(p)]) }));
     indicator();
     const below = bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0;
     // z-index under the bar (20), so the ring comes out from under it; the moving content is a stacking context
@@ -121,8 +140,10 @@
   // the content's edge, coming out from under the bar; `slide` animates there, otherwise it is immediate
   function move(to, slide) {
     y = to;
-    el.style.setProperty("transition", slide ? SLIDE : "none", "important");
-    el.style.setProperty("transform", `translate3d(0,${to}px,0)`, "important");
+    for (const el of moving) {
+      el.style.setProperty("transition", slide ? SLIDE : "none", "important");
+      el.style.setProperty("transform", `translate3d(0,${to}px,0)`, "important");
+    }
     host.style.transition = slide ? SLIDE + ",opacity .28s" : "none";
     host.style.transform = `translate(-50%,${Math.min(to / 2, to - HOLD / 2) - 18}px)`;
   }
@@ -146,22 +167,24 @@
   // Back at rest: the transform goes away entirely, so position: fixed in the apps is relative to the screen again
   function rest() {
     clearTimeout(timer);
-    if (el) {
-      for (const [p, v, prio] of saved.props) {
+    for (const { el, attr, props } of saved) {
+      for (const [p, v, prio] of props) {
         if (v) el.style.setProperty(p, v, prio);
         else el.style.removeProperty(p);
       }
-      if (!saved.attr && !el.getAttribute("style")) el.removeAttribute("style");
+      if (!attr && !el.getAttribute("style")) el.removeAttribute("style");
     }
     if (host) host.style.display = "none";
-    el = bar = saved = null;
+    moving = saved = [];
+    bar = null;
     y = 0;
     state = "";
     gen++;
   }
 
+  // They all slide alike, so the first one says when they are back
   addEventListener("transitionend", (e) => {
-    if (state === "back" && e.target === el && e.propertyName === "transform") rest();
+    if (state === "back" && e.target === moving[0] && e.propertyName === "transform") rest();
   });
 
   async function hold() {
@@ -174,8 +197,16 @@
     move(HOLD, true);
     const refresh = window.hubRefresh;  // home.js loads after this file, so look it up now
     if (typeof refresh !== "function") {
-      try { sessionStorage.setItem(FLAG, "1"); } catch (e) { /* no glow then */ }
+      try {
+        sessionStorage.setItem(FLAG, JSON.stringify({ path: location.pathname, t: Date.now() }));
+      } catch (e) { /* no glow then */ }
       location.reload();
+      // Still here after 10 s (a beforeunload said stay, say): let go again. Once the page is going it never runs.
+      setTimeout(() => {
+        if (me !== gen || leaving) return;
+        try { sessionStorage.removeItem(FLAG); } catch (e) { /* nothing to remove */ }
+        back();
+      }, 10000);
       return;
     }
     const ok = await Promise.race([
@@ -216,9 +247,10 @@
       return;
     }
     if (state !== "pull") {
-      // Not for a swipe that is more sideways than down (a carousel, say), not once the page has taken the gesture
-      // as its own scroll (we could not stop its rubber band any more), and not if it scrolled since touchstart
-      if (Math.abs(t.clientX - startX) > dist || !e.cancelable || blocked(from)) {
+      // Not for a swipe that is clearly sideways (a carousel, say); a first move that is only a little off is a pull,
+      // or iOS's own bounce would get the gesture. Not once the page has taken the gesture as its own scroll (we
+      // could not stop its rubber band any more), and not if it scrolled since touchstart.
+      if (Math.abs(t.clientX - startX) > dist + 6 || !e.cancelable || blocked(from)) {
         startY = null;
         return;
       }
@@ -249,5 +281,9 @@
     if (state === "pull" || state === "back") rest();
   });
   // Back from the page cache with the content still held open
-  addEventListener("pageshow", (e) => { if (e.persisted && state) rest(); });
+  addEventListener("pageshow", (e) => {
+    leaving = false;
+    if (e.persisted && state) rest();
+  });
+  addEventListener("pagehide", () => { leaving = true; });
 })();

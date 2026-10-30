@@ -48,6 +48,9 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
   background: radial-gradient(700px 300px at 90% -20%, rgb(255 138 92 / .22), transparent 60%),
               radial-gradient(600px 340px at 0% 120%, rgb(63 211 156 / .16), transparent 60%),
               linear-gradient(160deg, #0b1a33, #123566); }
+/* Dark above the hero, so the gap a pull opens under the top bar is dark too (pull.js moves the hero down by at most
+   140px). At rest it is behind the top bar or above the page; a box-shadow is paint only, no layout or scrolling. */
+.hero { box-shadow: 0 -80px 0 80px #0b1a33; }
 .hero-in { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
 .hero-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .hero .brand { color: #f3f6fb; }
