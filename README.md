@@ -158,8 +158,9 @@ screen and for 10 minutes after, and each app is unlocked separately on each dev
 
 Known limits:
 
-- Whatever an app keeps in `localStorage`, IndexedDB or a service worker cache is outside the lock, and so is a file of a folder app fetched before the lock was turned on, which can
-  stay in the browser's cache. Nothing on the server can empty an old cache.
+- Whatever an app keeps in `localStorage`, IndexedDB or a service worker cache is outside the lock, and so is a file of
+  a folder app fetched before the lock was turned on, which can stay in the browser's cache. Nothing on the server can
+  empty an old cache.
 - Anyone who holds your phone can ask the Claude app on it about your data.
 - The lock is yours alone. Other people with access to a [shared-data](docs/APPS.md#shared-data) app still see it.
 - A borrowed admin phone can invite new people. They see apps marked *Everyone* and their shared data, never your

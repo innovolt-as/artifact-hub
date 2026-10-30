@@ -244,8 +244,19 @@ def _stuck_link(admin_client):
 def test_a_link_card_at_a_surviving_lock_can_be_managed(locked, admin_client):
     c = _stuck_link(admin_client)
     assert c.post("/api/access", json={"slug": "notat", "level": "admin", "people": []}).status_code == 200
-    assert edit(c, new_slug="notat2").status_code == 200
-    assert c.post("/api/delete", data={"slug": "notat2"}).status_code == 200
+    assert edit(c, title="Nytt").status_code == 200
+    assert c.post("/api/delete", data={"slug": "notat"}).status_code == 200
+
+
+def test_a_link_card_at_a_surviving_lock_cannot_get_a_new_address(locked, admin_client):
+    unlock(admin_client, "notat")
+    assert admin_client.put("/api/data/notat/k", json={"value": 1}).status_code == 200
+    c = _stuck_link(admin_client)
+    assert edit(c, new_slug="annet").status_code == 423
+    with main.db() as con:
+        assert applock.is_locked(con, ADMIN, "notat") and not applock.is_locked(con, ADMIN, "annet")
+    assert c.get("/api/data/notat").status_code == 423
+    assert c.post("/api/delete", data={"slug": "notat"}).status_code == 200
 
 
 def test_a_link_card_at_a_surviving_lock_can_be_deleted(locked, admin_client):

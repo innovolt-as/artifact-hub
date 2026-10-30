@@ -349,7 +349,7 @@ def require_unlocked(request: Request, user: str, slug: str) -> None:
 
 
 def require_unlocked_to_manage(request: Request, user: str, slug: str) -> None:
-    """For the admin actions: a link card is no app, so a lock that outlived the app at its address does not stop them."""
+    """For delete, access and upload: a link card is no app, so a lock that outlived the app at its address does not stop them."""
     path = _meta_path(slug)
     if not (path and path.name.endswith(".link.json")):
         require_unlocked(request, user, slug)
@@ -2196,7 +2196,7 @@ async def api_edit(
     if new_slug != slug and _meta_path(new_slug):
         raise HTTPException(409, i18n.t("err.address_taken", slug=new_slug))
     if new_slug != slug and who != "token":
-        require_unlocked_to_manage(request, who, slug)  # before anything is written
+        require_unlocked(request, who, slug)  # before anything is written; strict: a rename moves the lock, not the data
 
     icon_data, icon_ext = None, ""
     if icon and icon.filename:
