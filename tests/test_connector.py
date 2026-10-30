@@ -288,6 +288,15 @@ def test_instructions_explain_shared_data_and_ask_first():
     assert "ask" in connector.INSTRUCTIONS.lower()
 
 
+def test_instructions_explain_rounds_errors_and_the_fixed_banner():
+    from app import cards, connector
+    text = connector.INSTRUCTIONS
+    assert "Promise.all" in text and f"{cards.MAX_ROUNDS} rounds" in text and f"{cards.MAX_READS} paths" in text
+    for code in (*cards.CODES, "too_many_reads", "bad_path", "failed: <message>"):
+        assert code in text, code
+    assert "top: var(--hub-banner-h, 0px)" in text
+
+
 def test_connector_writes_are_recorded(mcp, token, hub):
     _page(hub)
     call(mcp, token, "set_app_data", slug="mat", path="days/d", data={})

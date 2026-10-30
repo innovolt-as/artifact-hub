@@ -102,15 +102,38 @@ async function hubCard({ db, today }) {
 
 `hubCard` gets `{ db, today, now, timeZone }` and returns a string, or `null` for no line (it may be `async`).
 
-- `db` is read-only: `db.doc(path).get()`, `db.collection(path).get()` and `.where(field, op, value)` on a
-  collection (a collection read sees at most the 500 documents with the highest ids). It reads what the viewer sees in the app: personal data, or in an app with shared data the shared
+- `db` is read-only: `db.doc(path).get()`, `db.collection(path).get()`, and `.where(field, op, value)`,
+  `.orderBy(field, dir)` and `.limit(n)` on a collection (a collection read sees at most the 500 documents with the
+  highest ids). It reads what the viewer sees in the app: personal data, or in an app with shared data the shared
   documents and the viewer's own branch.
 - `today` is the viewer's date as `YYYY-MM-DD`, `now` the time in milliseconds and `timeZone` the viewer's IANA zone
   (the hub learns it from the browser; until then it is the server's).
 - No DOM and no network, only plain functions. The recipe has 0.25 seconds for everything it does and 32 MB of memory;
   one that takes longer, or throws, fails (see below for what the card then shows).
 - The first `<script data-hub-card>` in the page counts. The line is trimmed and cut at 140 characters and shown as
-  plain text. Claude can see what it gives with `get_app` (the `card` field).
+  plain text. Claude can see what it gives with `get_app`: the `card` field is `{"text": ...}` with the line (or
+  `null` for none), or `{"error": ...}` with one of the codes below.
+
+The recipe reads in rounds. It only sees the data the hub has handed it, and a read of anything else ends the round:
+the hub reads every path that round asked for and runs the recipe again from the start, now with that data. There
+are at most 5 rounds and 50 paths per round. So read in parallel with `Promise.all`, or read a whole collection with
+`where`/`orderBy`/`limit`, rather than one document at a time in a loop with `await`: a loop over the seven days of a
+week takes a round per day and fails with `too_many_reads`, although the same loop works in the app.
+
+```js
+// week: an array of dates as YYYY-MM-DD
+const days = await Promise.all(week.map((d) => db.doc(`days/${d}`).get()));
+```
+
+| Error | |
+|---|---|
+| `timeout` | The recipe took more than 0.25 seconds, reads included. |
+| `memory` | It used more than 32 MB. |
+| `no_function` | The block defines no `hubCard` function. |
+| `not_text` | It returned something other than a string or `null`. |
+| `too_many_reads` | It needed more than 5 rounds, or more than 50 paths in one round. |
+| `bad_path` | It asked for a path the hub cannot read. |
+| `failed: <message>` | A syntax error or an exception, with its first line. `failed: worker` means the hub could not run recipes at all. |
 
 What wins: the recipe, when the app has one. If it fails, the card shows the stored `hub/summary` line only if it was
 written today in the viewer's time zone; an older one would be stale, so the card then has no line.
@@ -133,19 +156,26 @@ When the hub serves an HTML file from an app it adds:
 - **`hub.js`**, first in `<head>`, for the storage above.
 - **A banner** at the top: a dark strip with a back arrow, the hub's logo and the app's icon and name, linking to
   the front page. It stays fixed at the top while the page scrolls (an empty placeholder of the same height keeps the content below
-  it) and is left out when printing. Its height is available as the CSS variable `--hub-banner-h`. It sits in its own shadow DOM, so
+  it) and is left out when printing. Its height is available as the CSS variable `--hub-banner-h` (see
+  [below](#a-top-bar-under-the-banner)), and links to anchors and `scrollIntoView` stop under it. It sits in its own shadow DOM, so
   the app's CSS and the banner's CSS do not affect each other. It only goes into pages the browser opens, not
   into HTML an app fetches with `fetch()` or shows in an iframe.
 - **Pull to refresh** in the home-screen app, where iOS has none. It only starts when the page is scrolled to the
-  top and you are not typing, and does nothing in a normal browser tab.
+  top and you are not typing, and does nothing in a normal browser tab. It moves the direct children of `<body>`
+  with the finger, except those that are `position: fixed`: a fixed tab bar that is a direct child of `<body>` stays
+  put, while a fixed element nested inside another element moves along until the pull is over.
 - **Two CSS rules** that keep the page from scrolling sideways on phones: `overflow-x: clip` on `html` and `body`,
   and at least 16px text in form fields on touch screens, so iOS does not zoom in and stay zoomed.
 
+### A top bar under the banner
+
+The banner is fixed at the top of the screen, so an app's own sticky or fixed top bar (`position: sticky` or
+`position: fixed` with `top: 0`) would end up under it. Place the bar right below the banner with
+`top: var(--hub-banner-h, 0px)`, or `top: var(--hub-banner-h, <its current value>)` to keep a value of its own. The
+variable is only set while the banner is there, and follows its height (safe area included) when the screen turns.
+
 ### Turning the banner off
 
-Apps with their own sticky top bar should place it under the banner with
-`top: var(--hub-banner-h, <your own value>)`; the variable is only set when the banner is there.
-
 The *banner* button on the admin page turns the banner off for one app (`"banner": false` in its meta). Turn it off
-for apps that are exactly one screen tall (`100dvh`) or have a fixed top bar (`position: fixed; top: 0`), since
-the banner takes space from the first and covers the second.
+for apps that are exactly one screen tall (`100dvh`): with the banner they no longer fit, and a strip of them is
+always out of sight. Turn it off as well for an app whose top bar cannot be moved as above.

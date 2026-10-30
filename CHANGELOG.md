@@ -2,6 +2,13 @@
 
 ## v1.3.0 (unreleased)
 
+### Before you upgrade
+
+- The banner in apps now stays fixed at the top, so it covers an app's own sticky or fixed top bar. Give such a bar
+  `top: var(--hub-banner-h, <its current value>)` before upgrading: older versions never set the variable, so the
+  change does nothing until then. Or turn the banner off for that app on the admin page. Turn it off for apps that
+  are exactly one screen tall (`100dvh`) too. See "A top bar under the banner" in `docs/APPS.md`.
+
 ### New
 
 - Card recipes: an app can put a `<script data-hub-card>` in its page that turns its data into the line on its
@@ -11,13 +18,14 @@
 - Pull to refresh moves the content with your finger, keeps the header still and glows green when it is done.
 - A sticky top row on the front page.
 - Hold and drag a favourite to change the order. The order is saved.
+- The connector's `get_app` returns a `card` field: the line the app's card recipe gives right now, or the recipe's
+  error, so Claude can check a recipe right after writing it.
 
 ### Changed
 
 - The star, the view switch and "Choose apps" no longer reload the page.
 - The front page no longer reloads by itself after 5 minutes.
-- The banner in apps now always stays fixed at the top. An app with its own sticky top bar should place it with
-  `top: var(--hub-banner-h, 0px)`; see `docs/APPS.md`.
+- The banner in apps now always stays fixed at the top, and links to anchors in an app stop under it.
 - Card recipes run in V8 through `mini-racer` 0.14.1, so the image gets bigger (about 22 MB compressed).
 
 ## v1.2.0 (2026-10-27)
