@@ -139,7 +139,7 @@ def _theme(ctx) -> str:
     try:
         with db() as con:
             return home.get_theme(con, user)
-    except (sqlite3.Error, ValueError):  # ValueError: the stored text is not JSON
+    except sqlite3.Error:
         return "auto"
 
 

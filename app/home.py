@@ -132,7 +132,10 @@ def set_view(con: sqlite3.Connection, email: str, view: str) -> None:
 
 def get_theme(con: sqlite3.Connection, email: str) -> str:
     """The viewer's chosen theme; "auto" (follow the device) when never chosen or the stored value is unknown."""
-    theme = _get(con, email, "theme", "auto")
+    try:
+        theme = _get(con, email, "theme", "auto")
+    except ValueError:  # the stored text is not JSON
+        return "auto"
     return theme if theme in THEMES else "auto"
 
 

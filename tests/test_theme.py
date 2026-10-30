@@ -80,8 +80,10 @@ def test_css_follows_the_choice(client):
 def test_bad_stored_theme_text_is_auto(hub, user_client):
     with hub.db() as con:
         con.execute("INSERT INTO prefs(email, key, value) VALUES('user@test.no', 'theme', 'not json{')")
-    r = user_client.get("/")
-    assert r.status_code == 200 and "data-theme" not in r.text.split("<head>")[0]
+    for path in ("/", "/settings"):
+        r = user_client.get(path)
+        assert r.status_code == 200 and "data-theme" not in r.text.split("<head>")[0]
+    assert 'value="auto" checked' in user_client.get("/settings").text
 
 
 def test_settings_needs_login(client):
