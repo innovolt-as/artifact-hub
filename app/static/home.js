@@ -1,6 +1,7 @@
 // Front page: greeting and date from the viewer's clock, pinning (the star on a card in a list; hold or right-click
 // on an icon in a closed section for a menu) and the «Arrange apps» list. Prefs live on the account (/api/prefs/*).
-// The page never reloads: it fetches itself again, swaps in what changed and blinks those cards.
+// The page fetches itself again, swaps in what changed and blinks those cards. It reloads only when the hub has a new
+// home.js, drag.js or stylesheet (an upgrade): the old scripts would run against the new markup.
 //
 // Every section (Favourites, each group, Other) opens as a list of cards and closes into a grid of icons on a tap on
 // its heading (toggleSection); the choice is saved on the account like the other prefs.
@@ -17,6 +18,10 @@
   const picker = document.getElementById("picker");
   const groupsDlg = document.getElementById("groups"); // «Groups»: make, rename, delete and order the groups
   const S = JSON.parse(document.getElementById("__hub_strings").textContent);
+  // The addresses of the scripts and the stylesheet this page runs (static_url: they change with the file's content)
+  const assetsOf = (d) => [...d.querySelectorAll('script[src*="/static/home.js"], script[src*="/static/drag.js"], link[rel=stylesheet][href*="/static/hub.css"]')]
+    .map((n) => n.getAttribute("src") || n.getAttribute("href")).sort().join(" ");
+  const running = assetsOf(document);
   const failed = () => alert(S.save_failed);
   const post = (url, body) =>
     fetch(url, {
@@ -199,6 +204,21 @@
       document.addEventListener("hub:idle", check);
     });
 
+  // The hub was upgraded since this page loaded (a home-screen app resumed): its scripts and the page's markup no
+  // longer fit. Only for a real answer: not the stored copy the service worker gives (data-hub-offline), whose scripts
+  // are the ones that ran when it was stored.
+  const newScripts = (doc) => !doc.documentElement.hasAttribute("data-hub-offline") && assetsOf(doc) !== running;
+  // Once in 30 s at most, so a page that keeps being served with other addresses can't reload in a loop
+  function reload() {
+    try {
+      const last = +sessionStorage.getItem("hub-reloaded") || 0;
+      if (Date.now() - last < 30000) return false;
+      sessionStorage.setItem("hub-reloaded", String(Date.now()));
+    } catch { /* no storage: reload anyway */ }
+    location.reload();
+    return true;
+  }
+
   async function run(quiet) {
     // Busy again by the time this resumes, e.g. drag.js opens the menu as it lets go: wait on
     do { await idle(); } while (busy());
@@ -221,6 +241,7 @@
     }
     if (!doc.getElementById("home")) return false; // e.g. the login page after the session ran out
     do { await idle(); } while (busy()); // don't move cards under a finger: something may have started while fetching
+    if (newScripts(doc) && reload()) return false;
     try {
       const back = offline(); // the copy is showing and the server answered: draw the real page, without blinking
       apply(doc, quiet || back, back);
@@ -494,10 +515,11 @@
   addEventListener("scroll", closeMenu, { passive: true });
 
   // ------------------------------------------------------------ «Arrange apps» and «Groups»
-  // Each tick and each group change is saved at once; closing the list refreshes the page if anything changed. A group
-  // change redraws the list from the groups the hub answers with (drawGroups), and a refused one says why inside the
-  // list. The group menu, the name field and the delete question open inside the list, under the row or heading they
-  // belong to, one at a time (opened). Group names are typed by people: they only ever go into the page as text.
+  // Each tick and each group change is saved at once; closing a list refreshes the page if anything changed. A group
+  // change redraws both lists from the groups the hub answers with (drawGroups, drawWindow), and a refused one says why
+  // inside the list. In «Arrange apps» the group menu (and the name field for «New group …») opens under the app's row;
+  // in «Groups» the name field and the delete question open under the group's row or the «New group» button; one at a
+  // time (opened). Group names are typed by people: they only ever go into the page as text.
   let changed = false, seenSent = false;
   const saving = new Set();
   const track = (p) => { saving.add(p); p.finally(() => saving.delete(p)); };
@@ -529,11 +551,19 @@
   }
   // Group requests go one after the other, so their answers are drawn in the order they were asked
   let chain = Promise.resolve();
-  function inTurn(url, body) {
-    const p = chain.then(() => send(url, body));
+  function turn(job) {
+    const p = chain.then(job);
     chain = p.catch(() => {});
     return p;
   }
+  const inTurn = (url, body) => turn(() => send(url, body));
+  // drag.js: the save of a dropped row in «Groups» (job() resolves to whether the hub kept it) goes in the same line, so a
+  // rename or delete right after the drop is answered with the new order, and «Done» waits for it
+  window.hubGroupsSave = (job) => {
+    const p = turn(job);
+    track(p.catch(() => {}));
+    return p;
+  };
   // The second tap of a double tap on a menu item must not tick or untick the row that is under it once the menu has
   // closed. While the hub answers, the busy menu takes it; when the answer came first, the first click inside the menu's
   // old place within 400 ms of the choice is dropped (detail 0 is a key, never dropped). A new menu ends that.
@@ -649,7 +679,10 @@
     p.textContent = text;
     li.append(p);
   }
-  const clearErrors = () => pickList()?.querySelectorAll("li > .gerr").forEach((p) => p.remove());
+  const clearErrors = () => {
+    pickList()?.querySelectorAll("li > .gerr").forEach((p) => p.remove());
+    groupsDlg.querySelector(".gwerr").textContent = ""; // a failed drag in «Groups» (drag.js)
+  };
 
   let opened = null; // {el, done(back)}: the open menu, name field or question; back = keyboard focus returns
   function closeOpen(back = false) {
@@ -802,14 +835,16 @@
     });
   }
 
-  const onListClick = (e) => {
+  // «Arrange apps»: the button with an app's group
+  picker.addEventListener("click", (e) => {
     const pick = at(e, ".gpick");
-    if (pick) {
-      const li = pick.closest("li");
-      if (opened?.el.matches(".gmenu") && opened.el.parentNode === li) closeOpen(true);
-      else groupMenu(li);
-      return;
-    }
+    if (!pick) return;
+    const li = pick.closest("li");
+    if (opened?.el.matches(".gmenu") && opened.el.parentNode === li) closeOpen(true);
+    else groupMenu(li);
+  });
+  // «Groups»: rename, delete and the «New group» button
+  groupsDlg.addEventListener("click", (e) => {
     const ren = at(e, ".grename");
     if (ren) {
       const sec = ren.closest(".pgroup"), gh = sec.querySelector(".gh");
@@ -819,9 +854,7 @@
     if (del) return askDelete(del.closest(".pgroup"));
     const add = at(e, ".gnew");
     if (add) nameField({ put: (f) => add.after(f), hide: add, back: add });
-  };
-  picker.addEventListener("click", onListClick);
-  groupsDlg.addEventListener("click", onListClick);
+  });
   // A finger or a button going down outside the group menu closes it (its own button toggles it on the click)
   picker.addEventListener("pointerdown", (e) => {
     if (!opened?.el.matches(".gmenu") || opened.el.contains(e.target)) return;

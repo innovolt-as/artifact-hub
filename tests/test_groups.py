@@ -536,8 +536,9 @@ def test_group_markup_open(hub, user_client):
     html = user_client.get("/").text
     sec = _sec(html, f"g-{gid}")
     assert f'<section id="g-{gid}" class="group" data-group="{gid}" data-order="group" data-open="1">' in sec
-    assert '<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true" data-label="Åpne eller lukk Jobb">' in sec
+    assert '<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true">Jobb<span class="gcount">' in sec
     assert 'Jobb<span class="gcount">· 2</span><span class="chev"></span></button></h3>' in sec
+    assert "data-label" not in sec
     assert sec.index('data-slug="b"') < sec.index('data-slug="a"') and 'data-slug="c"' not in sec
     assert "hidden" not in sec and "gclosed" not in sec
 
@@ -554,14 +555,14 @@ def test_closed_group_markup(hub, user_client):
     assert grid.count('aria-hidden="true"') == 2  # a screen reader gets the name, not the letters
     assert '<a class="gicon" href="/a/a/" data-slug="a">' in grid and "<span>A</span>" in grid
     head = sec[sec.index('class="gtoggle"'):sec.index("</h3>")]
-    assert 'data-label="Åpne eller lukk Jobb"' in head and "aria-label" not in head  # named by its text and count
+    assert "data-label" not in head and "aria-label" not in head  # named by its text and count
 
 
 def test_closed_group_names_are_escaped_in_the_heading_label(hub, user_client):
     _front(hub, "a")
     gid = _grp(hub, '<b>x</b>"&', ["a"], open_=False)
     sec = _sec(user_client.get("/").text, f"g-{gid}")
-    assert 'data-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in sec and "<b>x</b>" not in sec
+    assert "&lt;b&gt;x&lt;/b&gt;&#34;&amp;<span" in sec and "<b>x</b>" not in sec
 
 
 def test_closed_group_keeps_its_lines_in_the_hidden_list(hub, user_client):
@@ -613,7 +614,7 @@ def test_group_name_escaped(hub, user_client):
     html = user_client.get("/").text
     sec = _sec(html, f"g-{gid}")
     assert "&lt;b&gt;x&lt;/b&gt;&#34;&amp;" in sec and "<b>x</b>" not in html
-    assert 'data-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in sec
+    assert "&lt;b&gt;x&lt;/b&gt;&#34;&amp;<span" in sec
 
 
 # ---------------------------------------------------------------- folding (home.js, hub.css)
@@ -789,3 +790,34 @@ def test_picker_guards_double_taps_and_order():
         assert f'inTurn("{route}"' in body or "inTurn(url" in body
     assert 'send("/api/prefs/groups/' not in body
     assert "aria-busy" in body and "tabIndex = -1" in body and "deleting" in body
+
+
+def test_groups_window_drag_joins_the_line_and_shows_its_error_inside():
+    drag, home, css = _static("drag.js"), _static("home.js"), _static("hub.css")
+    # the order of the groups is sent in home.js's line of group requests, and «Done» waits for it
+    assert "window.hubGroupsSave" in home and "function turn(job)" in home and "const inTurn = (url, body) => turn(" in home
+    assert "track(p.catch" in home
+    assert "window.hubGroupsSave ? window.hubGroupsSave(send) : send()" in drag
+    # a failed drop in the window says so inside it; the front page keeps its alert
+    assert 'querySelector("#groups .gwerr")' in drag and "where.win && windowError(" in drag and "alert(" in drag
+    assert ".gwerr" in home and "#groups .gwerr" in css
+    # the last row's gap is its own margin, not the distance to a button that may be hidden
+    assert "items[i].matches(ROW) ? null : items[i].nextElementSibling" in drag
+
+
+def test_groups_window_has_an_error_line(hub, user_client):
+    _front(hub, "a")
+    w = _groups_window(user_client.get("/").text)
+    assert '<p class="gerr gwerr" role="alert"></p>' in w and w.index("gwerr") < w.index('class="glist"')
+
+
+def test_hub_css_scopes_section_spacing_and_taps():
+    css = _static("hub.css")
+    # the heading reset is for the open/closed sections, not the offline lists, which keep their spacing
+    assert ".apps > section[data-open] > .sec { margin: 0; }" in css and ".apps > section > .sec" not in css
+    # closed Favourites, groups and Other end 18 px below; the ids of the open rule would otherwise win
+    assert ':is(#fav, .group, #rest)[data-open="0"] { margin-bottom: 18px; }' in css
+    # the iPhone tap rule reaches the buttons of «Groups»; nothing is left of a picker «New group» button
+    assert "#groups button { touch-action: manipulation;" in css and "#picker .gnew" not in css and "#picker .gh button" not in css
+    js = _static("home.js")
+    assert 'picker.addEventListener("click", onListClick)' not in js and "onListClick" not in js

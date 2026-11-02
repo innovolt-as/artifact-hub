@@ -17,7 +17,8 @@
  * than SLOP px before the hold is up is a scroll, not a drag. The right mouse button keeps its own menu (home.js).
  *
  * Holding a group's row in the «Groups» window (#groups, not its buttons) works the same: the rows move up and down and
- * the drop saves the order of the groups.
+ * the drop saves the order of the groups, in the same line as home.js's other group requests (window.hubGroupsSave),
+ * and a failed save shows its message in the window (#groups .gwerr), not in an alert.
  *
  * Holding a group's heading (.gtoggle) the same way lifts the whole group section, open or closed, as one block. It
  * moves up and down among the other groups only (Favourites and the rest stay put), and the drop saves the order of
@@ -114,7 +115,9 @@
     const gaps = slots.map((s, i) => {
       if (!block) return gap;
       if (i + 1 < slots.length) return slots[i + 1].y - s.y - s.h;
-      const after = items[i].nextElementSibling;
+      // A group on the page: up to whatever follows the groups. A row of the «Groups» window: its own margin (the
+      // button after it may be hidden)
+      const after = items[i].matches(ROW) ? null : items[i].nextElementSibling;
       return after ? after.getBoundingClientRect().top + sy - s.y - s.h : parseFloat(getComputedStyle(items[i]).marginBottom) || 0;
     });
     el.classList.add("lifted");
@@ -259,7 +262,8 @@
       const n = d.to === d.from ? 0 : ++saved;
       if (n) latest.set(where.key, n);
       const keys = o.map((x) => keyOf(d.kind, x));
-      const sent = n ? save(d.url, d.body(keys)) : null; // now, not after the glide
+      if (n && where.win) windowError(""); // a new try
+      const sent = n ? save(d.url, d.body(keys), d.block) : null; // now, not after the glide
       d.el.classList.add("sliding");
       d.el.style.transform = offset(d, d.el, places(d, o).get(d.el));
       settle(d, () => {
@@ -290,22 +294,34 @@
   // ------------------------------------------------------------------ save
   // The whole order; resolves to whether the hub kept it. keepalive: the request still goes out when an app is
   // opened right after the drop.
-  function save(url, body) {
-    return fetch(url, {
+  // The order of the groups is sent in the line of home.js's other group requests (window.hubGroupsSave), so a rename or
+  // a delete asked right after a drop in «Groups» is answered with the new order, and «Done» waits for the save.
+  function save(url, body, groups = false) {
+    const send = () => fetch(url, {
       method: "POST",
       credentials: "same-origin",
       keepalive: true,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => r.ok, () => false);
+    return groups && window.hubGroupsSave ? window.hubGroupsSave(send) : send();
   }
+
+  // The window's own place for an error (home.js clears it); "" empties it
+  function windowError(text) {
+    const p = document.querySelector("#groups .gwerr");
+    if (p) p.textContent = text;
+    return !!p;
+  }
+  const hubStrings = () => JSON.parse(document.getElementById("__hub_strings").textContent);
 
   // Save number n failed, and what it moved has landed
   function unsaved(n, where, before) {
     // A later save of the same section (or of the groups) sends its whole order again, and a card or group held
     // right now, or pressed and about to lift, must not move under the finger
     if (latest.get(where.key) === n && !drag && !press) restore(where, before);
-    setTimeout(() => alert(JSON.parse(document.getElementById("__hub_strings").textContent).save_failed), SETTLE);
+    // A failed drop in «Groups» says so inside the window (the alert would sit behind it); the front page has its alert
+    setTimeout(() => { if (!(where.win && windowError(hubStrings().save_failed))) alert(hubStrings().save_failed); }, SETTLE);
   }
 
   // Puts the cards or icons in `list` in the order of `keys` (those not in it last) without a glide; the nodes that

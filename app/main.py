@@ -1399,6 +1399,8 @@ def api_me(user: str = Depends(api_user)):
 # ---------------------------------------------------------------- routes: front page prefs (app/home.py)
 @app.post("/api/prefs/view")
 async def prefs_view(request: Request, user: str = Depends(api_user)):
+    """Kept for pages opened before v1.7.0. It only sets the starting values of Favourites and Other for a user who has
+    not opened or closed them themselves (the front page no longer has a list/icons switch)."""
     _require_json(request)
     body = await request.json()
     view = body.get("view") if isinstance(body, dict) else None

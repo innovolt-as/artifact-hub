@@ -22,7 +22,7 @@
 {# A section's heading: a button with the name, the number of apps and a chevron; it folds the section. A section is a
    list of cards when open and, when closed, a grid of icons (below) with the list hidden #}
 {% macro section_head(name, count, open) -%}
-<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="{{ 'true' if open else 'false' }}" data-label="{{ t('home.group_toggle', name=name) }}">{{ name }}<span class="gcount">· {{ count }}</span><span class="chev"></span></button></h3>
+<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="{{ 'true' if open else 'false' }}">{{ name }}<span class="gcount">· {{ count }}</span><span class="chev"></span></button></h3>
 {%- endmacro %}
 
 {# The closed section: one tappable icon with the name under it for each app (the name is the link's text, so the icon is hidden from screen readers) #}
@@ -165,6 +165,7 @@
       <h1 id="groupsTitle" tabindex="-1" autofocus>{{ t("home.groups_title") }}</h1>
       <p>{{ t("home.groups_hint") }}</p>
     </header>
+    <p class="gerr gwerr" role="alert"></p>
     <div class="glist">
       {% for g, rows in available if g %}{{ group_row(g, rows|length) }}{% endfor %}
       <button type="button" class="gnew"><span aria-hidden="true">＋</span> {{ t("js.home.group_new") }}</button>

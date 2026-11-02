@@ -185,8 +185,8 @@ def test_open_section_is_a_list_with_a_heading_button(hub, user_client):
     html = _front_html(user_client)
     fav, rest = _sec(html, "fav"), _sec(html, "rest")
     assert fav.startswith('<section id="fav" data-order="pins" data-open="1">')
-    assert ('<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true" '
-            'data-label="Åpne eller lukk Favoritter">Favoritter<span class="gcount">· 2</span>'
+    assert ('<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true">'
+            'Favoritter<span class="gcount">· 2</span>'
             '<span class="chev"></span></button></h3>') in fav
     assert '<ul class="cards">' in fav and fav.count('class="pin"') == 2 and "gicons" not in fav
     assert rest.startswith('<section id="rest"') and 'data-open="1"' in rest

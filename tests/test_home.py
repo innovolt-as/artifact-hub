@@ -699,7 +699,10 @@ def test_home_js_hooks(client):
     js = client.get("/static/home.js").text
     for hook in ("hubRefresh", "hub:menu", "hub:idle", "/api/prefs/tz", "pageshow", "DOMParser"):
         assert hook in js
-    assert "STALE_MS" not in js and "location.reload" not in js
+    assert "STALE_MS" not in js
+    # the page reloads only when the hub's scripts or stylesheet have new addresses (an upgrade), and only for a real answer
+    assert js.count("location.reload") == 1 and "assetsOf(doc) !== running" in js and "static/home.js" in js
+    assert 'hasAttribute("data-hub-offline")' in js and "hub-reloaded" in js
 
 
 def test_drag_js_hooks(client):
