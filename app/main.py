@@ -64,6 +64,8 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 SITE_NAME = os.environ.get("SITE_NAME", "Artifact Hub")
 # Optional branding: files with these names in BRANDING_DIR replace the defaults in app/static/
 BRANDING_DIR = Path(os.environ.get("BRANDING_DIR") or DB_PATH.parent / "branding")
+PRECACHE_HEADER = "x-hub-precache"  # the service worker sends it when it fetches a copy of an app
+DEST_HEADER = "x-hub-dest"  # and this, naming the destination, on a navigation it passes on (Sec-Fetch-Dest says empty)
 BRANDING_FILES = ("logo.svg", "favicon-32.png", "apple-touch-icon.png")
 
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
@@ -103,7 +105,7 @@ ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin pag
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
 MAX_ICON_BYTES = 2 * 1024 * 1024
-META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data")  # what survives a re-upload
+META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline")  # what survives a re-upload
 
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -541,6 +543,7 @@ def list_artifacts(user: str) -> list[dict]:
                 "people": access.people(meta) if admin else [],
                 "banner": meta.get("banner") is not False,  # the strip at the top of the app (banner.py)
                 "data": "shared" if shared.is_shared(meta) else "personal",  # app/shared.py
+                "offline": kind != "link" and meta.get("offline") is True,  # the page is kept on the phone
                 "updated": mtime,
                 "emoji": meta.get("emoji", ""),
                 "icon_url": f"/icon/{slug}?v={int(icon.stat().st_mtime)}" if icon else None,
@@ -781,7 +784,8 @@ def index(request: Request, user: str = Depends(require_user)):
         "index.html",
         {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "top": top, "rest": rest,
          "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
-         "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale"), "tz": prefs["tz"] or ""}},
+         "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale"), "tz": prefs["tz"] or "",
+                       "offline_apps": [a["slug"] for a in apps if a["offline"] and a["kind"] != "link" and a["slug"] not in locked]}},
     )
 
 
@@ -872,6 +876,13 @@ def manifest():
     )
 
 
+@app.get("/sw.js")
+def service_worker():
+    """The hub's service worker, from the root so its scope covers every page."""
+    return FileResponse(static_file("sw.js"), media_type="text/javascript; charset=utf-8",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
 @app.get("/a/{slug}")
 def artifact_redirect(slug: str):
     return RedirectResponse(f"/a/{slug}/", status_code=301)
@@ -886,18 +897,26 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     if not can_see(meta, user):
         raise HTTPException(404)
     protected = app_locked(user, slug)
+    # the service worker's copy of a front page: not a visit, never of an app that is locked or not marked
+    precache = request.headers.get(PRECACHE_HEADER) == "1" and path in ("", "index.html")
+    if precache:
+        if protected:
+            raise _locked_error()
+        if meta.get("offline") is not True:
+            raise HTTPException(404)
     if protected and not unlocked(request, user, slug):
-        if request.headers.get("sec-fetch-dest", "document") == "document":
+        if _opened(request):
             return _lock_screen(request, user, slug, request.url.path + (f"?{request.url.query}" if request.url.query else ""))
         raise _locked_error()
-    if path in ("", "index.html"):
+    if path in ("", "index.html") and not precache:
         _log_visit(user, slug)
     # only a page the browser opens gets the banner, not HTML an app fetches or shows in an iframe
-    with_banner = request.headers.get("sec-fetch-dest", "document") == "document"
+    with_banner = precache or _opened(request)
+    offline = meta.get("offline") is True and not protected
     if root.is_file():
         if path not in ("", "index.html"):
             raise HTTPException(404)
-        return _html_with_shim(root, slug, user, with_banner=with_banner, locked=protected)
+        return _html_with_shim(root, slug, user, with_banner=with_banner, locked=protected, offline=offline, copy=precache)
     target = (root / (path or "index.html")).resolve()
     if root.resolve() not in target.parents and target != root.resolve():
         raise HTTPException(404)
@@ -906,9 +925,18 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     if not target.is_file() or target.name == "meta.json":
         raise HTTPException(404)
     if target.suffix.lower() in (".html", ".htm"):
-        return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected)
+        return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected, offline=offline, copy=precache)
     # a locked app's files must not outlive the unlock in the browser's cache
     return FileResponse(target, headers={"Cache-Control": "no-store"} if protected else None)
+
+
+def _opened(request: Request) -> bool:
+    """A page the browser opens in its tab, not HTML an app fetches or shows in a frame. A navigation the service worker
+    passes on arrives as Sec-Fetch-Dest: empty, with the real destination in X-Hub-Dest (static/sw.js)."""
+    dest = request.headers.get("sec-fetch-dest", "document")
+    if dest == "empty":
+        dest = request.headers.get(DEST_HEADER, dest)
+    return dest == "document"
 
 
 # Apps are used on phones and must never scroll sideways. iOS zooms in on inputs under 16px and
@@ -943,17 +971,19 @@ def open_link(slug: str, user: str = Depends(require_user)):
     return RedirectResponse(link["url"], status_code=302)
 
 
-def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool, locked: bool = False) -> HTMLResponse:
+def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool, locked: bool = False, offline: bool = False,
+                    copy: bool = False) -> HTMLResponse:
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
     and the hub banner right after <body> unless the app has it turned off. `locked` marks an app the viewer has
-    locked, so hub.js keeps its unlock alive."""
+    locked, so hub.js keeps its unlock alive. `offline` marks an app the service worker keeps a copy of, and `copy`
+    the page it fetches to keep (the copy opens without the server)."""
     html = path.read_text("utf-8", errors="replace")
     strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
     found = artifact_root(slug)
     data_shared = bool(found) and shared.is_shared(found[1])
     tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"{}></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings,
-        ' data-lock="1"' if locked else ""
+        (' data-lock="1"' if locked else "") + (' data-offline="1"' if offline else "") + (' data-copy="1"' if copy else "")
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
     html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
@@ -1430,7 +1460,7 @@ async def prefs_apps(request: Request, user: str = Depends(api_user)):
 
 @app.post("/api/prefs/seen")
 def prefs_seen(request: Request, user: str = Depends(api_user)):
-    """The user opened the "Velg apper" list: nothing in it is new any more."""
+    """The user opened the "Choose apps" list: nothing in it is new any more."""
     _require_json(request)
     with db() as con:
         home.mark_seen(con, user, [a["slug"] for a in list_artifacts(user)])
@@ -1962,6 +1992,36 @@ def api_toggle_banner(request: Request, slug: str = Form(...)):
         meta["banner"] = False
     _write_meta(meta_path, meta)
     return JSONResponse({"ok": True, "banner": meta.get("banner") is not False})
+
+
+def set_offline(slug: str, on: bool) -> None:
+    """Mark a page or folder app as working offline, or take the mark off (the key is removed)."""
+    meta_path = _meta_path(slug)
+    if not meta_path:
+        raise HubError(i18n.t("page.not_found", slug=slug))
+    if meta_path.name.endswith(".link.json"):
+        raise HubError(i18n.t("err.offline_link"))
+    meta = _read_meta(meta_path)
+    if on:
+        meta["offline"] = True
+    else:
+        meta.pop("offline", None)
+    _write_meta(meta_path, meta)
+
+
+@app.post("/api/toggle-offline")
+def api_toggle_offline(request: Request, slug: str = Form(...)):
+    """Flip «Works offline» for one app."""
+    _upload_authorized(request)
+    meta_path = _meta_path(slug)
+    if not meta_path:
+        raise HTTPException(404)
+    on = not _read_meta(meta_path).get("offline")
+    try:
+        set_offline(slug, on)
+    except HubError as e:
+        raise HTTPException(404) from e
+    return JSONResponse({"ok": True, "offline": on})
 
 
 # ---------------------------------------------------------------- shared data on and off (app/shared.py)

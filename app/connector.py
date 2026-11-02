@@ -45,6 +45,7 @@ and pass shared_data accordingly. In a shared app, put anything personal under d
 and say in the app's guide (meta/guide) what is shared and what is personal. update_app_info(shared_data=...)
 switches an existing app; copy_my_data=true also copies the user's current documents into the shared data, where
 everyone with access sees them, so check them for personal content first.
+An app can be marked to work offline (update_app_info offline=true); only do that for apps that keep their own data on the device and send it later.
 A user can lock an app behind a code on the hub; the lock covers the hub's own storage, not the browser's, so keep
 anything sensitive in window.claude.use("db"), never in localStorage.
 
@@ -177,18 +178,21 @@ def build_mcp() -> MCPServer:
         "Only call this when the user explicitly asks to publish. "
         "If Claude or a scheduled agent will write the app's content, first ask the user whether it is the same for "
         "everyone who can open the app (shared_data=true) or personal to each user (the default). "
+        "offline=true marks an app that keeps its own data on the device, so the hub stores its page on the phone. "
         "slug: lowercase letters, digits, '.', '-', '_'. emoji: one emoji used as the gallery icon.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
         structured_output=False,
     )
     def create_app(slug: str, html: str, title: str, description: str | None = None, emoji: str | None = None,
-                   private: bool = True, shared_data: bool | None = None) -> str:
+                   private: bool = True, shared_data: bool | None = None, offline: bool = False) -> str:
         try:
             _user()
             hub.save_page(slug, html, create=True, title=title, description=description, emoji=emoji,
                           private=private)
             if shared_data:
                 hub.set_data_mode(slug, True)
+            if offline:
+                hub.set_offline(slug, True)
         except hub.HubError as e:
             return _error(str(e))
         return i18n.t("mcp.created_private" if private else "mcp.created", url=_url(slug))
@@ -248,13 +252,15 @@ def build_mcp() -> MCPServer:
         "shared_data=true gives the app shared data (everyone who can see it reads it, only admins change it, and "
         "data/users/<e-mail>/ stays private to each user); false makes it personal again. Nothing is deleted either "
         "way. copy_my_data=true also copies the user's documents into the shared data when it has none yet: check "
-        "them for personal content first. Use list_apps to find the slug.",
+        "them for personal content first. "
+        "offline=true marks an app that keeps its own data on the device, so the hub stores its page on the phone; "
+        "false takes the mark off. Use list_apps to find the slug.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
         structured_output=False,
     )
     def update_app_info(slug: str, title: str | None = None, description: str | None = None,
                         emoji: str | None = None, private: bool | None = None, shared_data: bool | None = None,
-                        copy_my_data: bool = False) -> str:
+                        copy_my_data: bool = False, offline: bool | None = None) -> str:
         try:
             user = _user()
             hub.set_info(slug, title=title, description=description, emoji=emoji, private=private)
@@ -266,6 +272,9 @@ def build_mcp() -> MCPServer:
                     said.append(i18n.t("mcp.data_shared_exists"))
                 else:
                     said.append(i18n.tn("mcp.data_shared", copied) if shared_data else i18n.t("mcp.data_personal"))
+            if offline is not None:
+                hub.set_offline(slug, offline)
+                said.append(i18n.t("mcp.offline_on" if offline else "mcp.offline_off", slug=slug))
             if private is False and slug in hub.claude_warned(hub.list_artifacts(user)):
                 said.append(i18n.t("mcp.claude_warning"))
         except hub.HubError as e:

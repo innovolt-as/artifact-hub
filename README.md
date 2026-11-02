@@ -145,6 +145,21 @@ person using it, plus the [shared data](docs/APPS.md#shared-data) of apps that h
 Passwords, login links and connector tokens are stored as hashes. App data is stored as plain text. To report a
 vulnerability, see [SECURITY.md](SECURITY.md).
 
+### Offline copies
+
+The front page and apps marked *Works offline* are stored on the phone by the hub's service worker, and open without
+asking the server. Whoever holds the phone sees them as they were, with no login check. Apps behind a code lock are
+never stored.
+
+Known limits:
+
+- A copy is deleted on logout, on the login page, with *Delete my data*, and for an app when the code lock is turned
+  on for it on that device. This happens only in the browser or home-screen app where it is done: on an iPhone each
+  home-screen icon and Safari keep their own copies.
+- A lock set on another device, or access that has been taken away, reaches a phone's copy only the next time that
+  phone opens the hub online.
+- Apps on the hub's domain can read and change the hub's caches, as they can everything else the visitor can reach.
+
 ### Code lock
 
 Logins last 30 days, so whoever holds your logged-in phone is you as far as the hub knows. The code lock puts a code
@@ -158,9 +173,9 @@ screen and for 10 minutes after, and each app is unlocked separately on each dev
 
 Known limits:
 
-- Whatever an app keeps in `localStorage`, IndexedDB or a service worker cache is outside the lock, and so is a file of
-  a folder app fetched before the lock was turned on, which can stay in the browser's cache. Nothing on the server can
-  empty an old cache.
+- Whatever an app keeps in `localStorage`, IndexedDB or a service worker cache of its own is outside the lock, and so
+  is a file of a folder app fetched before the lock was turned on, which can stay in the browser's cache. Nothing on
+  the server can empty an old cache.
 - Anyone who holds your phone can ask the Claude app on it about your data.
 - The lock is yours alone. Other people with access to a [shared-data](docs/APPS.md#shared-data) app still see it.
 - A borrowed admin phone can invite new people. They see apps marked *Everyone* and their shared data, never your

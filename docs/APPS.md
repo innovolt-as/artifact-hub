@@ -97,6 +97,43 @@ entered, and reloads the page when the lock closes. Link cards cannot be locked.
 - **Save text as it is typed.** A locked app opens for 10 minutes after the last time it was on screen, then reloads
   to the code screen. Anything not saved by then is lost.
 
+## Offline
+
+The *Works offline* switch in an app's settings on the admin page (or `offline: true` through the connector) makes the
+hub keep the app on the phone. The hub's service worker stores the app's page and the files it loads from its own
+folder, and opens them if the server does not answer within 3 seconds. The front page is kept too, so the app can be
+found without a connection. The switch is for single-file and folder apps; link cards cannot have it.
+
+Only the page and its files are stored, never data. The hub's storage APIs need the server, so an app marked for
+offline use has to do its own bookkeeping:
+
+- **Keep the data on the device** (`localStorage` or IndexedDB) and send it to the server later, when there is a
+  connection again.
+- **Save text as it is typed.** An iPhone can drop a home-screen app from memory at any time.
+- **Do not register a service worker of your own.** The hub's worker already covers the app, and a narrower one in the
+  app's folder would take over and hide the hub's copy.
+
+The hub stores a copy by fetching the app's page with an `X-Hub-Precache: 1` header. That is not counted as a visit in
+the statistics. The server is asked first, so a connection gives the current app when the server answers within about
+3 seconds. Once it has not, the files the app loads come from their copies for the next 30 seconds, or until the
+server answers in time again, so a weak connection does not add a wait for each file.
+
+The page's copy is refreshed whenever the front page or the app is opened online. The files from the app's folder are
+stored when the app itself is opened online: a refresh from the front page fetches only the page. The copies are
+dropped when the switch is turned off. An app behind a [code lock](#code-lock) is never stored, and turning the lock
+on for an app deletes the copy on that device.
+
+### Back to the front page
+
+When the hub is installed as a home-screen app and the session started at the front page, coming back to an app after
+two minutes away shows the front page again instead of the app left behind. The page stays put when:
+
+- it has called `window.hubStay(true)`. Call `window.hubStay(false)` to let it go back again. The app may also run
+  outside the hub, so write `window.hubStay?.(true)`;
+- a visible field the user has typed into holds text that is not empty and differs from what the page put there.
+  Values set by a script do not count. Text the app has already autosaved still keeps the page while it shows, so
+  still save input as it is typed.
+
 ## A line on the front-page card
 
 In the card view, an app can show one line of text under its name, such as a count or today's total. The best way

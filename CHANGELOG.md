@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.5.0 (2026-11-02)
+
+### Before you upgrade
+
+- Going back to an earlier version afterwards needs one extra step, since phones keep the new service worker: see
+  "Going back to a version before v1.5.0" in [docs/UPGRADING.md](docs/UPGRADING.md).
+
+### New
+
+- Apps can work offline. Turn on *Works offline* in an app's settings on the admin page and the hub stores the app on
+  the phone, so it opens without a connection. The front page is stored too, and shows which apps open offline. Only
+  the page and its files are stored, not data, and apps behind a code lock never are. See "Offline" in
+  [docs/APPS.md](docs/APPS.md) and "Offline copies" in the README.
+- `create_app` and `update_app_info` in the connector take an `offline` parameter for the same switch.
+- The hub as a home-screen app goes back to the front page after two minutes away. It stays on the app while you have
+  typed something that is not saved, or while the app asks to with `window.hubStay(true)`.
+
+### Fixed
+
+- A white flash before the stylesheet loads, and when an app locks.
+
 ## v1.4.1 (2026-10-30)
 
 ### New

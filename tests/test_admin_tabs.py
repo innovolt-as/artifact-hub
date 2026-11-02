@@ -102,10 +102,10 @@ def test_empty_list_points_to_upload(admin_client):
 
 def test_sheet_markup(admin_client):
     html = admin_client.get("/admin").text
-    for id_ in ("appSheet", "asEdit", "asAccess", "asData", "asBanner", "asDelete", "asError", "asWarn", "appSearch"):
+    for id_ in ("appSheet", "asEdit", "asAccess", "asData", "asBanner", "asOffline", "asDelete", "asError", "asWarn", "appSearch"):
         assert f'id="{id_}"' in html
     assert html.index('id="asBanner"') < html.index('id="asDelete"')
-    assert html.count('role="switch"') == 2
+    assert html.count('role="switch"') == 3
 
 
 def test_picker_rules_stay_out_of_other_sheets(client):

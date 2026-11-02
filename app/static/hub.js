@@ -92,7 +92,8 @@
   if (me.dataset.lock === "1") {
     const PING_MS = 60000, OPEN_MS = 600000;
     let last = Date.now();
-    const lock = () => { document.documentElement.style.display = "none"; location.reload(); };
+    // Hide the body, not <html>: the canvas keeps the page background instead of flashing white.
+    const lock = () => { (document.body || document.documentElement).style.visibility = "hidden"; location.reload(); };
     const late = () => Date.now() - last >= OPEN_MS;
     async function ping() {
       try {
@@ -106,6 +107,71 @@
     document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
     addEventListener("pageshow", check);
   }
+
+  // ------------------------------------------------------------------ back to the front page after 2 minutes away
+  // The hub as a home-screen app: coming back after a while should show the front page, not the app left behind.
+  // Only when the session started at the front page (hub-start) and the page is not asking to stay (hubStay).
+  let stay = false;
+  window.hubStay = (on) => { stay = !!on; };
+  // Text the user typed and has not saved keeps the page too: record typed fields, forget them on submit.
+  const typed = new Set();
+  const isField = (el) => el instanceof Element && !el.closest("hub-banner") && (el.isContentEditable || el.tagName === "TEXTAREA"
+    || (el.tagName === "INPUT" && /^(text|search|email|url|tel|number|password|date|time|datetime-local|month|week)$/.test(el.type)));
+  document.addEventListener("input", (e) => { if (isField(e.target)) typed.add(e.target); }, true);
+  document.addEventListener("submit", (e) => { for (const el of e.target.elements || []) typed.delete(el); }, true);
+  const holdsText = () => {
+    try {
+      return [...typed].some((el) => el.isConnected && el.getClientRects().length > 0
+        && (el.isContentEditable ? el.textContent !== "" : el.value !== "" && el.value !== el.defaultValue));
+    } catch (e) { return true; } // an error in the check means stay: never lose text
+  };
+  try {
+    if (!sessionStorage.getItem("hub-start")) sessionStorage.setItem("hub-start", location.pathname);
+    const standalone = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+    if (standalone && sessionStorage.getItem("hub-start") === "/") {
+      const AWAY_MS = 120000;
+      let left = null;
+      const back = () => {
+        if (left !== null && !stay && Date.now() - left >= AWAY_MS && !holdsText()) location.replace("/");
+        left = null;
+      };
+      document.addEventListener("visibilitychange", () => { if (document.hidden) left = Date.now(); else back(); });
+      addEventListener("pageshow", back);
+    }
+  } catch (e) { /* no sessionStorage: the rule does not apply */ }
+
+  // ------------------------------------------------------------------ the copy on the phone (static/sw.js)
+  // The hub's service worker keeps the page of an app marked «Works offline» (data-offline="1"), and the files it
+  // uses, and drops the copy of one that is not. Once the page has loaded, tell it, with those files (it did not see
+  // them load on the first visit), and whether this is its stored copy (data-copy="1"). Not through
+  // navigator.serviceWorker.ready: under an app with its own worker, that is the app's. Without service workers the app
+  // works as before.
+  async function hubWorker(sw) {
+    const reg = await sw.register("/sw.js");
+    const next = reg.installing || reg.waiting;
+    if (next) {
+      await new Promise((resolve) => {
+        const done = () => { if (next.state === "activated" || next.state === "redundant") resolve(); };
+        next.addEventListener("statechange", done);
+        done();
+      });
+    }
+    return reg.active;
+  }
+  try {
+    const sw = navigator.serviceWorker;
+    if (sw) {
+      const parsed = document.readyState === "loading"
+        ? new Promise((resolve) => document.addEventListener("DOMContentLoaded", resolve, { once: true })) : null;
+      Promise.all([hubWorker(sw), parsed]).then(([worker]) => {
+        const roots = [document, document.querySelector("hub-banner")?.shadowRoot].filter(Boolean);
+        const assets = roots.flatMap((r) => [...r.querySelectorAll("link[rel=stylesheet], script[src], img[src]")])
+          .map((el) => el.href || el.src).filter((u) => u && u.startsWith(location.origin + "/"));
+        worker?.postMessage({ type: "hub:app", user: EMAIL, slug: SLUG, offline: me.dataset.offline === "1", assets,
+          copy: me.dataset.copy === "1" });
+      }).catch(() => {});
+    }
+  } catch (e) { /* no service workers here */ }
 
   // ------------------------------------------------------------------ queries
   const OPS = {

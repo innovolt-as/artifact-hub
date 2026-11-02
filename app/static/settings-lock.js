@@ -1,5 +1,6 @@
 // Settings, code lock section (templates/settings.html): choose or change the code, and a switch per app.
 // On goes through at once. Off asks for the code in a dialog; a wrong code leaves the switch on.
+// A locked app is never kept on the phone (static/sw.js): on also forgets its copy here and tells the hub's worker.
 (function () {
   const card = document.getElementById("lockCard");
   const err = document.getElementById("lockError");
@@ -22,6 +23,35 @@
       return { ok: r.ok, detail: typeof detail === "string" ? detail : "" };
     }).catch(() => ({ ok: false, detail: "" }));
   window.hubPost = post;  // settings-account.js, which loads after this file
+
+  // The hub's own worker, once active: the one register() gives (navigator.serviceWorker.ready may be an app's own)
+  async function hubWorker(sw) {
+    const reg = await sw.register("/sw.js");
+    const next = reg.installing || reg.waiting;
+    if (next) {
+      await new Promise((resolve) => {
+        const done = () => { if (next.state === "activated" || next.state === "redundant") resolve(); };
+        next.addEventListener("statechange", done);
+        done();
+      });
+    }
+    return reg.active;
+  }
+  // The app's page and folder files go from the copies here, also with no worker in control, and the worker drops it
+  // from its list. Only that app's: the hub's other copies and the app's own storage stay.
+  async function forgetCopy(slug) {
+    const here = async () => {
+      if (!window.caches || !(await caches.has("hub-pages-v1"))) return;
+      const cache = await caches.open("hub-pages-v1"), prefix = new URL(`/a/${slug}/`, location.origin).href;
+      for (const req of await cache.keys()) if (req.url.startsWith(prefix)) await cache.delete(req);
+    };
+    const worker = async () => {
+      const user = document.querySelector("a.who")?.textContent.trim();
+      if (!navigator.serviceWorker || !user) return;
+      (await hubWorker(navigator.serviceWorker))?.postMessage({ type: "hub:app", user, slug, offline: false, assets: [] });
+    };
+    await Promise.all([here().catch(() => {}), worker().catch(() => {})]);
+  }
 
   const digits = (el) => { el.value = el.value.replace(/[^0-9]/g, ""); };
   card.addEventListener("input", (e) => { if (e.target.classList.contains("code")) digits(e.target); });
@@ -54,7 +84,9 @@
         if (!r.ok) {
           sw.checked = false;
           err.textContent = r.detail || card.dataset.failed;
+          return;
         }
+        await forgetCopy(sw.dataset.slug);
         return;
       }
       sw.checked = true;  // stays on until the code is right

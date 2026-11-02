@@ -1,0 +1,399 @@
+import io
+import re
+import zipfile
+from pathlib import Path
+
+from tests.test_connector import PAGE, call, mcp, text, token  # noqa: F401  (fixtures)
+
+
+def meta(hub, slug="a"):
+    return hub._read_meta(hub._meta_path(slug))
+
+
+def test_toggle_offline_on_and_off(hub, admin_client, upload):
+    upload(admin_client, "a.html", "<body>x</body>")
+    assert admin_client.post("/api/toggle-offline", data={"slug": "a"}).json() == {"ok": True, "offline": True}
+    assert meta(hub)["offline"] is True
+    assert admin_client.post("/api/toggle-offline", data={"slug": "a"}).json() == {"ok": True, "offline": False}
+    assert "offline" not in meta(hub)
+
+
+def test_offline_survives_replace(hub, admin_client, upload):
+    upload(admin_client, "a.html", "<body>x</body>")
+    admin_client.post("/api/toggle-offline", data={"slug": "a"})
+    upload(admin_client, "a.html", "<body>y</body>")
+    assert meta(hub)["offline"] is True
+
+
+def test_offline_link_card_refused(hub, admin_client):
+    admin_client.post("/api/link", data={"title": "L", "url": "https://example.com"})
+    before = (hub.ARTIFACTS_DIR / "l.link.json").read_text()
+    assert admin_client.post("/api/toggle-offline", data={"slug": "l"}).status_code == 404
+    assert (hub.ARTIFACTS_DIR / "l.link.json").read_text() == before
+    assert admin_client.post("/api/toggle-offline", data={"slug": "nope"}).status_code == 404
+
+
+def test_offline_needs_admin(admin_client, user_client, upload):
+    upload(admin_client, "a.html", "<body>x</body>")
+    banner = user_client.post("/api/toggle-banner", data={"slug": "a"}).status_code
+    assert banner in (401, 403)
+    assert user_client.post("/api/toggle-offline", data={"slug": "a"}).status_code == banner
+
+
+def _folder():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("index.html", "<body>f</body>")
+    return buf.getvalue()
+
+
+def test_list_artifacts_offline_flag(hub, admin_client, upload):
+    upload(admin_client, "a.html", "<body>x</body>")
+    upload(admin_client, "b.html", "<body>x</body>")
+    upload(admin_client, "f.zip", _folder())
+    admin_client.post("/api/link", data={"title": "L", "url": "https://example.com"})
+    for slug in ("a", "f"):
+        admin_client.post("/api/toggle-offline", data={"slug": slug})
+    got = {a["slug"]: a["offline"] for a in hub.list_artifacts("admin@test.no")}
+    assert got == {"a": True, "f": True, "b": False, "l": False}
+
+
+def test_admin_row_and_switch(admin_client, upload):
+    upload(admin_client, "a.html", "<body>x</body>")
+    upload(admin_client, "b.html", "<body>x</body>")
+    admin_client.post("/api/toggle-offline", data={"slug": "a"})
+    page = admin_client.get("/admin").text
+    assert page.count('data-offline="1"') == 1 and page.count('data-offline="0"') == 1
+    assert page.count("virker uten nett") == 1
+    assert page.count('id="asOffline"') == 1 and 'id="asOffline"' in page and 'role="switch" id="asOffline"' in page
+
+
+def test_connector_update_app_info_offline(mcp, token, hub):  # noqa: F811
+    call(mcp, token, "create_app", slug="radar", html=PAGE, title="Radar")
+    res = call(mcp, token, "update_app_info", slug="radar", offline=True)
+    assert "«radar» virker nå uten nett." in text(res)
+    assert meta(hub, "radar")["offline"] is True
+    res = call(mcp, token, "update_app_info", slug="radar", offline=False)
+    assert "«radar» trenger nett igjen." in text(res)
+    assert "offline" not in meta(hub, "radar")
+    assert "virker" not in text(call(mcp, token, "update_app_info", slug="radar", title="R"))
+
+
+def test_connector_create_app_offline(mcp, token, hub):  # noqa: F811
+    call(mcp, token, "create_app", slug="radar", html=PAGE, title="Radar", offline=True)
+    assert meta(hub, "radar")["offline"] is True
+    call(mcp, token, "create_app", slug="plain", html=PAGE, title="P", offline=False)
+    assert "offline" not in meta(hub, "plain")
+
+
+# ---------------------------------------------------------------- what the service worker gets from the server
+import json  # noqa: E402
+import re  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from tests.conftest import lock, make_client, unlock  # noqa: E402
+
+USER = "user@test.no"
+PRE = {"X-Hub-Precache": "1", "sec-fetch-dest": "empty"}
+
+
+def _page(hub, slug, offline=True):
+    hub.save_page(slug, "<html><head><title>t</title></head><body>x</body></html>", create=True, private=False, title=slug)
+    if offline:
+        hub.set_offline(slug, True)
+
+
+def _visits(hub, slug):
+    with hub.db() as con:
+        return con.execute("SELECT COUNT(*) FROM visits WHERE slug=?", (slug,)).fetchone()[0]
+
+
+def test_precache_does_not_count_as_visit(hub):
+    _page(hub, "a")
+    c = make_client(USER)
+    assert c.get("/a/a/", headers=PRE).status_code == 200
+    assert _visits(hub, "a") == 0
+    assert c.get("/a/a/").status_code == 200
+    assert _visits(hub, "a") == 1
+
+
+def test_precache_gets_the_banner(hub):
+    _page(hub, "a")
+    assert "<hub-banner" in make_client(USER).get("/a/a/", headers=PRE).text
+
+
+def test_precache_refuses_unmarked(hub):
+    _page(hub, "b", offline=False)
+    c = make_client(USER)
+    assert c.get("/a/b/", headers=PRE).status_code == 404
+    assert c.get("/a/b/").status_code == 200
+
+
+def test_precache_refuses_locked_even_unlocked(hub):
+    _page(hub, "a")
+    lock(USER, "a")
+    c = make_client(USER)
+    assert c.get("/a/a/", headers=PRE).status_code == 423
+    assert unlock(c, "a").status_code == 303
+    assert c.get("/a/a/").status_code == 200
+    assert c.get("/a/a/", headers=PRE).status_code == 423
+
+
+def test_precache_folder_files_as_normal(hub, admin_client, upload):
+    upload(admin_client, "f.zip", _folder(), title="F")
+    hub.set_offline("f", True)
+    r = admin_client.get("/a/f/index.html", headers=PRE)
+    assert r.status_code == 200 and "<hub-banner" in r.text
+    assert admin_client.get("/a/f/missing.png", headers=PRE).status_code == 404
+
+
+def test_shim_marks_offline_apps(hub):
+    _page(hub, "a")
+    _page(hub, "b", offline=False)
+    _page(hub, "c")
+    lock(USER, "c")
+    c = make_client(USER)
+    tag = lambda slug: re.search(r'<script src="/static/hub\.js"[^>]*>', c.get(f"/a/{slug}/", headers={"sec-fetch-dest": "empty"}).text).group(0)  # noqa: E731
+    assert ' data-offline="1"' in tag("a")
+    assert "data-offline" not in tag("b")
+    unlock(c, "c")
+    assert "data-offline" not in tag("c")
+
+
+def test_front_page_lists_offline_apps(hub, admin_client):
+    for slug in ("a", "b", "c"):
+        _page(hub, slug, offline=slug != "b")
+    lock(USER, "c")
+    admin_client.post("/api/link", data={"title": "L", "url": "https://example.com"})
+    c = make_client(USER)
+    r = c.get("/")
+    strings = json.loads(re.search(r'id="__hub_strings">(.*?)</script>', r.text, re.S).group(1))
+    assert strings["offline_apps"] == ["a"]
+
+
+def test_sw_served_at_root(client):
+    r = client.get("/sw.js")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/javascript")
+    assert r.headers["cache-control"] == "no-cache"
+    assert r.headers["service-worker-allowed"] == "/"
+
+
+# ---------------------------------------------------------------- the service worker and forgetting the copies
+FORGET = '<script src="/static/forget.js"'
+
+
+def test_forget_on_logged_out_pages(client, user_client):
+    assert FORGET + ' data-run defer></script>' in client.get("/login").text
+    assert "forget.js" not in user_client.get("/").text
+    page = user_client.get("/settings").text
+    assert page.count(FORGET) == 1 and FORGET + ' defer></script>' in page and "data-run" not in page
+
+
+def test_sw_skips_private_routes(client):
+    js = client.get("/sw.js").text
+    skip = re.search(r"const SKIP = \[(.*?)\];", js, re.S).group(1)
+    for route in ("/api/", "/login", "/auth", "/logout", "/password", "/settings", "/admin", "/lock/", "/oauth/", "/mcp"):
+        assert f'"{route}"' in skip, route
+    for word in ("hub-pages-v1", "hub-static-v1", "X-Hub-Precache", "3000"):
+        assert word in js, word
+
+
+def test_pages_register_the_worker(client):
+    for name in ("home.js", "hub.js"):
+        js = client.get(f"/static/{name}").text
+        assert "serviceWorker" in js and "/sw.js" in js, name
+
+
+def test_messages_go_to_the_hub_worker(client):
+    """The registration register("/sw.js") gives, not navigator.serviceWorker.ready: under an app with its own worker
+    that is the app's."""
+    for name in ("home.js", "hub.js", "settings-lock.js"):
+        js = client.get(f"/static/{name}").text
+        assert 'register("/sw.js")' in js and "reg.installing || reg.waiting" in js, name
+        assert ".ready.then(" not in js and "sw.ready" not in js, name
+
+
+def test_lock_forgets_the_copy(client):
+    js = client.get("/static/settings-lock.js").text
+    assert "hub-pages-v1" in js and '"hub:app"' in js and "offline: false" in js
+
+
+def test_sw_wipes_on_login(client):
+    js = client.get("/sw.js").text
+    logins = re.search(r"const LOGINS = \[(.*?)\];", js, re.S).group(1)
+    for pair in ('["GET", "/auth"]', '["POST", "/login"]', '["POST", "/password"]'):
+        assert pair in logins, pair
+
+
+# A navigation the service worker passes on arrives as Sec-Fetch-Dest: empty; sw.js names what it was in X-Hub-Dest
+FWD = {"sec-fetch-dest": "empty", "sec-fetch-mode": "same-origin", "X-Hub-Dest": "document"}
+
+
+def test_forwarded_navigation_gets_the_banner(hub):
+    _page(hub, "a")
+    c = make_client(USER)
+    assert "<hub-banner" in c.get("/a/a/", headers=FWD).text
+    assert "<hub-banner" not in c.get("/a/a/", headers={**FWD, "X-Hub-Dest": "iframe"}).text
+    assert "<hub-banner" not in c.get("/a/a/", headers={"sec-fetch-dest": "empty"}).text
+    assert "<hub-banner" not in c.get("/a/a/", headers={**FWD, "sec-fetch-dest": "iframe"}).text  # only empty is named
+
+
+def test_forwarded_navigation_gets_the_code_screen(hub):
+    _page(hub, "a")
+    lock(USER, "a")
+    c = make_client(USER)
+    r = c.get("/a/a/", headers=FWD)
+    assert r.status_code == 423 and 'action="/lock/a"' in r.text
+    r = c.get("/a/a/", headers={"sec-fetch-dest": "empty"})
+    assert r.status_code == 423 and 'action="/lock/a"' not in r.text
+
+
+def test_sw_names_forwarded_navigations(client):
+    js = client.get("/sw.js").text
+    assert '"X-Hub-Dest"' in js and "req.destination" in js
+
+
+def test_offline_strings_reach_the_page(hub, admin_client):
+    _page(hub, "a", offline=True)
+    r = make_client(USER).get("/")
+    strings = json.loads(re.search(r'id="__hub_strings">(.*?)</script>', r.text, re.S).group(1))
+    for key in ("offline_badge", "offline_ok", "offline_no", "offline_back", "needs_net"):
+        assert strings[key]
+    assert "{app}" in strings["needs_net"]
+    css = (Path(__file__).parent.parent / "app" / "static" / "hub.css").read_text()
+    for sel in (".offline-badge", "#offline-no", ".hub-toast"):
+        assert sel in css
+
+
+def test_hub_js_has_the_away_rule():
+    static = Path(__file__).parent.parent / "app" / "static"
+    js = (static / "hub.js").read_text()
+    for part in ("hubStay", "hub-start", "120000", "display-mode: standalone"):
+        assert part in js
+    assert "hub-start" in (static / "home.js").read_text()
+    assert 'addEventListener("input"' in js and "holdsText" in js and "defaultValue" in js
+
+
+def test_background_before_stylesheet(pw_mode, hub, user_client, client):
+    for html in (user_client.get("/").text, client.get("/login").text):
+        css = html.index("/static/hub.css")
+        assert html.index("background:#151515") < css
+        assert html.index('name="color-scheme"') < css
+
+
+def test_color_scheme_follows_theme(pw_mode, hub, user_client):
+    def scheme():
+        return re.search(r'name="color-scheme" content="([^"]+)"', user_client.get("/").text).group(1)
+
+    assert scheme() == "light dark"
+    user_client.post("/api/prefs/theme", json={"theme": "dark"})
+    assert scheme() == "dark"
+    user_client.post("/api/prefs/theme", json={"theme": "light"})
+    assert scheme() == "light"
+
+
+def test_lock_keeps_the_background():
+    js = (Path(__file__).parent.parent / "app" / "static" / "hub.js").read_text()
+    assert 'documentElement.style.display = "none"' not in js
+
+
+# ---------------------------------------------------------------- final review fixes
+STATIC = Path(__file__).parent.parent / "app" / "static"
+
+
+def _fn(js, name):
+    """The source of a top-level function in sw.js, up to the next blank line."""
+    return re.search(rf"\n(?:async )?function {name}\(.*?\n\n", js, re.S).group(0)
+
+
+def test_sw_takes_the_network_as_down_for_a_while(client):
+    """Once the network has not answered in time, the files a page loads come from their copies at once instead of each
+    waiting 3 s more."""
+    js = client.get("/sw.js").text
+    assert "const DOWN_MS = 30000" in js
+    assert "downUntil = Date.now() + DOWN_MS" in _fn(js, "networkFirst")
+    assert "copyFirst(" in _fn(js, "hubFile")
+    assert "copyFirst(" in _fn(js, "appFile")
+    assert "copyFirst(" not in _fn(js, "front")
+
+
+def test_hub_scripts_keep_their_address(hub):
+    """Apps find the shim with querySelector('script[src="/static/hub.js"]') to read data-user (Treningsprogram picks its
+    localStorage namespace from it), so its address must never change."""
+    _page(hub, "a")
+    page = make_client(USER).get("/a/a/").text
+    assert '<script src="/static/hub.js" data-slug="a" data-user="user@test.no"' in page
+    assert "/static/hub.js?" not in page and "/static/pull.js?" not in page and '<script src="/static/pull.js"' in page
+
+
+def test_sw_every_answer_falls_back_to_the_network(client):
+    js = client.get("/sw.js").text
+    assert js.count("respondWith(") == 1
+    assert ".catch(() => fetch(forward(e.request)))" in _fn(js, "respond")
+    fwd = _fn(js, "forward")
+    assert "try {" in fwd and "catch" in fwd and "return req;" in fwd.split("catch", 1)[1]
+
+
+def test_sw_reads_the_body_before_the_queue(client):
+    """A body that stalls must not hold the queue (wipes, and after a login the fallback for /)."""
+    body = _fn(client.get("/sw.js").text, "store")
+    assert body.index("arrayBuffer()") < body.index("queue(")
+    assert "new Response(" in body
+
+
+def test_typed_date_and_time_fields_keep_the_page():
+    js = (STATIC / "hub.js").read_text()
+    rule = re.search(r"const isField = .*?;\n", js, re.S).group(0)
+    for kind in ("text", "number", "date", "time", "datetime-local", "month", "week"):
+        assert re.search(rf"[(|]{kind}[|)]", rule), kind
+    assert "select" not in rule.lower() and "checkbox" not in rule
+
+
+def test_offline_cards_look_only_in_the_hub_cache():
+    js = (STATIC / "home.js").read_text()
+    assert 'caches.match("/a/" + li.dataset.slug + "/", { cacheName: "hub-pages-v1" })' in js
+
+
+def test_offline_refresh_gives_up_after_10_s():
+    run = re.search(r"async function run\(quiet\) \{.*?\n  \}\n", (STATIC / "home.js").read_text(), re.S).group(0)
+    assert "AbortController" in run and "10000" in run and "signal" in run
+
+
+def test_copy_of_an_app_is_marked(hub):
+    """hub.js knows the page is the stored copy, so it does not ask for the front page from there."""
+    _page(hub, "a")
+    c = make_client(USER)
+    tag = lambda **h: re.search(r'<script src="/static/hub\.js"[^>]*>', c.get("/a/a/", headers=h).text).group(0)  # noqa: E731
+    assert ' data-copy="1"' in tag(**PRE)
+    assert "data-copy" not in tag()
+    assert "data-copy" not in tag(**FWD)
+
+
+def test_app_page_stores_the_front_page(client):
+    """A home-screen icon of an app has its own storage: the banner's back link needs a copy of / there too."""
+    js = (STATIC / "hub.js").read_text()
+    assert 'copy: me.dataset.copy === "1"' in js
+    js = client.get("/sw.js").text
+    update = _fn(js, "update")
+    assert "if (!m.copy) jobs.push(keepFront(g, true));" in update and "keepFront(g, false)" in update
+    assert "keepFile(" in _fn(js, "keepFront")  # and the hub's files the front page loads
+
+
+def test_forget_runs_only_when_logged_out(pw_mode, hub, client, user_client, admin_client):
+    run = '<script src="/static/forget.js" data-run'
+    _page(hub, "a")
+    lock(USER, "a")
+    r = user_client.get("/a/a/")
+    assert r.status_code == 423 and 'action="/lock/a"' in r.text
+    for page in (user_client.get("/").text, user_client.get("/settings").text, admin_client.get("/admin").text, r.text):
+        assert run not in page and "data-run" not in page
+    assert run in client.get("/login").text
+
+
+def test_comments_use_english_labels():
+    files = [STATIC / n for n in ("sw.js", "hub.js", "home.js", "forget.js")] + [STATIC.parent / "main.py"]
+    for p in files:
+        text = p.read_text()
+        for label in ("Virker uten nett", "Slett mine data", "Velg apper"):
+            assert label not in text, (p.name, label)

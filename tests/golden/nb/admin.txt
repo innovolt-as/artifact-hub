@@ -35,7 +35,9 @@ Tilgang
 ›
 Felles data
 Banner øverst
+Virker uten nett
 Felles data: alle med tilgang ser det samme. Du får se hva som kopieres før det skjer.
+Virker uten nett: appen lagres på telefonen og kan åpnes uten nett. Bare for apper som selv tar vare på dataene sine uten nett.
 Slett app
 @aria-label: Tilbake
 ‹
