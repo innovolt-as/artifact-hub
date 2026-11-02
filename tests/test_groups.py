@@ -1,0 +1,392 @@
+"""Each user's own groups for the front page (app/home.py, prefs key "groups")."""
+import json
+
+import pytest
+
+PAGE = "<!doctype html><html><head><title>A</title></head><body>a</body></html>"
+X = "x@t.no"
+
+
+def _mk(hub, *names):
+    """Create groups called `names`; returns their ids."""
+    with hub.db() as con:
+        return [hub.home.create_group(con, X, n)["id"] for n in names]
+
+
+def _groups(hub, email=X):
+    with hub.db() as con:
+        return hub.home.get_groups(con, email)
+
+
+def _view(hub, email=X):
+    """Group id -> slugs."""
+    return {g["id"]: g["slugs"] for g in _groups(hub, email)}
+
+
+def _store(hub, email, value):
+    with hub.db() as con:
+        hub.home._put(con, email, "groups", value)
+
+
+# ---------------------------------------------------------------- storage
+def test_create_rename_delete(hub):
+    with hub.db() as con:
+        g = hub.home.create_group(con, X, "Jobb")
+        assert set(g) == {"id", "name", "slugs", "open"}
+        assert g["name"] == "Jobb" and g["slugs"] == [] and g["open"] is True and len(g["id"]) == 8
+        h = hub.home.create_group(con, X, "Fritid")
+        assert [x["name"] for x in hub.home.get_groups(con, X)] == ["Jobb", "Fritid"]
+        assert hub.home.rename_group(con, X, g["id"], "Arbeid")["name"] == "Arbeid"
+        assert [x["name"] for x in hub.home.get_groups(con, X)] == ["Arbeid", "Fritid"]
+        assert hub.home.delete_group(con, X, g["id"]) is None
+        assert [x["id"] for x in hub.home.get_groups(con, X)] == [h["id"]]
+        assert hub.home.get_groups(con, "y@t.no") == []  # nobody else's
+
+
+def test_name_is_trimmed_and_validated(hub):
+    with hub.db() as con:
+        assert hub.home.create_group(con, X, "  Jobb \n")["name"] == "Jobb"
+        assert hub.home.create_group(con, X, "x" * 40)["name"] == "x" * 40
+        for bad in ("", "   ", "x" * 41, None, 5):
+            with pytest.raises(ValueError, match="1–40"):
+                hub.home.create_group(con, X, bad)
+        gid = hub.home.get_groups(con, X)[0]["id"]
+        with pytest.raises(ValueError, match="1–40"):
+            hub.home.rename_group(con, X, gid, " ")
+        assert len(hub.home.get_groups(con, X)) == 2
+
+
+def test_names_are_unique_ignoring_case(hub):
+    with hub.db() as con:
+        g = hub.home.create_group(con, X, "Jobb")
+        with pytest.raises(ValueError, match="«jobb»"):
+            hub.home.create_group(con, X, "jobb")
+        other = hub.home.create_group(con, X, "Fritid")
+        with pytest.raises(ValueError, match="«JOBB»"):
+            hub.home.rename_group(con, X, other["id"], " JOBB ")
+        assert hub.home.rename_group(con, X, g["id"], "JOBB")["name"] == "JOBB"  # its own name, another case
+        assert hub.home.create_group(con, "y@t.no", "Jobb")["name"] == "Jobb"  # per user
+
+
+def test_at_most_thirty_groups(hub):
+    with hub.db() as con:
+        for i in range(hub.home.GROUPS_MAX):
+            hub.home.create_group(con, X, f"g{i}")
+        with pytest.raises(ValueError, match="30"):
+            hub.home.create_group(con, X, "en til")
+        assert len(hub.home.get_groups(con, X)) == 30
+        hub.home.delete_group(con, X, hub.home.get_groups(con, X)[0]["id"])
+        hub.home.create_group(con, X, "en til")
+
+
+def test_constants(hub):
+    assert hub.home.GROUP_NAME_MAX == 40 and hub.home.GROUPS_MAX == 30
+
+
+def test_unknown_group_is_keyerror(hub):
+    with hub.db() as con:
+        for call in (
+            lambda: hub.home.rename_group(con, X, "nope", "A"),
+            lambda: hub.home.delete_group(con, X, "nope"),
+            lambda: hub.home.set_app_group(con, X, "a", "nope"),
+            lambda: hub.home.set_group_apps(con, X, "nope", ["a"]),
+            lambda: hub.home.set_group_open(con, X, "nope", False),
+        ):
+            with pytest.raises(KeyError):
+                call()
+        gid = hub.home.create_group(con, X, "A")["id"]
+        with pytest.raises(KeyError):  # someone else's group
+            hub.home.rename_group(con, "y@t.no", gid, "B")
+        hub.home.set_app_group(con, X, "a", gid)
+        with pytest.raises(KeyError):  # the unknown id is checked before the app leaves its group
+            hub.home.set_app_group(con, X, "a", "nope")
+        assert hub.home.get_groups(con, X)[0]["slugs"] == ["a"]
+
+
+def test_create_with_slug_moves_the_app(hub):
+    with hub.db() as con:
+        a = hub.home.create_group(con, X, "A")
+        hub.home.set_app_group(con, X, "s", a["id"])
+        b = hub.home.create_group(con, X, "B", "s")
+        assert b["slugs"] == ["s"]
+        assert [g["slugs"] for g in hub.home.get_groups(con, X)] == [[], ["s"]]
+
+
+def test_set_app_group_moves_between_groups_and_out(hub):
+    a, b = _mk(hub, "A", "B")
+    with hub.db() as con:
+        def view():  # inside the open transaction
+            return {g["id"]: g["slugs"] for g in hub.home.get_groups(con, X)}
+
+        hub.home.set_app_group(con, X, "s1", a)
+        hub.home.set_app_group(con, X, "s2", a)
+        hub.home.set_app_group(con, X, "s1", b)
+        assert view() == {a: ["s2"], b: ["s1"]}
+        hub.home.set_app_group(con, X, "s3", b)  # a new app goes last
+        hub.home.set_app_group(con, X, "s2", b)
+        assert view() == {a: [], b: ["s1", "s3", "s2"]}
+        hub.home.set_app_group(con, X, "s1", b)  # same group: moves to the end
+        assert view()[b] == ["s3", "s2", "s1"]
+        hub.home.set_app_group(con, X, "s3", None)
+        assert view()[b] == ["s2", "s1"]
+        hub.home.set_app_group(con, X, "nowhere", None)  # not in any group: nothing happens
+        assert view()[b] == ["s2", "s1"]
+
+
+def test_delete_group_leaves_its_apps_ungrouped(hub):
+    a, b = _mk(hub, "A", "B")
+    with hub.db() as con:
+        hub.home.set_app_group(con, X, "s1", a)
+        hub.home.set_app_group(con, X, "s2", b)
+        hub.home.delete_group(con, X, a)
+    assert _view(hub) == {b: ["s2"]}
+
+
+def test_set_group_apps_merges_like_pins(hub):
+    (a,) = _mk(hub, "A")
+    with hub.db() as con:
+        for s in "abc":
+            hub.home.set_app_group(con, X, s, a)
+        assert hub.home.set_group_apps(con, X, a, ["c", "zz", "a", "c"]) == ["c", "a", "b"]
+        assert hub.home.set_group_apps(con, X, a, []) == ["c", "a", "b"]
+    assert _view(hub)[a] == ["c", "a", "b"]
+
+
+def test_stale_app_order_does_not_move_apps_between_groups(hub):
+    # Review Focus 1: the page was opened before "b" moved to the other group.
+    a, b = _mk(hub, "A", "B")
+    with hub.db() as con:
+        for s in "abc":
+            hub.home.set_app_group(con, X, s, a)
+        hub.home.set_app_group(con, X, "b", b)
+        assert hub.home.set_group_apps(con, X, a, ["c", "b", "a"]) == ["c", "a"]
+    assert _view(hub) == {a: ["c", "a"], b: ["b"]}
+
+
+def test_stale_group_order_does_not_bring_back_a_deleted_group(hub):
+    # Review Focus 1: the page was opened before group "b" was deleted.
+    a, b, c = _mk(hub, "A", "B", "C")
+    with hub.db() as con:
+        hub.home.set_app_group(con, X, "s", b)
+        hub.home.delete_group(con, X, b)
+        assert hub.home.set_group_order(con, X, [c, b, "nope", a, c]) == [c, a]
+    assert [g["id"] for g in _groups(hub)] == [c, a]
+    assert [g["slugs"] for g in _groups(hub)] == [[], []]
+
+
+def test_set_group_order_keeps_groups_left_out(hub):
+    a, b, c = _mk(hub, "A", "B", "C")
+    with hub.db() as con:
+        assert hub.home.set_group_order(con, X, [c]) == [c, a, b]
+    assert [g["id"] for g in _groups(hub)] == [c, a, b]
+
+
+def test_set_group_open(hub):
+    a, b = _mk(hub, "A", "B")
+    with hub.db() as con:
+        hub.home.set_group_open(con, X, a, False)
+    assert [g["open"] for g in _groups(hub)] == [False, True]
+    with hub.db() as con:
+        hub.home.set_group_open(con, X, a, True)
+    assert [g["open"] for g in _groups(hub)] == [True, True]
+
+
+def test_get_groups_drops_junk(hub):
+    for junk in ("x", 5, None, {"id": "a"}, [{"id": 1}], ["x", 3, None]):
+        _store(hub, X, junk)
+        assert _groups(hub) == []
+    _store(hub, X, [
+        {"id": 1, "name": "bad id", "slugs": [], "open": True},
+        {"id": "", "name": "empty id", "slugs": [], "open": True},
+        {"id": "n", "name": 5, "slugs": [], "open": True},
+        {"id": "e", "name": "  ", "slugs": [], "open": True},
+        {"id": "a", "name": "A", "slugs": ["s1", 7, "s2", "s1", None], "open": False},
+        {"id": "a", "name": "again", "slugs": ["s9"], "open": True},          # a repeated id
+        {"id": "b", "name": "B", "slugs": ["s2", "s3"], "open": "yes"},       # s2 stays in the first group
+        {"id": "c", "name": "C", "slugs": "s4"},
+        "junk",
+    ])
+    assert _groups(hub) == [
+        {"id": "a", "name": "A", "slugs": ["s1", "s2"], "open": False},
+        {"id": "b", "name": "B", "slugs": ["s3"], "open": True},
+        {"id": "c", "name": "C", "slugs": [], "open": True},
+    ]
+
+
+def test_unparseable_stored_groups_are_not_fatal(hub):
+    with hub.db() as con:
+        con.execute("INSERT INTO prefs(email, key, value) VALUES(?,?,?)", (X, "groups", "{not json"))
+        assert hub.home.get_groups(con, X) == []
+
+
+def test_rename_app_keeps_it_in_its_group(hub):
+    # Review Focus 2
+    a, b = _mk(hub, "A", "B")
+    with hub.db() as con:
+        for s in ("a", "x"):
+            hub.home.set_app_group(con, X, s, a)
+        hub.home.set_app_group(con, X, "m", b)
+        hub.home.set_app_group(con, "y@t.no", "a", hub.home.create_group(con, "y@t.no", "Y")["id"])
+        hub.home.set_app_group(con, X, "k", b)
+        hub.home.rename(con, "a", "b")
+    assert _view(hub) == {a: ["b", "x"], b: ["m", "k"]}
+    assert [g["slugs"] for g in _groups(hub, "y@t.no")] == [["b"]]
+
+
+def test_rename_leaves_groups_alone_when_the_app_is_in_none(hub):
+    (a,) = _mk(hub, "A")
+    with hub.db() as con:
+        hub.home.set_app_group(con, X, "x", a)
+        before = con.execute("SELECT value FROM prefs WHERE email=? AND key='groups'", (X,)).fetchone()["value"]
+        hub.home.rename(con, "a", "b")
+        after = con.execute("SELECT value FROM prefs WHERE email=? AND key='groups'", (X,)).fetchone()["value"]
+    assert before == after
+
+
+def _others(con):
+    """Every stored pref except the groups."""
+    return [tuple(r) for r in con.execute(
+        "SELECT key, value FROM prefs WHERE email=? AND key!='groups' ORDER BY key", (X,)).fetchall()]
+
+
+def test_groups_never_touch_the_other_prefs(hub):
+    with hub.db() as con:
+        for s in ("a", "b"):
+            hub.home.set_added(con, X, s, True)
+            hub.home.set_pin(con, X, s, True)
+        hub.home.set_view(con, X, "cards")
+        before = _others(con)
+        assert len(before) == 4  # apps, pins, seen, view
+        g = hub.home.create_group(con, X, "A", "a")["id"]
+        h = hub.home.create_group(con, X, "B")["id"]
+        hub.home.rename_group(con, X, g, "C")
+        hub.home.set_app_group(con, X, "b", g)
+        hub.home.set_app_group(con, X, "a", h)
+        hub.home.set_group_apps(con, X, g, ["b"])
+        hub.home.set_group_order(con, X, [h, g])
+        hub.home.set_group_open(con, X, g, False)
+        hub.home.set_app_group(con, X, "a", None)
+        hub.home.delete_group(con, X, h)
+        assert _others(con) == before
+        hub.home.rename(con, "a", "z")  # only the rename rewrites them, as it always did
+        assert hub.home.get_prefs(con, X)["apps"] == ["z", "b"]
+
+
+# ---------------------------------------------------------------- routes
+def _page(hub, slug="a", **kw):
+    hub.save_page(slug, PAGE, create=True, private=False, **kw)
+
+
+def _post(client, route, **body):
+    return client.post(f"/api/prefs/groups/{route}", json=body)
+
+
+def _gid(r):
+    return r.json()["groups"][-1]["id"]
+
+
+def test_routes_answer_ok_and_the_groups(hub, user_client):
+    for s in ("a", "b"):
+        _page(hub, s)
+    r = _post(user_client, "new", name=" Jobb ")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and [g["name"] for g in body["groups"]] == ["Jobb"] and body["groups"][0]["open"] is True
+    g1 = _gid(r)
+    r = _post(user_client, "new", name="Fritid", slug="a")
+    g2 = _gid(r)
+    assert [g["slugs"] for g in r.json()["groups"]] == [[], ["a"]]
+    assert _post(user_client, "app", slug="b", id=g2).json()["groups"][1]["slugs"] == ["a", "b"]
+    assert _post(user_client, "apps", id=g2, order=["b", "a"]).json()["groups"][1]["slugs"] == ["b", "a"]
+    assert _post(user_client, "app", slug="b", id=None).json()["groups"][1]["slugs"] == ["a"]
+    assert [g["id"] for g in _post(user_client, "order", order=[g2, g1]).json()["groups"]] == [g2, g1]
+    r = _post(user_client, "open", id=g2, open=False)
+    assert r.json() == {"ok": True, "groups": [
+        {"id": g2, "name": "Fritid", "slugs": ["a"], "open": False},
+        {"id": g1, "name": "Jobb", "slugs": [], "open": True}]}
+    assert _post(user_client, "rename", id=g1, name="Arbeid").json()["groups"][1]["name"] == "Arbeid"
+    r = _post(user_client, "delete", id=g2)
+    assert r.json() == {"ok": True, "groups": [{"id": g1, "name": "Arbeid", "slugs": [], "open": True}]}
+    assert _groups(hub, "user@test.no") == r.json()["groups"]
+
+
+def test_routes_answer_400_for_bad_input(hub, user_client):
+    _page(hub)
+    gid = _gid(_post(user_client, "new", name="A"))
+    bad = [
+        ("new", {}), ("new", {"name": 5}), ("new", {"name": ""}), ("new", {"name": "x" * 41}),
+        ("new", {"name": "a"}),  # taken, ignoring case
+        ("new", {"name": "B", "slug": 5}),
+        ("rename", {"id": gid}), ("rename", {"id": 5, "name": "B"}), ("rename", {"id": gid, "name": " "}),
+        ("rename", {"id": gid, "name": "X" * 41}),
+        ("delete", {}), ("delete", {"id": 5}),
+        ("app", {}), ("app", {"slug": 5, "id": gid}), ("app", {"slug": "a"}), ("app", {"slug": "a", "id": 5}),
+        ("apps", {"id": gid}), ("apps", {"id": gid, "order": "a"}), ("apps", {"id": gid, "order": [1]}),
+        ("apps", {"order": []}),
+        ("order", {}), ("order", {"order": "a"}), ("order", {"order": [1]}),
+        ("open", {"id": gid}), ("open", {"id": gid, "open": "no"}), ("open", {"open": True}),
+    ]
+    for route, body in bad:
+        assert _post(user_client, route, **body).status_code == 400, (route, body)
+    for route in ("new", "rename", "delete", "app", "apps", "order", "open"):
+        r = user_client.post(f"/api/prefs/groups/{route}", json=["not", "an", "object"])
+        assert r.status_code == 400, route
+    r = _post(user_client, "new", name="")
+    assert "1–40" in r.json()["detail"]
+    assert [g["name"] for g in _groups(hub, "user@test.no")] == ["A"]
+
+
+def test_routes_answer_404_for_unknown_group_or_unseen_app(hub, user_client):
+    _page(hub, "a")
+    hub.save_page("hemmelig", PAGE, create=True, private=True)
+    gid = _gid(_post(user_client, "new", name="A"))
+    for route, body in [
+        ("rename", {"id": "nope", "name": "B"}), ("delete", {"id": "nope"}),
+        ("app", {"slug": "a", "id": "nope"}), ("apps", {"id": "nope", "order": []}),
+        ("open", {"id": "nope", "open": True}),
+        ("app", {"slug": "finnes-ikke", "id": gid}), ("app", {"slug": "hemmelig", "id": gid}),
+        ("app", {"slug": "hemmelig", "id": None}),
+        ("new", {"name": "B", "slug": "finnes-ikke"}), ("new", {"name": "B", "slug": "hemmelig"}),
+    ]:
+        assert _post(user_client, route, **body).status_code == 404, (route, body)
+    assert [g["name"] for g in _groups(hub, "user@test.no")] == ["A"]  # the failed "new" created nothing
+
+
+def test_routes_need_login_and_json(hub, user_client, client):
+    for route in ("new", "rename", "delete", "app", "apps", "order", "open"):
+        assert _post(client, route).status_code == 401, route
+        assert user_client.post(f"/api/prefs/groups/{route}", data={"name": "A"}).status_code == 415, route
+
+
+def test_routes_are_per_user(hub, user_client, admin_client):
+    gid = _gid(_post(user_client, "new", name="A"))
+    assert _post(admin_client, "rename", id=gid, name="B").status_code == 404
+    assert _post(admin_client, "new", name="A").status_code == 200
+
+
+def test_routes_leave_apps_pins_and_seen_alone(hub, user_client):
+    for s in ("a", "b"):
+        _page(hub, s)
+        user_client.post("/api/prefs/apps", json={"slug": s, "added": True})
+        user_client.post("/api/prefs/pin", json={"slug": s, "pinned": True})
+    user_client.post("/api/prefs/seen", json={})
+    with hub.db() as con:
+        before = hub.home.get_prefs(con, "user@test.no")
+    g = _gid(_post(user_client, "new", name="A", slug="a"))
+    h = _gid(_post(user_client, "new", name="B"))
+    _post(user_client, "app", slug="b", id=g)
+    _post(user_client, "apps", id=g, order=["b", "a"])
+    _post(user_client, "order", order=[h, g])
+    _post(user_client, "open", id=g, open=False)
+    _post(user_client, "rename", id=h, name="C")
+    _post(user_client, "app", slug="a", id=None)
+    _post(user_client, "delete", id=g)
+    with hub.db() as con:
+        assert hub.home.get_prefs(con, "user@test.no") == before
+    assert json.dumps(before)  # sanity: a real, non-empty prefs dict
+    assert before["apps"] == ["a", "b"] and before["pins"] == ["a", "b"] and before["seen"]
+
+
+def test_markup_in_a_name_is_stored_as_typed(hub, user_client):
+    r = _post(user_client, "new", name='<b>x</b> "q" & co')
+    assert r.json()["groups"][0]["name"] == '<b>x</b> "q" & co'

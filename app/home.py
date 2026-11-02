@@ -1,5 +1,5 @@
 """Front page data, per logged-in user: which apps they have chosen for it, which apps they have seen in the
-"Velg apper" list, which apps they open, what they pin, how they view the list, and the one-line summary each
+"Velg apper" list, which apps they open, what they pin, the groups they sort apps into, how they view the list, and the one-line summary each
 app can leave for its card.
 
 Everything takes an open connection from main.db() (rows as sqlite3.Row) and an e-mail; nothing here
@@ -8,6 +8,7 @@ is shared between users, except the summary line of apps with shared data (app/s
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 import time
 from typing import NamedTuple
@@ -23,6 +24,8 @@ REVISIT_GAP = 600      # opening the same app again within 10 minutes (reloads) 
 MOST_USED_MAX = 4
 STATS_DAYS = 7         # the admin statistics cover the last week
 SUMMARY_MAX = 140
+GROUP_NAME_MAX = 40    # characters in a group name, after trimming
+GROUPS_MAX = 30        # groups per user
 VIEWS = ("icons", "cards")
 THEMES = ("auto", "light", "dark")
 SUMMARY_DOC = ("hub", "summary")      # db.doc("hub/summary") in apps using window.claude.use("db")
@@ -206,11 +209,136 @@ def add_for(con: sqlite3.Connection, emails, slug: str) -> None:
 
 
 def rename(con: sqlite3.Connection, old: str, new: str) -> None:
-    """An app got a new address: it stays chosen, pinned and seen for everyone."""
+    """An app got a new address: it stays chosen, pinned, seen and in its group for everyone."""
     for row in con.execute("SELECT email, key, value FROM prefs WHERE key IN ('apps', 'seen', 'pins')").fetchall():
         value = json.loads(row["value"])
         if isinstance(value, list) and old in value:
             _put(con, row["email"], row["key"], [new if s == old else s for s in value if s != new])
+    for row in con.execute("SELECT email FROM prefs WHERE key='groups'").fetchall():
+        groups = get_groups(con, row["email"])
+        if any(old in g["slugs"] for g in groups):
+            for g in groups:
+                g["slugs"] = [new if s == old else s for s in g["slugs"] if s != new]
+            _put(con, row["email"], "groups", groups)
+
+
+# ---------------------------------------------------------------- groups
+# Stored whole under the prefs key "groups": [{"id", "name", "slugs", "open"}], in the order shown. Every change
+# re-reads and cleans the stored list first, so an order or move saved from a stale page only touches what is
+# still there: apps that moved to another group stay put, and a deleted group does not come back.
+def get_groups(con: sqlite3.Connection, email: str) -> list[dict]:
+    """The user's groups, each {"id", "name", "slugs", "open"}. Entries that are not well-formed and repeated ids
+    are dropped; an app stays only in the first group that has it."""
+    try:
+        stored = _get(con, email, "groups", [])
+    except ValueError:  # the stored text is not JSON
+        return []
+    groups: list[dict] = []
+    ids: set[str] = set()
+    taken: set[str] = set()
+    for g in stored if isinstance(stored, list) else []:
+        if not isinstance(g, dict) or not isinstance(g.get("id"), str) or not g["id"] or g["id"] in ids:
+            continue
+        if not isinstance(g.get("name"), str) or not g["name"].strip():
+            continue
+        ids.add(g["id"])
+        slugs = [s for s in dict.fromkeys(_slugs(g.get("slugs"))) if s not in taken]
+        taken.update(slugs)
+        groups.append({"id": g["id"], "name": g["name"].strip(), "slugs": slugs,
+                       "open": g["open"] if isinstance(g.get("open"), bool) else True})
+    return groups
+
+
+def _find(groups: list[dict], gid: str) -> dict:
+    for g in groups:
+        if g["id"] == gid:
+            return g
+    raise KeyError(gid)
+
+
+def _group_name(name: object, others: list[dict]) -> str:
+    """`name` trimmed; ValueError unless it is 1-40 characters and no other group has it (ignoring case)."""
+    clean = name.strip() if isinstance(name, str) else ""
+    if not 1 <= len(clean) <= GROUP_NAME_MAX:
+        raise ValueError(i18n.t("err.group_name"))
+    if any(g["name"].casefold() == clean.casefold() for g in others):
+        raise ValueError(i18n.t("err.group_taken", name=clean))
+    return clean
+
+
+def _take_out(groups: list[dict], slug: str) -> None:
+    for g in groups:
+        g["slugs"] = [s for s in g["slugs"] if s != slug]
+
+
+def create_group(con: sqlite3.Connection, email: str, name: str, slug: str | None = None) -> dict:
+    """A new open group last in the list; with `slug`, that app moves into it."""
+    groups = get_groups(con, email)
+    clean = _group_name(name, groups)
+    if len(groups) >= GROUPS_MAX:
+        raise ValueError(i18n.t("err.group_max"))
+    group = {"id": secrets.token_hex(4), "name": clean, "slugs": [], "open": True}
+    while any(g["id"] == group["id"] for g in groups):  # 32 bits: a clash is unlikely, but cheap to rule out
+        group["id"] = secrets.token_hex(4)
+    if slug is not None:
+        _take_out(groups, slug)
+        group["slugs"].append(slug)
+    groups.append(group)
+    _put(con, email, "groups", groups)
+    return group
+
+
+def rename_group(con: sqlite3.Connection, email: str, gid: str, name: str) -> dict:
+    groups = get_groups(con, email)
+    group = _find(groups, gid)
+    group["name"] = _group_name(name, [g for g in groups if g is not group])
+    _put(con, email, "groups", groups)
+    return group
+
+
+def delete_group(con: sqlite3.Connection, email: str, gid: str) -> None:
+    """Its apps have no group afterwards."""
+    groups = get_groups(con, email)
+    _find(groups, gid)
+    _put(con, email, "groups", [g for g in groups if g["id"] != gid])
+
+
+def set_app_group(con: sqlite3.Connection, email: str, slug: str, gid: str | None) -> None:
+    """Take the app out of any group; unless `gid` is None, put it last in that group."""
+    groups = get_groups(con, email)
+    target = _find(groups, gid) if gid is not None else None
+    _take_out(groups, slug)
+    if target is not None:
+        target["slugs"].append(slug)
+    _put(con, email, "groups", groups)
+
+
+def set_group_apps(con: sqlite3.Connection, email: str, gid: str, order: list[str]) -> list[str]:
+    """Reorder one group, like set_pin_order: its slugs in `order` first (no duplicates; slugs not in this group
+    are ignored, even if the page still thinks they are), then the ones `order` left out, in their old order."""
+    groups = get_groups(con, email)
+    group = _find(groups, gid)
+    old = group["slugs"]
+    slugs = [s for s in dict.fromkeys(order) if s in old]
+    group["slugs"] = slugs + [s for s in old if s not in slugs]
+    _put(con, email, "groups", groups)
+    return group["slugs"]
+
+
+def set_group_order(con: sqlite3.Connection, email: str, order: list[str]) -> list[str]:
+    """Reorder the groups by id, the same merge rule: ids that are gone are ignored, none is brought back."""
+    groups = get_groups(con, email)
+    by_id = {g["id"]: g for g in groups}
+    ids = [i for i in dict.fromkeys(order) if i in by_id]
+    ids += [g["id"] for g in groups if g["id"] not in ids]
+    _put(con, email, "groups", [by_id[i] for i in ids])
+    return ids
+
+
+def set_group_open(con: sqlite3.Connection, email: str, gid: str, open: bool) -> None:
+    groups = get_groups(con, email)
+    _find(groups, gid)["open"] = open
+    _put(con, email, "groups", groups)
 
 
 def picker(apps: list[dict], chosen: list[str], seen: list[str] | None) -> list[dict]:
