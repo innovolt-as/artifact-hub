@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.5.1 (unreleased)
+
+### Fixed
+
+- The front page now also switches to the offline view when it is already open and the connection goes, which is how
+  you usually come back to the hub on a phone. It switches at once when the phone is offline, and after about 3 seconds
+  when the server does not answer; it goes back to the normal page by itself when the server answers.
+
 ## v1.5.0 (2026-11-02)
 
 ### Before you upgrade
