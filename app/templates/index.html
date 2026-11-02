@@ -97,7 +97,7 @@
   {% endif %}
   {% for g, members in groups %}
   <section id="g-{{ g.id }}" class="group" data-group="{{ g.id }}" data-order="group" data-open="{{ '1' if g.open else '0' }}">
-    <h3 class="sec"><button type="button" class="gtoggle" aria-expanded="{{ 'true' if g.open else 'false' }}" aria-label="{{ t('home.group_toggle', name=g.name) }}">{{ g.name }}<span class="gcount">· {{ members|length }}</span><span class="chev"></span></button></h3>
+    <h3 class="sec"><button type="button" class="gtoggle" aria-expanded="{{ 'true' if g.open else 'false' }}" data-label="{{ t('home.group_toggle', name=g.name) }}">{{ g.name }}<span class="gcount">· {{ members|length }}</span><span class="chev"></span></button></h3>
     <ul class="{{ 'grid' if view == 'icons' else 'cards' }}"{% if not g.open %} hidden{% endif %}>
       {% for a in members %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>

@@ -168,7 +168,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 #picker .pgroup[hidden], #picker .gh[hidden] { display: none; }
 #picker .gh { display: flex; align-items: center; gap: 4px; margin: 10px 4px 0 8px; min-height: 44px; }
 #picker .gh h2 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; overflow-wrap: anywhere; }
-#picker .gh button { flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: none; color: var(--fg); cursor: pointer; }
+#picker .gh button { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: none; color: var(--fg); cursor: pointer; }
 #picker .gh button, #picker .gmenu button, #picker .gnew { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 #picker .gh button:hover { border-color: var(--accent); }
 #picker li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-radius: 12px; }

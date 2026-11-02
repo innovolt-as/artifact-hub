@@ -536,7 +536,7 @@ def test_group_markup_open(hub, user_client):
     html = user_client.get("/").text
     sec = _sec(html, f"g-{gid}")
     assert f'<section id="g-{gid}" class="group" data-group="{gid}" data-order="group" data-open="1">' in sec
-    assert '<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true" aria-label="Åpne eller lukk Jobb">' in sec
+    assert '<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true" data-label="Åpne eller lukk Jobb">' in sec
     assert 'Jobb<span class="gcount">· 2</span><span class="chev"></span></button></h3>' in sec
     assert sec.index('data-slug="b"') < sec.index('data-slug="a"') and 'data-slug="c"' not in sec
     assert "hidden" not in sec and "gclosed" not in sec
@@ -552,8 +552,8 @@ def test_closed_group_markup(hub, user_client):
     assert closed.count('class="icon icon-xs"') == 2
     assert closed.count('aria-hidden="true"') == 2  # a screen reader gets the label, not the letters
     head = sec[sec.index('class="gtoggle"'):sec.index('class="gclosed"')]
-    label = 'aria-label="Åpne eller lukk Jobb"'
-    assert label in head and 'aria-expanded="false" ' + label in closed
+    assert 'data-label="Åpne eller lukk Jobb"' in head and "aria-label" not in head  # named by its text and count
+    assert 'aria-expanded="false" aria-label="Åpne eller lukk Jobb"' in closed
 
 
 def test_closed_row_has_the_headings_label_escaped(hub, user_client):
@@ -613,7 +613,7 @@ def test_group_name_escaped(hub, user_client):
     html = user_client.get("/").text
     sec = _sec(html, f"g-{gid}")
     assert "&lt;b&gt;x&lt;/b&gt;&#34;&amp;" in sec and "<b>x</b>" not in html
-    assert 'aria-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in sec
+    assert 'data-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in sec
 
 
 # ---------------------------------------------------------------- folding (home.js, hub.css)

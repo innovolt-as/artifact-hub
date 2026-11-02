@@ -4,7 +4,7 @@
  *
  * Holding a card still for HOLD ms lifts it (.lifted in hub.css: a little larger, with a shadow). It then follows the
  * pointer, and the other cards of its section slide aside (.sliding) to show where it will land: the slot whose
- * centre is nearest the pointer. A card never leaves its section; moving apps between groups is done in "Choose
+ * centre is nearest the pointer. A card never leaves its section; moving apps between groups is done in "Arrange
  * apps". Letting go saves the section's whole order at once (data-order="pins": POST /api/prefs/pins {order};
  * "group": /api/prefs/groups/apps {id, order}), with keepalive, so opening an app right after the drop doesn't lose
  * it, glides the card there and moves the node in the DOM. If saving fails, the cards glide back once it has landed

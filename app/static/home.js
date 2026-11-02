@@ -85,7 +85,8 @@
       row.type = "button";
       row.className = "gclosed";
       row.setAttribute("aria-expanded", "false");
-      row.setAttribute("aria-label", section.querySelector(".gtoggle")?.getAttribute("aria-label") || "");
+      // The heading is named by its text and count; the icon row has no text, so it gets the label the template put on the heading
+      row.setAttribute("aria-label", section.querySelector(".gtoggle")?.dataset.label || "");
       section.append(row);
     }
     row.replaceChildren(...[...section.querySelectorAll("li.app .icon")].map((ic) => {
@@ -692,7 +693,7 @@
       closeOpen(true);
     };
     track(inTurn("/api/prefs/groups/app", { slug: li.dataset.slug, id }).then(
-      (r) => { shut(); redraw(r.groups, li); li.querySelector(".gpick").focus({ preventScroll: true }); },
+      (r) => { shut(); redraw(r.groups, li); if (!opened) li.querySelector(".gpick").focus({ preventScroll: true }); },
       (e) => { shut(); rowError(li, e.message); },
     ));
   }
