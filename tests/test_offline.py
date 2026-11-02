@@ -180,14 +180,15 @@ def test_sw_served_at_root(client):
 
 
 # ---------------------------------------------------------------- the service worker and forgetting the copies
-FORGET = '<script src="/static/forget.js"'
+FORGET = '<script src="/static/forget.js?v='
 
 
 def test_forget_on_logged_out_pages(client, user_client):
-    assert FORGET + ' data-run defer></script>' in client.get("/login").text
+    assert re.search(r'<script src="/static/forget\.js\?v=[0-9a-f]{8}" data-run defer></script>', client.get("/login").text)
     assert "forget.js" not in user_client.get("/").text
     page = user_client.get("/settings").text
-    assert page.count(FORGET) == 1 and FORGET + ' defer></script>' in page and "data-run" not in page
+    assert page.count(FORGET) == 1 and "data-run" not in page
+    assert re.search(r'<script src="/static/forget\.js\?v=[0-9a-f]{8}" defer></script>', page)
 
 
 def test_sw_skips_private_routes(client):
@@ -390,14 +391,14 @@ def test_app_page_stores_the_front_page(client):
 
 
 def test_forget_runs_only_when_logged_out(pw_mode, hub, client, user_client, admin_client):
-    run = '<script src="/static/forget.js" data-run'
+    run = re.compile(r'<script src="/static/forget\.js\?v=[0-9a-f]{8}" data-run')
     _page(hub, "a")
     lock(USER, "a")
     r = user_client.get("/a/a/")
     assert r.status_code == 423 and 'action="/lock/a"' in r.text
     for page in (user_client.get("/").text, user_client.get("/settings").text, admin_client.get("/admin").text, r.text):
-        assert run not in page and "data-run" not in page
-    assert run in client.get("/login").text
+        assert not run.search(page) and "data-run" not in page
+    assert run.search(client.get("/login").text)
 
 
 def test_comments_use_english_labels():

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.6.1 (unreleased)
+
+### Fixed
+
+- After an upgrade, Safari could keep using the hub's old scripts for a while, so new buttons on the page did nothing
+  (on the front page, *New group* in *Arrange apps*). Every script and the stylesheet now have an address that changes
+  with their content, and the rest are checked with the server each time.
+
 ## v1.6.0 (2026-11-02)
 
 ### Before you upgrade

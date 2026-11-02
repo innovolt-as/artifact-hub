@@ -125,12 +125,33 @@ class BrandedStatic(StaticFiles):
             return str(f), os.stat(f)
         return super().lookup_path(path)
 
+    async def get_response(self, path: str, scope):
+        # Without Cache-Control, Safari kept old scripts after an upgrade on its own and ran them with the new pages.
+        # An address with ?v= names one content (static_url) and is kept; any other is checked again each time.
+        resp = await super().get_response(path, scope)
+        versioned = b"v=" in scope.get("query_string", b"")
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable" if versioned else "no-cache"
+        return resp
+
+
+_static_v: dict[str, tuple[int, str]] = {}  # name -> (st_mtime_ns, digest)
+
+
+def static_url(name: str) -> str:
+    """/static/<name>?v=<first 8 of its sha256>, so a browser fetches it again whenever it changes."""
+    f = static_file(name)
+    mtime = f.stat().st_mtime_ns
+    cached = _static_v.get(name)
+    if not cached or cached[0] != mtime:
+        cached = (mtime, hashlib.sha256(f.read_bytes()).hexdigest()[:8])
+        _static_v[name] = cached
+    return f"/static/{name}?v={cached[1]}"
+
 
 app.mount("/static", BrandedStatic(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["pw_mode"] = lambda: password_mode()
-# In the stylesheet's address, so a browser fetches it again after an upgrade: /static sends no Cache-Control
-templates.env.globals["css_v"] = hashlib.sha256((BASE_DIR / "static" / "hub.css").read_bytes()).hexdigest()[:8]
+templates.env.globals["static_url"] = static_url
 templates.env.globals.update(t=i18n.t, t_html=i18n.t_html, tn=i18n.tn, raw=i18n.raw, lang=lambda: i18n.LANG)
 signer = URLSafeTimedSerializer(SECRET_KEY, salt="session")
 unlock_signer = URLSafeTimedSerializer(SECRET_KEY, salt="app-unlock")

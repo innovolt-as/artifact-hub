@@ -146,6 +146,6 @@
   <template id="pgroupNew"><section class="pgroup" data-gid="">{{ pick_head(none) }}<ul></ul></section></template>
 </dialog>
 <script type="application/json" id="__hub_strings">{{ js_strings|tojson }}</script>
-<script src="/static/home.js" defer></script>
-<script src="/static/drag.js" defer></script>
+<script src="{{ static_url('home.js') }}" defer></script>
+<script src="{{ static_url('drag.js') }}" defer></script>
 {% endblock %}

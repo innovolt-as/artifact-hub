@@ -20,4 +20,4 @@
   "appGone": {{ raw("admin.app_gone")|tojson }},
   "loggedOut": {{ raw("err.not_logged_in")|tojson }}
 }</script>
-<script src="/static/admin.js"></script>
+<script src="{{ static_url('admin.js') }}"></script>

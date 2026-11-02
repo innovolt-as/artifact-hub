@@ -74,7 +74,7 @@ def test_a_locked_page_shows_the_code_screen(user_client, locked):
     assert 'name="code"' in r.text and "App notat" in r.text
     assert MARKER not in r.text
     assert i18n.t("lock.back") in r.text
-    assert '<script src="/static/lock.js" defer></script>' in r.text
+    assert re.search(r'<script src="/static/lock\.js\?v=[0-9a-f]{8}" defer></script>', r.text)
 
 
 def test_the_code_field_has_the_right_keyboard_and_no_keychain(user_client, locked):
