@@ -180,8 +180,40 @@ def test_stale_group_order_does_not_bring_back_a_deleted_group(hub):
 def test_set_group_order_keeps_groups_left_out(hub):
     a, b, c = _mk(hub, "A", "B", "C")
     with hub.db() as con:
-        assert hub.home.set_group_order(con, X, [c]) == [c, a, b]
-    assert [g["id"] for g in _groups(hub)] == [c, a, b]
+        # Only c was shown: nothing it could pass, so nothing moves
+        assert hub.home.set_group_order(con, X, [c]) == [a, b, c]
+    assert [g["id"] for g in _groups(hub)] == [a, b, c]
+
+
+def test_hidden_apps_keep_their_place_in_a_group(hub):
+    # The page shows only some of a group (b is pinned, or not on the front page): a drop sends d, a, c, and b
+    # stays right after a instead of drifting to the end
+    (g,) = _mk(hub, "G")
+    with hub.db() as con:
+        for s in "abcd":
+            hub.home.set_app_group(con, X, s, g)
+        assert hub.home.set_group_apps(con, X, g, ["d", "a", "c"]) == ["d", "a", "b", "c"]
+        # a and b left out: they go with d, the shown app they followed
+        assert hub.home.set_group_apps(con, X, g, ["c", "d"]) == ["c", "d", "a", "b"]
+
+
+def test_a_hidden_first_app_stays_first(hub):
+    (g,) = _mk(hub, "G")
+    with hub.db() as con:
+        for s in "xabc":
+            hub.home.set_app_group(con, X, s, g)
+        assert hub.home.set_group_apps(con, X, g, ["c", "a", "b"]) == ["x", "c", "a", "b"]
+        # still only the group's own slugs, each once (Review Focus 1)
+        assert hub.home.set_group_apps(con, X, g, ["b", "zz", "b", "a"]) == ["x", "c", "b", "a"]
+
+
+def test_an_empty_group_keeps_its_place_in_the_group_order(hub):
+    # Empty groups are not on the front page, so a drop of the groups leaves them out
+    a, empty, b, c = _mk(hub, "A", "Empty", "B", "C")
+    with hub.db() as con:
+        assert hub.home.set_group_order(con, X, [c, a, b]) == [c, a, empty, b]
+        assert hub.home.set_group_order(con, X, [b, c]) == [b, c, a, empty]
+    assert [g["id"] for g in _groups(hub)] == [b, c, a, empty]
 
 
 def test_set_group_open(hub):

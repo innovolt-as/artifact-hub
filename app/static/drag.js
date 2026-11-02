@@ -52,7 +52,8 @@
   let press = null;  // a pointer held on a card or a group heading, not lifted yet
   let drag = null;   // the lifted card or group, until it has landed
   let swallow = 0;   // a click before this time is the one that follows a lift
-  let saves = 0;     // number of the latest save
+  let saved = 0;     // number of the latest save
+  const latest = new Map(); // what a drop saves ("groups", or a section id) -> number of its latest save
 
   // home.js: the click on a group heading that ends a hold must not fold the group
   window.hubDragJustEnded = () => performance.now() < swallow;
@@ -239,9 +240,10 @@
     try {
       const o = order(d);
       const before = d.items.map((x) => keyOf(d.block, x));
-      const n = d.to === d.from ? 0 : ++saves;
+      const where = { block: d.block, sec: d.sec, key: d.block ? "groups" : d.sec };
+      const n = d.to === d.from ? 0 : ++saved;
+      if (n) latest.set(where.key, n);
       const sent = n ? save(d.url, d.body(o.map((x) => keyOf(d.block, x)))) : null; // now, not after the glide
-      const where = { block: d.block, sec: d.sec };
       d.el.classList.add("sliding");
       d.el.style.transform = offset(d, d.el, places(d, o).get(d.el));
       settle(d, () => {
@@ -283,9 +285,9 @@
 
   // Save number n failed, and what it moved has landed
   function unsaved(n, where, before) {
-    // A later save sends the whole order again, and a card or group held right now, or pressed and about to lift,
-    // must not move under the finger
-    if (n === saves && !drag && !press) restore(where, before);
+    // A later save of the same section (or of the groups) sends its whole order again, and a card or group held
+    // right now, or pressed and about to lift, must not move under the finger
+    if (latest.get(where.key) === n && !drag && !press) restore(where, before);
     setTimeout(() => alert(JSON.parse(document.getElementById("__hub_strings").textContent).save_failed), SETTLE);
   }
 

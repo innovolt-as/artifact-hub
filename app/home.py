@@ -312,24 +312,39 @@ def set_app_group(con: sqlite3.Connection, email: str, slug: str, gid: str | Non
     _put(con, email, "groups", groups)
 
 
+def _merge(old: list[str], order: list[str]) -> list[str]:
+    """`old` reordered by `order`: the items of `order` that are in `old` (no duplicates, anything else ignored), in
+    that order, and each item `order` left out right after the one it followed in `old` (the nearest one `order`
+    has), or first when none came before it. The page sends only what it shows (no pinned apps, no empty groups), and
+    a drop there must not move what it doesn't show to the end."""
+    shown = [s for s in dict.fromkeys(order) if s in old]
+    after: dict[str | None, list[str]] = {}
+    anchor = None
+    for s in old:
+        if s in shown:
+            anchor = s
+        else:
+            after.setdefault(anchor, []).append(s)
+    out = list(after.get(None, []))
+    for s in shown:
+        out += [s, *after.get(s, [])]
+    return out
+
+
 def set_group_apps(con: sqlite3.Connection, email: str, gid: str, order: list[str]) -> list[str]:
-    """Reorder one group, like set_pin_order: its slugs in `order` first (no duplicates; slugs not in this group
-    are ignored, even if the page still thinks they are), then the ones `order` left out, in their old order."""
+    """Reorder one group (_merge): slugs not in this group are ignored, even if the page still thinks they are."""
     groups = get_groups(con, email)
     group = _find(groups, gid)
-    old = group["slugs"]
-    slugs = [s for s in dict.fromkeys(order) if s in old]
-    group["slugs"] = slugs + [s for s in old if s not in slugs]
+    group["slugs"] = _merge(group["slugs"], order)
     _put(con, email, "groups", groups)
     return group["slugs"]
 
 
 def set_group_order(con: sqlite3.Connection, email: str, order: list[str]) -> list[str]:
-    """Reorder the groups by id, the same merge rule: ids that are gone are ignored, none is brought back."""
+    """Reorder the groups by id (_merge): ids that are gone are ignored, none is brought back."""
     groups = get_groups(con, email)
     by_id = {g["id"]: g for g in groups}
-    ids = [i for i in dict.fromkeys(order) if i in by_id]
-    ids += [g["id"] for g in groups if g["id"] not in ids]
+    ids = _merge([g["id"] for g in groups], order)
     _put(con, email, "groups", [by_id[i] for i in ids])
     return ids
 
