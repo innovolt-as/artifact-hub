@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.7.0 (unreleased)
+
+### Before you upgrade
+
+- Nothing is needed. No stored choice is changed: what was open or closed stays so, and the new open/closed
+  choices for *Favourites* and *Other* are worked out from your old view until you tap one.
+
+### New
+
+- Every section on the front page, *Favourites*, each group and *Other*, is a list of cards when it is open and a
+  row of icons with the name under each when it is closed. A tap on the heading switches, and the hub remembers it per
+  section on your account. Tap an icon to open the app; hold it for the favourite menu, or hold and drag to reorder.
+- A *Groups* window, opened by *Groups* under the apps. It lists your groups with the number of apps in each. Make a
+  group, rename it, delete it, or hold a row and drag to change the order of the groups.
+
+### Changed
+
+- The *list / icons* switch at the top of the front page is gone: the choice is now made per section.
+- *Arrange apps* only places apps: tick what you want on the front page and choose a group for each app (the menu
+  still has *New group …*). Renaming, deleting and making groups moved to *Groups*. A long app name wraps in its own
+  column and never runs into the group button.
+- Starting values on upgrade: if you used the list, every section starts open; if you used icons, *Favourites* and
+  *Other* start closed. Groups keep their own open/closed choice from v1.6, so a group that was open (a grid of
+  icons for the icon view) is now an open list.
+
 ## v1.6.1 (2026-11-02)
 
 ### Fixed
