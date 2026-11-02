@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.6.0 (unreleased)
+## v1.6.0 (2026-11-02)
 
 ### Before you upgrade
 
