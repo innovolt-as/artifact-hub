@@ -340,3 +340,60 @@ def test_sw_reads_the_body_before_the_queue(client):
     body = _fn(client.get("/sw.js").text, "store")
     assert body.index("arrayBuffer()") < body.index("queue(")
     assert "new Response(" in body
+
+
+def test_typed_date_and_time_fields_keep_the_page():
+    js = (STATIC / "hub.js").read_text()
+    rule = re.search(r"const isField = .*?;\n", js, re.S).group(0)
+    for kind in ("text", "number", "date", "time", "datetime-local", "month", "week"):
+        assert re.search(rf"[(|]{kind}[|)]", rule), kind
+    assert "select" not in rule.lower() and "checkbox" not in rule
+
+
+def test_offline_cards_look_only_in_the_hub_cache():
+    js = (STATIC / "home.js").read_text()
+    assert 'caches.match("/a/" + li.dataset.slug + "/", { cacheName: "hub-pages-v1" })' in js
+
+
+def test_offline_refresh_gives_up_after_10_s():
+    run = re.search(r"async function run\(quiet\) \{.*?\n  \}\n", (STATIC / "home.js").read_text(), re.S).group(0)
+    assert "AbortController" in run and "10000" in run and "signal" in run
+
+
+def test_copy_of_an_app_is_marked(hub):
+    """hub.js knows the page is the stored copy, so it does not ask for the front page from there."""
+    _page(hub, "a")
+    c = make_client(USER)
+    tag = lambda **h: re.search(r'<script src="/static/hub\.js"[^>]*>', c.get("/a/a/", headers=h).text).group(0)  # noqa: E731
+    assert ' data-copy="1"' in tag(**PRE)
+    assert "data-copy" not in tag()
+    assert "data-copy" not in tag(**FWD)
+
+
+def test_app_page_stores_the_front_page(client):
+    """A home-screen icon of an app has its own storage: the banner's back link needs a copy of / there too."""
+    js = (STATIC / "hub.js").read_text()
+    assert 'copy: me.dataset.copy === "1"' in js
+    js = client.get("/sw.js").text
+    update = _fn(js, "update")
+    assert "if (!m.copy) jobs.push(keepFront(g, true));" in update and "keepFront(g, false)" in update
+    assert "keepFile(" in _fn(js, "keepFront")  # and the hub's files the front page loads
+
+
+def test_forget_runs_only_when_logged_out(pw_mode, hub, client, user_client, admin_client):
+    run = '<script src="/static/forget.js" data-run'
+    _page(hub, "a")
+    lock(USER, "a")
+    r = user_client.get("/a/a/")
+    assert r.status_code == 423 and 'action="/lock/a"' in r.text
+    for page in (user_client.get("/").text, user_client.get("/settings").text, admin_client.get("/admin").text, r.text):
+        assert run not in page and "data-run" not in page
+    assert run in client.get("/login").text
+
+
+def test_comments_use_english_labels():
+    files = [STATIC / n for n in ("sw.js", "hub.js", "home.js", "forget.js")] + [STATIC.parent / "main.py"]
+    for p in files:
+        text = p.read_text()
+        for label in ("Virker uten nett", "Slett mine data", "Velg apper"):
+            assert label not in text, (p.name, label)

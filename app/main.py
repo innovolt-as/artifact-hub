@@ -916,7 +916,7 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     if root.is_file():
         if path not in ("", "index.html"):
             raise HTTPException(404)
-        return _html_with_shim(root, slug, user, with_banner=with_banner, locked=protected, offline=offline)
+        return _html_with_shim(root, slug, user, with_banner=with_banner, locked=protected, offline=offline, copy=precache)
     target = (root / (path or "index.html")).resolve()
     if root.resolve() not in target.parents and target != root.resolve():
         raise HTTPException(404)
@@ -925,7 +925,7 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     if not target.is_file() or target.name == "meta.json":
         raise HTTPException(404)
     if target.suffix.lower() in (".html", ".htm"):
-        return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected, offline=offline)
+        return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected, offline=offline, copy=precache)
     # a locked app's files must not outlive the unlock in the browser's cache
     return FileResponse(target, headers={"Cache-Control": "no-store"} if protected else None)
 
@@ -971,17 +971,19 @@ def open_link(slug: str, user: str = Depends(require_user)):
     return RedirectResponse(link["url"], status_code=302)
 
 
-def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool, locked: bool = False, offline: bool = False) -> HTMLResponse:
+def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool, locked: bool = False, offline: bool = False,
+                    copy: bool = False) -> HTMLResponse:
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
     and the hub banner right after <body> unless the app has it turned off. `locked` marks an app the viewer has
-    locked, so hub.js keeps its unlock alive. `offline` marks an app the service worker keeps a copy of."""
+    locked, so hub.js keeps its unlock alive. `offline` marks an app the service worker keeps a copy of, and `copy`
+    the page it fetches to keep (the copy opens without the server)."""
     html = path.read_text("utf-8", errors="replace")
     strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
     found = artifact_root(slug)
     data_shared = bool(found) and shared.is_shared(found[1])
     tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"{}></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings,
-        (' data-lock="1"' if locked else "") + (' data-offline="1"' if offline else "")
+        (' data-lock="1"' if locked else "") + (' data-offline="1"' if offline else "") + (' data-copy="1"' if copy else "")
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
     html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
@@ -1458,7 +1460,7 @@ async def prefs_apps(request: Request, user: str = Depends(api_user)):
 
 @app.post("/api/prefs/seen")
 def prefs_seen(request: Request, user: str = Depends(api_user)):
-    """The user opened the "Velg apper" list: nothing in it is new any more."""
+    """The user opened the "Choose apps" list: nothing in it is new any more."""
     _require_json(request)
     with db() as con:
         home.mark_seen(con, user, [a["slug"] for a in list_artifacts(user)])
@@ -2009,7 +2011,7 @@ def set_offline(slug: str, on: bool) -> None:
 
 @app.post("/api/toggle-offline")
 def api_toggle_offline(request: Request, slug: str = Form(...)):
-    """Flip «Virker uten nett» for one app."""
+    """Flip «Works offline» for one app."""
     _upload_authorized(request)
     meta_path = _meta_path(slug)
     if not meta_path:

@@ -1,5 +1,5 @@
 // Front page: greeting and date from the viewer's clock, view toggle, pinning (star in the card view,
-// long-press / right-click menu in the icon view) and the "Velg apper" list. Prefs live on the account
+// long-press / right-click menu in the icon view) and the "Choose apps" list. Prefs live on the account
 // (/api/prefs/*). The page never reloads: it fetches itself again, swaps in what changed and blinks those cards.
 //
 // Shared with pull.js and drag.js:
@@ -41,7 +41,7 @@
   const keyOf = (li) => (li.closest("section")?.id || "") + "/" + li.dataset.slug;
   const cardsOf = (home) => new Map([...home.querySelectorAll("li.app[data-slug]")].map((li) => [keyOf(li), li]));
   // What the server drew: each card's HTML by section/slug, and the rest of #home with the cards as placeholders
-  // (sections, slug order, the dot on "Velg apper"...). Taken from server markup only, never from the live page,
+  // (sections, slug order, the dot on "Choose apps"...). Taken from server markup only, never from the live page,
   // so classes like blink or a drag's inline styles don't count as changes.
   function snapshot(home) {
     const frame = home.cloneNode(true);
@@ -98,7 +98,7 @@
     stamp();
   }
 
-  // Wait while a favourite is dragged, the pin menu is open or "Velg apper" is open; each of them sends hub:idle
+  // Wait while a favourite is dragged, the pin menu is open or "Choose apps" is open; each of them sends hub:idle
   // and, while offline, a finger on the screen
   let touching = 0;
   const offline = () => root.dataset.hubOffline === "1";
@@ -118,13 +118,19 @@
     // Busy again by the time this resumes, e.g. drag.js opens the menu as it lets go: wait on
     do { await idle(); } while (busy());
     fetching = true;
+    // While the copy shows, a fetch that hangs on a weak connection would be shared by every refresh after it: give up
+    // after 10 s, and the next refresh asks again
+    const ctl = offline() && window.AbortController ? new AbortController() : null;
+    const timer = ctl && setTimeout(() => ctl.abort(), 10000);
     let doc;
     try {
-      const r = await fetch("/", { credentials: "same-origin", cache: "no-store" });
+      const r = await fetch("/", { credentials: "same-origin", cache: "no-store", signal: ctl?.signal });
       if (r.status !== 200) return false;
       doc = new DOMParser().parseFromString(await r.text(), "text/html");
     } catch {
       return false;
+    } finally {
+      clearTimeout(timer);
     }
     if (!doc.getElementById("home")) return false; // e.g. the login page after the session ran out
     do { await idle(); } while (busy()); // don't move cards under a finger: something may have started while fetching
@@ -155,8 +161,8 @@
 
   // ------------------------------------------------------------ the stored front page (layout C)
   // The service worker answers with its copy of this page and sets data-hub-offline on <html>. Only apps marked
-  // «Virker uten nett» and found in the cache can open, so they get a section of their own and the rest is greyed.
-  // Nothing here saves anything: the stars, the view toggle and «Velg apper» are hidden (hub.css) and guarded below.
+  // «Works offline» and found in the hub's cache can open, so they get a section of their own and the rest is greyed.
+  // Nothing here saves anything: the stars, the view toggle and «Choose apps» are hidden (hub.css) and guarded below.
   let toast = null, toastTimer = null;
   function showToast(text) {
     toast?.remove();
@@ -191,7 +197,8 @@
     const marked = new Set(S.offline_apps || []);
     const stored = await Promise.all(cards.map(async (li) => {
       if (!marked.has(li.dataset.slug)) return false;
-      try { return !!(await caches.match("/a/" + li.dataset.slug + "/")); } catch { return false; }
+      // only the hub's cache: an app's own (Treningsprogram's sbfb-*) may hold the same address
+      try { return !!(await caches.match("/a/" + li.dataset.slug + "/", { cacheName: "hub-pages-v1" })); } catch { return false; }
     }));
     if (!offline() || !apps.isConnected) return; // the server answered meanwhile
     const kind = apps.dataset.view === "icons" ? "grid" : "cards";
@@ -244,7 +251,7 @@
   });
 
   // ------------------------------------------------------------ the copy on the phone (static/sw.js)
-  // The hub's service worker keeps this page and the apps marked «Virker uten nett». Unless this is that copy, tell it
+  // The hub's service worker keeps this page and the apps marked «Works offline». Unless this is that copy, tell it
   // who is logged in, which apps those are, and the hub's files this page uses (it did not see them load on the first
   // visit). The worker is the one register() gives, once active (not navigator.serviceWorker.ready, which may be an
   // app's own). Without service workers the page works as before.
@@ -381,7 +388,7 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
   addEventListener("scroll", closeMenu, { passive: true });
 
-  // ------------------------------------------------------------ "Velg apper"
+  // ------------------------------------------------------------ "Choose apps"
   // Each tick is saved at once; closing the list refreshes the page if anything changed
   let changed = false, seenSent = false;
   const saving = new Set();

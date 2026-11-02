@@ -115,8 +115,8 @@
   window.hubStay = (on) => { stay = !!on; };
   // Text the user typed and has not saved keeps the page too: record typed fields, forget them on submit.
   const typed = new Set();
-  const isField = (el) => el instanceof Element && !el.closest("hub-banner") && (el.isContentEditable
-    || el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && /^(text|search|email|url|tel|number|password)?$/.test(el.getAttribute("type") || "")));
+  const isField = (el) => el instanceof Element && !el.closest("hub-banner") && (el.isContentEditable || el.tagName === "TEXTAREA"
+    || (el.tagName === "INPUT" && /^(text|search|email|url|tel|number|password|date|time|datetime-local|month|week)$/.test(el.type)));
   document.addEventListener("input", (e) => { if (isField(e.target)) typed.add(e.target); }, true);
   document.addEventListener("submit", (e) => { for (const el of e.target.elements || []) typed.delete(el); }, true);
   const holdsText = () => {
@@ -141,10 +141,11 @@
   } catch (e) { /* no sessionStorage: the rule does not apply */ }
 
   // ------------------------------------------------------------------ the copy on the phone (static/sw.js)
-  // The hub's service worker keeps the page of an app marked «Virker uten nett» (data-offline="1"), and the files it
+  // The hub's service worker keeps the page of an app marked «Works offline» (data-offline="1"), and the files it
   // uses, and drops the copy of one that is not. Once the page has loaded, tell it, with those files (it did not see
-  // them load on the first visit). Not through navigator.serviceWorker.ready: under an app with its own worker, that is
-  // the app's. Without service workers the app works as before.
+  // them load on the first visit), and whether this is its stored copy (data-copy="1"). Not through
+  // navigator.serviceWorker.ready: under an app with its own worker, that is the app's. Without service workers the app
+  // works as before.
   async function hubWorker(sw) {
     const reg = await sw.register("/sw.js");
     const next = reg.installing || reg.waiting;
@@ -166,7 +167,8 @@
         const roots = [document, document.querySelector("hub-banner")?.shadowRoot].filter(Boolean);
         const assets = roots.flatMap((r) => [...r.querySelectorAll("link[rel=stylesheet], script[src], img[src]")])
           .map((el) => el.href || el.src).filter((u) => u && u.startsWith(location.origin + "/"));
-        worker?.postMessage({ type: "hub:app", user: EMAIL, slug: SLUG, offline: me.dataset.offline === "1", assets });
+        worker?.postMessage({ type: "hub:app", user: EMAIL, slug: SLUG, offline: me.dataset.offline === "1", assets,
+          copy: me.dataset.copy === "1" });
       }).catch(() => {});
     }
   } catch (e) { /* no service workers here */ }

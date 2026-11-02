@@ -1,6 +1,6 @@
 // Forget the copies on this phone (static/sw.js). They are the caches whose names start with "hub-", and only those
 // go: an app's localStorage, IndexedDB and own caches are never touched.
-//   window.hubForget() -> Promise<void>  never fails; settings-account.js calls it after «Slett mine data»
+//   window.hubForget() -> Promise<void>  never fails; settings-account.js calls it after «Delete my data»
 // With data-run on its tag it runs at once: base.html loads it so on every page for someone not logged in, so logging
 // out, or a login that has run out, leaves no copy behind. The worker is told too, so an answer it is still storing
 // does not bring a cache back.
