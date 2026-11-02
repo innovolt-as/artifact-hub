@@ -266,6 +266,15 @@ def test_offline_strings_reach_the_page(hub, admin_client):
         assert sel in css
 
 
+def test_open_front_page_goes_offline():
+    # The page that was open when the network went (the usual way back into the home-screen app) must switch to the
+    # offline layout too, not only the stored copy the worker answers with
+    js = (Path(__file__).parent.parent / "app" / "static" / "home.js").read_text()
+    assert 'addEventListener("offline", goOffline)' in js
+    assert "navigator.onLine === false" in js and "setTimeout(goOffline, 3000)" in js
+    assert "r.status >= 500) goOffline()" in js
+
+
 def test_hub_js_has_the_away_rule():
     static = Path(__file__).parent.parent / "app" / "static"
     js = (static / "hub.js").read_text()

@@ -118,16 +118,18 @@
     // Busy again by the time this resumes, e.g. drag.js opens the menu as it lets go: wait on
     do { await idle(); } while (busy());
     fetching = true;
-    // While the copy shows, a fetch that hangs on a weak connection would be shared by every refresh after it: give up
-    // after 10 s, and the next refresh asks again
-    const ctl = offline() && window.AbortController ? new AbortController() : null;
+    // A fetch that hangs on a weak connection would be shared by every refresh after it: give up after 10 s, and the
+    // next refresh asks again
+    const ctl = window.AbortController ? new AbortController() : null;
     const timer = ctl && setTimeout(() => ctl.abort(), 10000);
     let doc;
     try {
       const r = await fetch("/", { credentials: "same-origin", cache: "no-store", signal: ctl?.signal });
+      if (r.status >= 500) goOffline(); // the server is down: as offline, like the service worker
       if (r.status !== 200) return false;
       doc = new DOMParser().parseFromString(await r.text(), "text/html");
     } catch {
+      goOffline(); // no network, or no answer within 10 s
       return false;
     } finally {
       clearTimeout(timer);
@@ -155,12 +157,20 @@
   }
   window.hubRefresh = () => refresh();
 
-  // Back on the page: from another tab or app, or from the browser's back/forward cache
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
-  addEventListener("pageshow", (e) => { if (e.persisted || offline()) refresh(); });
+  // Back on the page: from another tab or app, or from the browser's back/forward cache. A page that was open when the
+  // network went (the usual way back into a home-screen app) shows layout C at once without a network, or when the
+  // server has not answered within 3 s; a later answer draws the real page again.
+  function check() {
+    if (navigator.onLine === false) goOffline();
+    const slow = offline() ? null : setTimeout(goOffline, 3000);
+    refresh().finally(() => clearTimeout(slow));
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+  addEventListener("pageshow", (e) => { if (e.persisted || offline()) check(); });
 
   // ------------------------------------------------------------ the stored front page (layout C)
-  // The service worker answers with its copy of this page and sets data-hub-offline on <html>. Only apps marked
+  // The service worker answers with its copy of this page and sets data-hub-offline on <html>; an open page that loses
+  // the server sets it itself (goOffline). Only apps marked
   // «Works offline» and found in the hub's cache can open, so they get a section of their own and the rest is greyed.
   // Nothing here saves anything: the stars, the view toggle and «Choose apps» are hidden (hub.css) and guarded below.
   let toast = null, toastTimer = null;
@@ -181,9 +191,21 @@
     toast?.remove();
     toast = null;
   }
+  // The open page lost the server: mark it at once (hub.css hides what saves), and rearrange it once nothing is being
+  // dragged or touched
+  async function goOffline() {
+    if (offline()) return;
+    root.dataset.hubOffline = "1";
+    try {
+      do { await idle(); } while (busy());
+      if (offline()) await enterOffline();
+    } catch (e) {
+      console.error(e);
+    }
+  }
   async function enterOffline() {
     const bar = document.querySelector(".topbar .hero-row");
-    if (bar) {
+    if (bar && !bar.querySelector(".offline-badge")) {
       const badge = document.createElement("span");
       badge.className = "offline-badge";
       const dot = document.createElement("span");
@@ -229,6 +251,7 @@
     apps.prepend(...[ok, no].filter(Boolean));
   }
   if (offline()) enterOffline().catch((e) => console.error(e));
+  addEventListener("offline", goOffline);
   addEventListener("online", () => { if (offline()) refresh(); });
   setInterval(() => { if (offline() && !document.hidden) refresh(); }, 5000);
   for (const ev of ["touchstart", "touchend", "touchcancel"]) {
