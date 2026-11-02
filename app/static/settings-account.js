@@ -1,5 +1,5 @@
 // Settings, account section (templates/settings.html): delete my data. The dialog asks for the code, or for a typed word
-// when there is no code. The page stays, with a line saying it is done.
+// when there is no code. The page stays, with a line saying it is done, once the copies on this phone are gone too.
 (function () {
   const card = document.getElementById("accountCard");
   const ask = document.getElementById("deleteAsk");
@@ -29,6 +29,7 @@
     busy = false;
     if (r.ok) {
       ask.close();
+      await window.hubForget?.(); // and the copies on this phone (static/forget.js)
       done.textContent = card.dataset.done;
       return;
     }

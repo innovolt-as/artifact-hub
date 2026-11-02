@@ -158,6 +158,22 @@
     if (e.animationName === "blink") e.target.closest(".app")?.classList.remove("blink");
   });
 
+  // ------------------------------------------------------------ the copy on the phone (static/sw.js)
+  // The hub's service worker keeps this page and the apps marked «Virker uten nett». Unless this is that copy, tell it
+  // who is logged in, which apps those are, and the hub's files this page uses (it did not see them load on the first
+  // visit). Without service workers the page works as before.
+  try {
+    const sw = navigator.serviceWorker;
+    sw?.register("/sw.js").catch(() => {});
+    const user = document.querySelector(".topbar .who")?.textContent.trim();
+    if (sw && user && root.dataset.hubOffline !== "1") {
+      const assets = [...document.querySelectorAll("link[rel=stylesheet], link[rel=manifest], script[src], img[src]")]
+        .map((el) => el.href || el.src).filter((u) => u && u.startsWith(location.origin + "/"));
+      sw.ready.then((reg) => reg.active?.postMessage({ type: "hub:home", user, offline: S.offline_apps || [], assets }))
+        .catch(() => {});
+    }
+  } catch { /* no service workers here */ }
+
   // ------------------------------------------------------------ pinning
   function setPinned(li, on) {
     li.dataset.pinned = String(on);

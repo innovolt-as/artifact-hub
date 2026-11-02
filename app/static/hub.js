@@ -107,6 +107,25 @@
     addEventListener("pageshow", check);
   }
 
+  // ------------------------------------------------------------------ the copy on the phone (static/sw.js)
+  // The hub's service worker keeps the page of an app marked «Virker uten nett» (data-offline="1") and drops the copy
+  // of one that is not. Once the page has loaded, tell it, with the hub's files the page uses (it did not see them
+  // load on the first visit). Without service workers the app works as before.
+  try {
+    const sw = navigator.serviceWorker;
+    sw?.register("/sw.js").catch(() => {});
+    if (sw) {
+      const parsed = document.readyState === "loading"
+        ? new Promise((resolve) => document.addEventListener("DOMContentLoaded", resolve, { once: true })) : null;
+      Promise.all([sw.ready, parsed]).then(([reg]) => {
+        const roots = [document, document.querySelector("hub-banner")?.shadowRoot].filter(Boolean);
+        const assets = roots.flatMap((r) => [...r.querySelectorAll("link[rel=stylesheet], script[src], img[src]")])
+          .map((el) => el.href || el.src).filter((u) => u && u.startsWith(location.origin + "/"));
+        reg.active?.postMessage({ type: "hub:app", user: EMAIL, slug: SLUG, offline: me.dataset.offline === "1", assets });
+      }).catch(() => {});
+    }
+  } catch (e) { /* no service workers here */ }
+
   // ------------------------------------------------------------------ queries
   const OPS = {
     "==": (a, b) => a === b, "!=": (a, b) => a !== b,

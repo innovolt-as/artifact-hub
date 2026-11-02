@@ -174,3 +174,29 @@ def test_sw_served_at_root(client):
     assert r.headers["content-type"].startswith("text/javascript")
     assert r.headers["cache-control"] == "no-cache"
     assert r.headers["service-worker-allowed"] == "/"
+
+
+# ---------------------------------------------------------------- the service worker and forgetting the copies
+FORGET = '<script src="/static/forget.js"'
+
+
+def test_forget_on_logged_out_pages(client, user_client):
+    assert FORGET + ' data-run defer></script>' in client.get("/login").text
+    assert "forget.js" not in user_client.get("/").text
+    page = user_client.get("/settings").text
+    assert page.count(FORGET) == 1 and FORGET + ' defer></script>' in page and "data-run" not in page
+
+
+def test_sw_skips_private_routes(client):
+    js = client.get("/sw.js").text
+    skip = re.search(r"const SKIP = \[(.*?)\];", js, re.S).group(1)
+    for route in ("/api/", "/login", "/auth", "/logout", "/password", "/settings", "/admin", "/lock/", "/oauth/", "/mcp"):
+        assert f'"{route}"' in skip, route
+    for word in ("hub-pages-v1", "hub-static-v1", "X-Hub-Precache", "3000"):
+        assert word in js, word
+
+
+def test_pages_register_the_worker(client):
+    for name in ("home.js", "hub.js"):
+        js = client.get(f"/static/{name}").text
+        assert "serviceWorker" in js and "/sw.js" in js, name
