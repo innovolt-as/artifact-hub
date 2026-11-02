@@ -321,3 +321,46 @@ def test_both_bottom_buttons(hub, user_client):
 def test_the_empty_page_keeps_its_one_big_button(hub, user_client):
     html = _front_html(user_client)
     assert 'class="addcard" data-open-picker' in html and "data-open-groups" not in html
+
+
+# ---------------------------------------------------------------- home.js, drag.js, hub.css
+def _static(name):
+    from pathlib import Path
+
+    return (Path(__file__).resolve().parent.parent / "app" / "static" / name).read_text("utf-8")
+
+
+def _css_rule(css, selector):
+    m = re.search(rf"^\s*{re.escape(selector)} \{{(.*?)\}}", css, re.M | re.S)
+    return m.group(1) if m else ""
+
+
+def test_section_js_wiring():
+    js, drag, css = _static("home.js"), _static("drag.js"), _static("hub.css")
+    # Favourites and Other fold through their own route; a section folded here builds the same grid as the server
+    assert "/api/prefs/sections/open" in js and "/api/prefs/groups/open" in js
+    assert '"gicons"' in js and '"gicon"' in js and ".gicons" in js
+    # v1.6 leftovers are gone: the folded icon row and the view toggle
+    for gone in ("gclosed", "data-set-view", "pressView", "/api/prefs/view", "icon-xs", ".view"):
+        assert gone not in js, gone
+    # Only the groups may fold: the guard that kept Favourites and Other from folding is gone
+    assert 'closest("section.group"); // Favourites' not in js
+    # The icons in a closed section: hold opens the menu, hold and move reorders
+    assert ".gicon" in drag and ".gicons" in drag and "hub:menu" in drag
+    assert ".grid" not in drag
+    grid = _css_rule(css, ".gicons")
+    assert "display: grid" in grid
+    assert re.search(r"@media \(max-width: 480px\) \{[^}]*\.gicons \{[^}]*repeat\(5, minmax\(0, 1fr\)\)", css)
+    assert "--size: 46px" in _css_rule(css, ".gicon .icon")
+    assert "min-height: 44px" in _css_rule(css, ".gicon")
+    for gone in (".gclosed", ".viewtog", ".grid "):
+        assert gone not in css, gone
+    assert ".gicon.lifted" in css and ".gicon.sliding" in css
+
+
+def test_offline_layout_shows_every_section_as_lists():
+    js = _static("home.js")
+    start = js.index("async function enterOffline")
+    body = js[start:js.index("if (offline()) enterOffline()", start)]
+    assert "#fav, section.group, #rest" in body and 'ul.className = "cards"' in body
+    assert "dataset.view" not in body and '"grid"' not in body

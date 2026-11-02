@@ -1,15 +1,17 @@
-// Front page: greeting and date from the viewer's clock, view toggle, pinning (star in the card view,
-// long-press / right-click menu in the icon view) and the «Arrange apps» list. Prefs live on the account
-// (/api/prefs/*). The page never reloads: it fetches itself again, swaps in what changed and blinks those cards.
+// Front page: greeting and date from the viewer's clock, pinning (the star on a card in a list; hold or right-click
+// on an icon in a closed section for a menu) and the «Arrange apps» list. Prefs live on the account (/api/prefs/*).
+// The page never reloads: it fetches itself again, swaps in what changed and blinks those cards.
 //
-// Groups fold and unfold on a tap (toggleGroup); the choice is saved on the account like the other prefs.
+// Every section (Favourites, each group, Other) opens as a list of cards and closes into a grid of icons on a tap on
+// its heading (toggleSection); the choice is saved on the account like the other prefs.
 //
 // Shared with pull.js and drag.js:
 //   window.hubRefresh() -> Promise<boolean>  true when the page was updated, false when fetching it failed
-//   "hub:menu" on document, detail {li, x, y} opens the pin/unpin menu (drag.js: long press on a card it drags)
+//   "hub:menu" on document, detail {li, x, y} opens the pin/unpin menu (drag.js: an icon held and let go without
+//                                            moving; li is the icon or its card)
 //   "hub:idle" on document                    a drag or the menu is done, so a waiting refresh may run
-//   <html data-hub-drag="1">                  set by drag.js while a card or a group is being dragged
-//   window.hubDragJustEnded() -> boolean      drag.js: a tap that ends a drag must not fold the group under it
+//   <html data-hub-drag="1">                  set by drag.js while a card, an icon or a group is being dragged
+//   window.hubDragJustEnded() -> boolean      drag.js: a tap that ends a drag must not fold the section under it
 (function () {
   const root = document.documentElement;
   const picker = document.getElementById("picker");
@@ -45,86 +47,95 @@
   const cardsOf = (home) => new Map([...home.querySelectorAll("li.app[data-slug]")].map((li) => [keyOf(li), li]));
   // What the server drew: each card's HTML by section/slug, and the rest of #home with the cards as placeholders
   // (sections, slug order, the dot on «Arrange apps»...). Taken from server markup only, never from the live page,
-  // so classes like blink or a drag's inline styles don't count as changes. Whether a group is open is kept out of the
-  // frame (open: group id -> "1"/"0"): a fold, here or in another tab, is applied to the live group and neither swaps
-  // #home nor blinks a card.
-  const groupsOf = (home) => [...home.querySelectorAll("section.group[data-group]")];
+  // so classes like blink or a drag's inline styles don't count as changes. Whether a section is open is kept out of
+  // the frame, and so is the grid of icons a closed one shows (open: section id -> "1"/"0"): a fold, here or in another
+  // tab, is applied to the live section and neither swaps #home nor blinks a card.
+  const sectionsOf = (home) => [...home.querySelectorAll(".apps > section[data-open]")];
   function snapshot(home) {
     const frame = home.cloneNode(true);
     frame.querySelectorAll("li.app[data-slug]").forEach((li) => li.replaceWith("[" + li.dataset.slug + "]"));
-    groupsOf(frame).forEach((g) => {
-      g.removeAttribute("data-open");
-      g.querySelector(".gtoggle")?.removeAttribute("aria-expanded");
-      g.querySelector("ul")?.removeAttribute("hidden");
-      g.querySelector(".gclosed")?.remove();
+    sectionsOf(frame).forEach((s) => {
+      s.removeAttribute("data-open");
+      s.querySelector(".gtoggle")?.removeAttribute("aria-expanded");
+      s.querySelector(":scope > ul")?.removeAttribute("hidden");
+      s.querySelector(":scope > .gicons")?.remove();
     });
     return {
       cards: new Map([...cardsOf(home)].map(([k, li]) => [k, li.outerHTML])),
-      open: new Map(groupsOf(home).map((g) => [g.dataset.group, g.dataset.open])),
+      open: new Map(sectionsOf(home).map((s) => [s.id, s.dataset.open])),
       frame: frame.outerHTML,
-      view: home.querySelector(".apps")?.dataset.view,
     };
   }
   let shown = snapshot(document.getElementById("home"));
 
-  // ------------------------------------------------------------ folding groups
-  // Group id -> "1"/"0" for a fold whose save is under way; refreshes leave those groups as they are
+  // ------------------------------------------------------------ folding sections
+  // Section id ("fav", "rest", "g-<id>") -> "1"/"0" for a fold whose save is under way; refreshes leave those alone
   const folding = new Map();
-  // A closed group shows its apps as one row of small icons, copied from its cards (the server draws the same row for
-  // a group that was closed when the page was fetched)
-  function syncClosed(section) {
-    let row = section.querySelector(".gclosed");
-    if (section.dataset.open === "1") {
-      const had = row && row === document.activeElement; // the row goes away: keep keyboard focus in the group
-      row?.remove();
-      if (had) section.querySelector(".gtoggle")?.focus({ preventScroll: true });
+  // A closed section shows its apps as a grid of icons with the name under, each a link that opens the app. It is made
+  // from the section's cards (still in the page, hidden), the same as the grid the server draws for a section that was
+  // closed when the page was fetched; an open section has none.
+  function gicon(li) {
+    const card = li.querySelector(":scope > a");
+    const a = document.createElement("a");
+    a.className = "gicon";
+    a.href = card.getAttribute("href");
+    a.dataset.slug = li.dataset.slug;
+    if (card.target) {
+      a.target = card.target;
+      a.rel = card.rel;
+    }
+    const icon = card.querySelector(".icon").cloneNode(true);
+    icon.setAttribute("aria-hidden", "true"); // the name under it is the link's text
+    const name = document.createElement("span");
+    name.textContent = li.querySelector("h2")?.textContent || "";
+    a.append(icon, name);
+    return a;
+  }
+  function syncGrid(section) {
+    let grid = section.querySelector(":scope > .gicons");
+    const cards = [...section.querySelectorAll(":scope > ul > li.app")];
+    const focused = grid?.contains(document.activeElement) ? document.activeElement.dataset.slug : null;
+    if (section.dataset.open === "1" || !cards.length) {
+      grid?.remove();
+      if (focused) section.querySelector(".gtoggle")?.focus({ preventScroll: true }); // keep keyboard focus here
       return;
     }
-    if (!row) {
-      row = document.createElement("button");
-      row.type = "button";
-      row.className = "gclosed";
-      row.setAttribute("aria-expanded", "false");
-      // The heading is named by its text and count; the icon row has no text, so it gets the label the template put on the heading
-      row.setAttribute("aria-label", section.querySelector(".gtoggle")?.dataset.label || "");
-      section.append(row);
+    if (!grid) {
+      grid = document.createElement("div");
+      grid.className = "gicons";
+      section.append(grid);
     }
-    row.replaceChildren(...[...section.querySelectorAll("li.app .icon")].map((ic) => {
-      const c = ic.cloneNode(true);
-      c.classList.add("icon-xs");
-      c.setAttribute("aria-hidden", "true");
-      return c;
-    }));
+    grid.replaceChildren(...cards.map(gicon));
+    if (focused) [...grid.children].find((a) => a.dataset.slug === focused)?.focus({ preventScroll: true });
   }
   function setOpen(section, open) {
     section.dataset.open = open ? "1" : "0";
     section.querySelector(".gtoggle")?.setAttribute("aria-expanded", String(open));
-    const list = section.querySelector("ul");
+    const list = section.querySelector(":scope > ul");
     if (list) list.hidden = !open;
-    syncClosed(section);
+    syncGrid(section);
   }
-  // Flips at once, saves, and flips back (with the usual alert) if the save fails
-  function toggleGroup(section) {
+  // Flips at once, saves, and flips back (with the usual alert) if the save fails and no later tap has its own save
+  function toggleSection(section) {
     if (offline()) return; // nothing saves offline
-    const id = section.dataset.group, open = section.dataset.open !== "1";
+    const key = section.id, open = section.dataset.open !== "1", wanted = open ? "1" : "0";
+    const [url, body] = section.dataset.group
+      ? ["/api/prefs/groups/open", { id: section.dataset.group, open }]
+      : ["/api/prefs/sections/open", { section: key, open }];
     setOpen(section, open);
-    folding.set(id, open ? "1" : "0");
-    const wanted = open ? "1" : "0";
-    const done = () => { if (folding.get(id) === wanted) folding.delete(id); };
-    post("/api/prefs/groups/open", { id, open }).then(
+    folding.set(key, wanted);
+    const done = () => { if (folding.get(key) === wanted) folding.delete(key); };
+    post(url, body).then(
       () => refresh({ after: true }).finally(done),
       () => {
-        const latest = folding.get(id) === wanted; // a later toggle of this group has its own save to answer for
+        const latest = folding.get(key) === wanted; // a later toggle of this section has its own save to answer for
         done();
-        const now = document.getElementById("g-" + id); // #home may have been swapped meanwhile
+        const now = document.getElementById(key); // #home may have been swapped meanwhile
         if (now && latest) setOpen(now, !open);
         failed();
       },
     );
   }
-
-  const pressView = (view) =>
-    document.querySelectorAll("[data-set-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.setView === view)));
 
   // force: swap the whole #home, whatever is unchanged (the offline layout has moved the cards around)
   function apply(doc, quiet, force = false) {
@@ -142,7 +153,7 @@
         live.get(k).replaceWith(n);
         return n;
       });
-      for (const g of groupsOf(home)) if (swapped.some((n) => g.contains(n))) syncClosed(g); // its icons changed
+      for (const s of sectionsOf(home)) if (swapped.some((n) => s.contains(n))) syncGrid(s); // its icons changed
     } else {
       const n = document.importNode(fresh, true);
       home.replaceWith(n);
@@ -150,21 +161,18 @@
       const now = cardsOf(n);
       swapped = redrawn.map(([k]) => now.get(k));
     }
-    // Open or closed as the server has it, except a group folded here whose save has not been answered yet
-    for (const g of groupsOf(home)) {
-      const want = folding.has(g.dataset.group) ? folding.get(g.dataset.group) : next.open.get(g.dataset.group);
-      if (want && g.dataset.open !== want) setOpen(g, want === "1");
+    // Open or closed as the server has it, except a section folded here whose save has not been answered yet
+    for (const s of sectionsOf(home)) {
+      const want = folding.has(s.id) ? folding.get(s.id) : next.open.get(s.id);
+      if (want && s.dataset.open !== want) setOpen(s, want === "1");
     }
-    // A new view redraws every card; that is not a change to blink about
-    if (!quiet && !(shown.view && next.view && shown.view !== next.view)) swapped.forEach((li) => li.classList.add("blink"));
+    if (!quiet) swapped.forEach((li) => li.classList.add("blink"));
     shown = next;
     if (focusLi && !focusLi.isConnected) { // keep keyboard focus on the same card after its node was replaced
       const li = [...home.querySelectorAll("li.app")].find((x) => x.dataset.slug === focusLi.dataset.slug);
       li?.querySelector(focused.matches(".pin") ? ".pin" : "a")?.focus({ preventScroll: true });
     }
 
-    const view = doc.querySelector('[data-set-view][aria-pressed="true"]');
-    if (view) pressView(view.dataset.setView);
     const list = "#picker .picklist, #picker .sheet-in > p.none";
     const oldList = document.querySelector(list), newList = doc.querySelector(list);
     if (!picker.open && oldList && newList) oldList.replaceWith(document.importNode(newList, true));
@@ -173,8 +181,8 @@
     stamp();
   }
 
-  // Wait while a card or group is dragged, the pin menu is open or «Arrange apps» is open; each of them sends hub:idle
-  // and, while offline, a finger on the screen
+  // Wait while a card, an icon or a group is dragged, the pin menu is open or «Arrange apps» is open; each of them
+  // sends hub:idle; and, while offline, a finger on the screen
   let touching = 0;
   const offline = () => root.dataset.hubOffline === "1";
   const busy = () => !!(root.dataset.hubDrag || menu || picker.open || (offline() && touching));
@@ -247,7 +255,8 @@
   // The service worker answers with its copy of this page and sets data-hub-offline on <html>; an open page that loses
   // the server sets it itself (goOffline). Only apps marked
   // «Works offline» and found in the hub's cache can open, so they get a section of their own and the rest is greyed.
-  // Nothing here saves anything: the stars, the view toggle and «Arrange apps» are hidden (hub.css) and guarded below.
+  // Nothing here saves anything: the stars and «Arrange apps» are hidden (hub.css) and guarded below. Every section,
+  // open or closed, gives up its cards, and they show as lists.
   let toast = null, toastTimer = null;
   function showToast(text) {
     toast?.remove();
@@ -290,7 +299,7 @@
     }
     const apps = document.querySelector("#home .apps");
     if (!apps) return;
-    // Favourites, every group (open or closed: its hidden cards count too) and the rest, in page order
+    // Favourites, every group and the rest, open or closed (a closed one's hidden cards count too), in page order
     const pageSections = "#fav, section.group, #rest";
     const cards = [...apps.querySelectorAll(pageSections)].flatMap((s) => [...s.querySelectorAll("li.app")]);
     const marked = new Set(S.offline_apps || []);
@@ -300,7 +309,6 @@
       try { return !!(await caches.match("/a/" + li.dataset.slug + "/", { cacheName: "hub-pages-v1" })); } catch { return false; }
     }));
     if (!offline() || !apps.isConnected) return; // the server answered meanwhile
-    const kind = apps.dataset.view === "icons" ? "grid" : "cards";
     const section = (id, title, items, caption) => {
       if (!items.length) return null;
       const sec = document.createElement("section");
@@ -309,7 +317,7 @@
       h.className = "sec";
       h.textContent = title;
       const ul = document.createElement("ul");
-      ul.className = kind;
+      ul.className = "cards";
       ul.append(...items);
       sec.append(h);
       if (caption) {
@@ -398,7 +406,7 @@
     );
   }
 
-  let timer = null, swallow = null; // swallow: the card whose next click a long press ate
+  let swallow = null; // the icon or card whose next click a long press ate
   function closeMenu() {
     if (!menu) return;
     menu.remove();
@@ -425,32 +433,30 @@
   const outside = (e) => { if (menu && !menu.contains(e.target)) closeMenu(); };
   document.addEventListener("pointerdown", outside, true);
   document.addEventListener("touchstart", outside, { capture: true, passive: true });
-  // drag.js owns the long press on the cards it drags and asks for the menu when one was let go without moving
+  // An icon stands for its card, which is still in the section, hidden: the menu reads and flips the card's pin
+  const cardOf = (el) => {
+    if (!el.matches(".gicon")) return el;
+    const cards = el.closest("section").querySelectorAll(":scope > ul > li.app");
+    return [...cards].find((li) => li.dataset.slug === el.dataset.slug);
+  };
+  // drag.js owns the hold on the icons of every closed section and asks for the menu when one was let go without moving
   document.addEventListener("hub:menu", (e) => {
     const d = e.detail || {};
-    if (!d.li) return;
+    const li = d.li && cardOf(d.li);
+    if (!li) return;
     swallow = d.li;
-    openMenu(d.li, d.x, d.y);
+    openMenu(li, d.x, d.y);
   });
-
-  // Icon view: right-click anywhere, long press outside Favourites and the groups (drag.js owns the long press there)
+  // A right-click on an icon opens the same menu
   document.addEventListener("contextmenu", (e) => {
-    const li = at(e, ".grid .app");
+    const icon = at(e, ".apps > section > .gicons > .gicon");
+    const li = icon && cardOf(icon);
     if (!li) return;
     e.preventDefault();
     if (!offline() && !root.dataset.hubDrag) openMenu(li, e.clientX, e.clientY);
   });
-  document.addEventListener("touchstart", (e) => {
-    swallow = null; // a long press sends no click, so clear it before the next tap
-    clearTimeout(timer);
-    const li = at(e, ".grid .app");
-    if (!li || li.closest("section[data-order]") || offline() || e.touches.length !== 1) return; // drag.js has those
-    const t = e.touches[0];
-    timer = setTimeout(() => { swallow = li; openMenu(li, t.clientX, t.clientY); }, 500);
-  }, { passive: true });
-  for (const ev of ["touchend", "touchmove", "touchcancel"]) {
-    document.addEventListener(ev, () => clearTimeout(timer), { passive: true });
-  }
+  // A long press sends no click: clear it before the next tap
+  document.addEventListener("touchstart", () => { swallow = null; }, { passive: true });
   document.addEventListener("click", (e) => {
     const eat = swallow && swallow.contains(e.target);
     swallow = null;
@@ -467,27 +473,16 @@
       }
       return;
     }
-    const fold = at(e, ".gtoggle, .gclosed");
+    const fold = at(e, ".apps > section[data-open] .gtoggle");
     if (fold) {
       e.preventDefault();
-      const group = fold.closest("section.group"); // Favourites and Other fold in Task 2; until then their heading does nothing
-      if (group && !window.hubDragJustEnded?.()) toggleGroup(group);
+      if (!window.hubDragJustEnded?.()) toggleSection(fold.closest("section[data-open]"));
       return;
     }
     const pin = at(e, ".pin");
     if (pin) {
       e.preventDefault();
       togglePin(pin.closest(".app"));
-      return;
-    }
-    const v = at(e, "[data-set-view]");
-    if (v && v.getAttribute("aria-pressed") !== "true") {
-      const was = document.querySelector('[data-set-view][aria-pressed="true"]')?.dataset.setView;
-      pressView(v.dataset.setView);
-      post("/api/prefs/view", { view: v.dataset.setView }).then(
-        () => refresh({ after: true }),
-        () => { pressView(was); failed(); },
-      );
       return;
     }
     if (at(e, "[data-open-picker]")) openPicker();

@@ -623,9 +623,9 @@ def _static(name):
 
 def test_fold_wiring():
     js, css = _static("home.js"), _static("hub.css")
-    for needle in ("gtoggle", "gclosed", "/api/prefs/groups/open", "toggleGroup", "hubDragJustEnded"):
+    for needle in ("gtoggle", "gicons", "/api/prefs/groups/open", "toggleSection", "hubDragJustEnded"):
         assert needle in js
-    for needle in (".gclosed", ".gtoggle", '.group[data-open="0"]'):
+    for needle in (".gicons", ".gtoggle", '.apps > section[data-open="0"]'):
         assert needle in css
 
 
