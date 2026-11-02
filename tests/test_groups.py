@@ -589,3 +589,15 @@ def test_offline_layout_collects_every_group():
     body = js[start:js.index("if (offline()) enterOffline()", start)]
     assert "section.group" in body and '"top"' not in body and "#top" not in body
     assert "#top" not in js
+
+
+# ---------------------------------------------------------------- hold and drag (drag.js)
+def test_drag_wiring():
+    js, home, css = _static("drag.js"), _static("home.js"), _static("hub.css")
+    for needle in ("data-order", "/api/prefs/pins", "/api/prefs/groups/apps", "/api/prefs/groups/order",
+                   "hubDragJustEnded", ".gtoggle"):
+        assert needle in js
+    # Not only the favourites any more: every ordered section, and the menu's long press is drag.js's in all of them
+    assert "#fav .app" not in js and "#fav ul" not in js
+    assert 'closest("#fav")' not in home
+    assert ".group.lifted" in css and ".group.sliding" in css

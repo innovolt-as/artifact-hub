@@ -6,9 +6,9 @@
 //
 // Shared with pull.js and drag.js:
 //   window.hubRefresh() -> Promise<boolean>  true when the page was updated, false when fetching it failed
-//   "hub:menu" on document, detail {li, x, y} opens the pin/unpin menu (drag.js: long press on a favourite)
+//   "hub:menu" on document, detail {li, x, y} opens the pin/unpin menu (drag.js: long press on a card it drags)
 //   "hub:idle" on document                    a drag or the menu is done, so a waiting refresh may run
-//   <html data-hub-drag="1">                  set by drag.js while a favourite is being dragged
+//   <html data-hub-drag="1">                  set by drag.js while a card or a group is being dragged
 //   window.hubDragJustEnded() -> boolean      drag.js: a tap that ends a drag must not fold the group under it
 (function () {
   const root = document.documentElement;
@@ -172,7 +172,7 @@
     stamp();
   }
 
-  // Wait while a favourite is dragged, the pin menu is open or "Choose apps" is open; each of them sends hub:idle
+  // Wait while a card or group is dragged, the pin menu is open or "Choose apps" is open; each of them sends hub:idle
   // and, while offline, a finger on the screen
   let touching = 0;
   const offline = () => root.dataset.hubOffline === "1";
@@ -424,7 +424,7 @@
   const outside = (e) => { if (menu && !menu.contains(e.target)) closeMenu(); };
   document.addEventListener("pointerdown", outside, true);
   document.addEventListener("touchstart", outside, { capture: true, passive: true });
-  // drag.js owns the long press on favourites and asks for the menu when one was let go without moving
+  // drag.js owns the long press on the cards it drags and asks for the menu when one was let go without moving
   document.addEventListener("hub:menu", (e) => {
     const d = e.detail || {};
     if (!d.li) return;
@@ -432,7 +432,7 @@
     openMenu(d.li, d.x, d.y);
   });
 
-  // Icon view: right-click anywhere, long press outside Favourites
+  // Icon view: right-click anywhere, long press outside Favourites and the groups (drag.js owns the long press there)
   document.addEventListener("contextmenu", (e) => {
     const li = at(e, ".grid .app");
     if (!li) return;
@@ -443,7 +443,7 @@
     swallow = null; // a long press sends no click, so clear it before the next tap
     clearTimeout(timer);
     const li = at(e, ".grid .app");
-    if (!li || li.closest("#fav") || offline() || e.touches.length !== 1) return;
+    if (!li || li.closest("section[data-order]") || offline() || e.touches.length !== 1) return; // drag.js has those
     const t = e.touches[0];
     timer = setTimeout(() => { swallow = li; openMenu(li, t.clientX, t.clientY); }, 500);
   }, { passive: true });

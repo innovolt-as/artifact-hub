@@ -73,7 +73,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 #fav, .group { margin-bottom: 26px; }
 /* A group's heading is a button: name, count, chevron at the far end (› closed, ⌄ open) */
 .group > .sec { margin: 0; }
-.gtoggle { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; padding: 0 2px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.gtoggle { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; padding: 0 2px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .gtoggle:focus-visible, .gclosed:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
 /* .grid and .cards set display, which would beat the hidden attribute of a closed group's list */
 .apps ul[hidden] { display: none; }
@@ -93,8 +93,11 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 @keyframes blink { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 40% { box-shadow: 0 0 0 4px var(--accent); border-color: var(--accent); } }
 .app.lifted { z-index: 5; transition: none; }
 .app.lifted a, .grid .app.lifted a:hover { transform: scale(1.04); box-shadow: 0 12px 30px -8px rgb(0 0 0 / .35); }
-#fav .app a, #fav .app img { -webkit-user-drag: none; } /* drag.js moves favourites, not the system's link drag */
+[data-order] .app a, [data-order] .app img { -webkit-user-drag: none; } /* drag.js moves these cards, not the system's link drag */
 .app.sliding { transition: transform .2s; }
+/* A group held by its heading (drag.js): one block over the others, up and down only, so no scale to widen the page */
+.group.lifted { position: relative; z-index: 5; background: var(--bg); border-radius: 10px; box-shadow: 0 0 0 6px var(--bg), 0 0 0 7px var(--line), 0 14px 34px -8px rgb(0 0 0 / .4); transition: none; }
+.group.sliding { transition: transform .2s; }
 .dot { position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--card); }
 .lock, .ext { position: absolute; top: 8px; font-size: 12px; color: var(--muted); }
 .ext { left: 10px; } .lock { right: 22px; }
