@@ -275,7 +275,7 @@ def test_index_sections(hub, user_client):
     html = user_client.get("/").text
     assert 'id="top"' not in html and "Mest brukt" not in html
     assert 'data-slug="a"' in _section(html, "rest") and 'data-slug="b"' in _section(html, "rest")
-    assert 'id="fav"' not in html and 'class="sec"' not in _section(html, "rest")
+    assert 'id="fav"' not in html and "Alle apper" in _section(html, "rest")  # the only section: its heading folds it
 
 
 def test_index_favorites_section(hub, user_client):
@@ -307,17 +307,17 @@ def test_index_cards_shows_escaped_summary(hub, user_client):
         hub.home.set_view(con, "user@test.no", "cards")
         _doc_summary(con, "a", "user@test.no", {"text": "<b>x</b> 93 ▼1"}, 100)
     html = user_client.get("/").text
-    assert 'data-view="cards"' in html
     assert "&lt;b&gt;x&lt;/b&gt; 93 ▼1" in html and "<b>x</b>" not in html
     assert 'class="pin"' in html
 
 
-def test_index_icons_hides_summary(hub, user_client):
+def test_index_closed_section_keeps_the_summary_in_its_list_not_in_the_icons(hub, user_client):
     _two_public_pages(hub)
     with hub.db() as con:
         _doc_summary(con, "a", "user@test.no", {"text": "hemmelig linje"}, 100)
-    html = user_client.get("/").text
-    assert 'data-view="icons"' in html and "hemmelig linje" not in html
+    rest = _section(user_client.get("/").text, "rest")  # nothing chosen: closed, a grid of icons
+    assert 'class="gicons"' in rest and rest.count("hemmelig linje") == 1
+    assert "hemmelig linje" not in rest[rest.index('class="gicons"'):]
 
 
 def test_index_new_dot(hub, user_client):
@@ -623,12 +623,15 @@ def test_recipe_sees_what_the_viewer_sees(hub, user_client):
     assert "1100</p>" in user_client.get("/").text
 
 
-def test_icon_view_runs_no_recipes(hub, user_client, monkeypatch):
+def test_icon_view_user_still_gets_recipe_lines(hub, user_client, monkeypatch):
     _recipe_page(hub, "mat")
     with hub.db() as con:
         hub.home.set_view(con, USER, "icons")
-    monkeypatch.setattr(hub.cards, "run_recipe", lambda *a, **k: pytest.fail("a recipe ran"))
+    ran = []
+    real = hub.cards.run_recipe
+    monkeypatch.setattr(hub.cards, "run_recipe", lambda *a, **k: ran.append(1) or real(*a, **k))
     assert user_client.get("/").status_code == 200
+    assert ran  # every list shows its lines, and it is the user's choice of open or closed that hides them
 
 
 def test_recipe_line_trimmed_and_cut(hub, user_client):

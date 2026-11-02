@@ -470,7 +470,8 @@
     const fold = at(e, ".gtoggle, .gclosed");
     if (fold) {
       e.preventDefault();
-      if (!window.hubDragJustEnded?.()) toggleGroup(fold.closest("section.group"));
+      const group = fold.closest("section.group"); // Favourites and Other fold in Task 2; until then their heading does nothing
+      if (group && !window.hubDragJustEnded?.()) toggleGroup(group);
       return;
     }
     const pin = at(e, ".pin");

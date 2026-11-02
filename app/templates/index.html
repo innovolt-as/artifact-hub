@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_icon.html" import icon %}
 
-{% macro app_item(a, view, summary) -%}
+{% macro app_item(a, summary) -%}
 <li class="app{% if a.pinned %} pinned{% endif %}" data-slug="{{ a.slug }}" data-pinned="{{ 'true' if a.pinned else 'false' }}">
   <a href="{{ a.open_url }}" {% if a.description %}title="{{ a.description }}"{% endif %} {% if a.kind == 'link' %}target="_blank" rel="noopener"{% endif %}>
     {% if a.new %}<span class="dot" title="{{ t('home.changed') }}"></span>{% endif %}
@@ -10,15 +10,24 @@
     {{ icon(a) }}
     <span class="txt">
       <h2>{{ a.title }}</h2>
-      {% if view == 'cards' and a.code_locked %}<p class="summary locked" title="{{ t('lock.card') }}" aria-label="{{ t('lock.card') }}">🔒</p>
-      {% elif view == 'cards' and summary %}<p class="summary">{{ summary }}</p>{% endif %}
+      {% if a.code_locked %}<p class="summary locked" title="{{ t('lock.card') }}" aria-label="{{ t('lock.card') }}">🔒</p>
+      {% elif summary %}<p class="summary">{{ summary }}</p>{% endif %}
     </span>
   </a>
-  {% if view == 'cards' %}
   <button class="pin" type="button" aria-pressed="{{ 'true' if a.pinned else 'false' }}"
           aria-label="{{ t('js.home.unpin') if a.pinned else t('js.home.pin') }}: {{ a.title }}">{{ '★' if a.pinned else '☆' }}</button>
-  {% endif %}
 </li>
+{%- endmacro %}
+
+{# A section's heading: a button with the name, the number of apps and a chevron; it folds the section. A section is a
+   list of cards when open and, when closed, a grid of icons (below) with the list hidden #}
+{% macro section_head(name, count, open) -%}
+<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="{{ 'true' if open else 'false' }}" data-label="{{ t('home.group_toggle', name=name) }}">{{ name }}<span class="gcount">· {{ count }}</span><span class="chev"></span></button></h3>
+{%- endmacro %}
+
+{# The closed section: one tappable icon with the name under it for each app (the name is the link's text, so the icon is hidden from screen readers) #}
+{% macro gicons(members) -%}
+<div class="gicons">{% for a in members %}<a class="gicon" href="{{ a.open_url }}" data-slug="{{ a.slug }}"{% if a.kind == 'link' %} target="_blank" rel="noopener"{% endif %}>{{ icon(a, "icon", true) }}<span>{{ a.title }}</span></a>{% endfor %}</div>
 {%- endmacro %}
 
 {# «Arrange apps»: one app (tick, icon, name, the button with its group) and a group's heading, whose empty copy in
@@ -63,14 +72,6 @@
         <h1 id="hello">{{ t("home.hello") }}</h1>
         <p class="today" id="today">{{ today }}</p>
       </div>
-      <div class="viewtog" role="group" aria-label="{{ t('home.view') }}">
-        <button type="button" data-set-view="icons" aria-pressed="{{ 'true' if view == 'icons' else 'false' }}" title="{{ t('home.icons') }}">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
-        </button>
-        <button type="button" data-set-view="cards" aria-pressed="{{ 'true' if view == 'cards' else 'false' }}" title="{{ t('home.cards') }}">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><rect x="3" y="4" width="18" height="6.5" rx="2"/><rect x="3" y="13.5" width="18" height="6.5" rx="2"/></svg>
-        </button>
-      </div>
     </div>
   </div>
 </header>
@@ -86,31 +87,34 @@
     <span>{{ t("home.add_hint") }}</span>
   </button>
 {% else %}
-<div class="apps" data-view="{{ view }}">
+<div class="apps">
   {% if favs %}
-  <section id="fav" data-order="pins">
-    <h3 class="sec">{{ t("home.favorites") }}</h3>
-    <ul class="{{ 'grid top4' if view == 'icons' else 'cards' }}">
-      {% for a in favs %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
+  <section id="fav" data-order="pins" data-open="{{ '1' if fav_open else '0' }}">
+    {{ section_head(t("home.favorites"), favs|length, fav_open) }}
+    <ul class="cards"{% if not fav_open %} hidden{% endif %}>
+      {% for a in favs %}{{ app_item(a, summaries.get(a.slug)) }}{% endfor %}
     </ul>
+    {% if not fav_open %}{{ gicons(favs) }}{% endif %}
   </section>
   {% endif %}
   {% for g, members in groups %}
   <section id="g-{{ g.id }}" class="group" data-group="{{ g.id }}" data-order="group" data-open="{{ '1' if g.open else '0' }}">
-    <h3 class="sec"><button type="button" class="gtoggle" aria-expanded="{{ 'true' if g.open else 'false' }}" data-label="{{ t('home.group_toggle', name=g.name) }}">{{ g.name }}<span class="gcount">· {{ members|length }}</span><span class="chev"></span></button></h3>
-    <ul class="{{ 'grid' if view == 'icons' else 'cards' }}"{% if not g.open %} hidden{% endif %}>
-      {% for a in members %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
+    {{ section_head(g.name, members|length, g.open) }}
+    <ul class="cards"{% if not g.open %} hidden{% endif %}>
+      {% for a in members %}{{ app_item(a, summaries.get(a.slug)) }}{% endfor %}
     </ul>
-    {% if not g.open %}<button type="button" class="gclosed" aria-expanded="false" aria-label="{{ t('home.group_toggle', name=g.name) }}">{% for a in members %}{{ icon(a, "icon icon-xs", true) }}{% endfor %}</button>{% endif %}
+    {% if not g.open %}{{ gicons(members) }}{% endif %}
   </section>
   {% endfor %}
-  <section id="rest">
-    {% if rest and (favs or has_groups) %}<h3 class="sec">{{ t("home.other") if has_groups else t("home.all") }}</h3>{% endif %}
-    <ul class="{{ 'grid' if view == 'icons' else 'cards' }}">
-      {% for a in rest %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
+  <section id="rest" data-open="{{ '1' if rest_open else '0' }}">
+    {% if rest %}{{ section_head(t("home.other") if has_groups else t("home.all"), rest|length, rest_open) }}{% endif %}
+    <ul class="cards"{% if not rest_open %} hidden{% endif %}>
+      {% for a in rest %}{{ app_item(a, summaries.get(a.slug)) }}{% endfor %}
     </ul>
+    {% if rest and not rest_open %}{{ gicons(rest) }}{% endif %}
   </section>
   <button type="button" class="more" data-open-picker>{{ t("home.edit") }}{% if has_new %}<span class="dot" title="{{ t('home.new_apps') }}"></span>{% endif %}</button>
+  <button type="button" class="more" data-open-groups>{{ t("home.groups_button") }}</button>
 </div>
 {% endif %}
 </div>

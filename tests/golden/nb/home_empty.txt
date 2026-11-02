@@ -4,9 +4,6 @@ user@test.no
 @aria-label: Innstillinger
 Hei
 mandag 26. oktober
-@aria-label: Visning
-@title: Ikoner
-@title: Kort
 +
 Legg til apper
 Velg hvilke apper du vil ha på forsiden din

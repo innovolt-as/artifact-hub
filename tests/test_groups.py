@@ -547,30 +547,30 @@ def test_closed_group_markup(hub, user_client):
     gid = _grp(hub, "Jobb", ["a", "b"], open_=False)
     sec = _sec(user_client.get("/").text, f"g-{gid}")
     assert 'data-open="0"' in sec and 'aria-expanded="false"' in sec and '<span class="gcount">· 2</span>' in sec
-    assert "<ul class=\"grid\" hidden>" in sec and 'data-slug="a"' in sec  # still rendered, only hidden
-    closed = sec[sec.index('<button type="button" class="gclosed"'):]
-    assert closed.count('class="icon icon-xs"') == 2
-    assert closed.count('aria-hidden="true"') == 2  # a screen reader gets the label, not the letters
-    head = sec[sec.index('class="gtoggle"'):sec.index('class="gclosed"')]
+    assert '<ul class="cards" hidden>' in sec and 'data-slug="a"' in sec  # still rendered, only hidden
+    assert "gclosed" not in sec
+    grid = sec[sec.index('<div class="gicons">'):]
+    assert grid.count('<a class="gicon" href="/a/') == 2 and grid.count('class="icon"') == 2
+    assert grid.count('aria-hidden="true"') == 2  # a screen reader gets the name, not the letters
+    assert '<a class="gicon" href="/a/a/" data-slug="a">' in grid and "<span>A</span>" in grid
+    head = sec[sec.index('class="gtoggle"'):sec.index("</h3>")]
     assert 'data-label="Åpne eller lukk Jobb"' in head and "aria-label" not in head  # named by its text and count
-    assert 'aria-expanded="false" aria-label="Åpne eller lukk Jobb"' in closed
 
 
-def test_closed_row_has_the_headings_label_escaped(hub, user_client):
+def test_closed_group_names_are_escaped_in_the_heading_label(hub, user_client):
     _front(hub, "a")
     gid = _grp(hub, '<b>x</b>"&', ["a"], open_=False)
     sec = _sec(user_client.get("/").text, f"g-{gid}")
-    row = sec[sec.index('<button type="button" class="gclosed"'):]
-    assert 'aria-expanded="false" aria-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in row and "<b>x</b>" not in sec
+    assert 'data-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in sec and "<b>x</b>" not in sec
 
 
-def test_closed_group_in_cards_view_keeps_its_lines(hub, user_client):
+def test_closed_group_keeps_its_lines_in_the_hidden_list(hub, user_client):
     _front(hub, "a")
     gid = _grp(hub, "Jobb", ["a"], open_=False)
     with hub.db() as con:
         hub.home.set_view(con, U, "cards")
     sec = _sec(user_client.get("/").text, f"g-{gid}")
-    assert '<ul class="cards" hidden>' in sec and 'class="gclosed"' in sec
+    assert '<ul class="cards" hidden>' in sec and 'class="gicons"' in sec
 
 
 def test_pinned_app_is_not_in_its_group_on_the_page(hub, user_client):
@@ -581,7 +581,7 @@ def test_pinned_app_is_not_in_its_group_on_the_page(hub, user_client):
     html = user_client.get("/").text
     assert 'data-slug="a"' in _sec(html, "fav") and 'data-slug="a"' not in _sec(html, f"g-{gid}")
     assert '<span class="gcount">· 1</span>' in _sec(html, f"g-{gid}")
-    assert html[: html.index("<dialog")].count('data-slug="a"') == 1  # the picker below lists every app
+    assert html[: html.index("<dialog")].count('<li class="app pinned" data-slug="a"') == 1  # the picker below lists every app
 
 
 def test_gone_apps_not_shown_or_counted(hub, user_client):
@@ -589,12 +589,12 @@ def test_gone_apps_not_shown_or_counted(hub, user_client):
     gid = _grp(hub, "Jobb", ["a", "b", "slettet"], open_=False)
     sec = _sec(user_client.get("/").text, f"g-{gid}")
     assert "slettet" not in sec and '<span class="gcount">· 2</span>' in sec
-    assert sec.count('class="icon icon-xs"') == 2
+    assert sec.count('<a class="gicon"') == 2
     with hub.db() as con:  # access lost: still in the stored group, not on the page
         hub.home.set_added(con, U, "b", False)
     sec = _sec(user_client.get("/").text, f"g-{gid}")
     assert 'data-slug="b"' not in sec and '<span class="gcount">· 1</span>' in sec
-    assert sec.count('class="icon icon-xs"') == 1
+    assert sec.count('<a class="gicon"') == 1
 
 
 def test_group_with_only_gone_apps_is_not_shown(hub, user_client):
