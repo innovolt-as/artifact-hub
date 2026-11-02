@@ -1,5 +1,7 @@
 import io
+import re
 import zipfile
+from pathlib import Path
 
 from tests.test_connector import PAGE, call, mcp, text, token  # noqa: F401  (fixtures)
 
@@ -271,3 +273,26 @@ def test_hub_js_has_the_away_rule():
         assert part in js
     assert "hub-start" in (static / "home.js").read_text()
     assert 'addEventListener("input"' in js and "holdsText" in js and "defaultValue" in js
+
+
+def test_background_before_stylesheet(pw_mode, hub, user_client, client):
+    for html in (user_client.get("/").text, client.get("/login").text):
+        css = html.index("/static/hub.css")
+        assert html.index("background:#151515") < css
+        assert html.index('name="color-scheme"') < css
+
+
+def test_color_scheme_follows_theme(pw_mode, hub, user_client):
+    def scheme():
+        return re.search(r'name="color-scheme" content="([^"]+)"', user_client.get("/").text).group(1)
+
+    assert scheme() == "light dark"
+    user_client.post("/api/prefs/theme", json={"theme": "dark"})
+    assert scheme() == "dark"
+    user_client.post("/api/prefs/theme", json={"theme": "light"})
+    assert scheme() == "light"
+
+
+def test_lock_keeps_the_background():
+    js = (Path(__file__).parent.parent / "app" / "static" / "hub.js").read_text()
+    assert 'documentElement.style.display = "none"' not in js

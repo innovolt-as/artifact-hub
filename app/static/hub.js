@@ -92,7 +92,8 @@
   if (me.dataset.lock === "1") {
     const PING_MS = 60000, OPEN_MS = 600000;
     let last = Date.now();
-    const lock = () => { document.documentElement.style.display = "none"; location.reload(); };
+    // Hide the body, not <html>: the canvas keeps the page background instead of flashing white.
+    const lock = () => { (document.body || document.documentElement).style.visibility = "hidden"; location.reload(); };
     const late = () => Date.now() - last >= OPEN_MS;
     async function ping() {
       try {
