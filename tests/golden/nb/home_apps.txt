@@ -5,15 +5,14 @@ admin@test.no
 @aria-label: Innstillinger
 Hei
 mandag 26. oktober
-@aria-label: Visning
-@title: Ikoner
-@title: Kort
 Favoritter
+· 1
 F
 Fast app
 @aria-label: Fjern fra favoritter: Fast app
 ★
 Alle apper
+· 2
 @title: Ekstern app
 ↗
 E
@@ -28,6 +27,7 @@ Hemmelig app
 ☆
 ＋ Ordne apper
 @title: Nye apper
+Grupper
 Ordne apper
 Huk av det du vil ha på forsiden, og velg gruppe.
 Uten gruppe
@@ -50,6 +50,9 @@ Ny app
 Ny
 @aria-label: Ny app: Velg gruppe
 Velg gruppe
+Ferdig
+Grupper
+Lag, gi nytt navn, slett, og dra for å endre rekkefølgen.
 ＋
 Ny gruppe
 Ferdig

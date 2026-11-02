@@ -34,5 +34,5 @@ def test_a_switch_shows_on_a_phone_without_color_mix():
 
 
 def test_a_hidden_list_stays_hidden():
-    # .grid and .cards set display: grid, which beats the hidden attribute of a closed group's list
+    # .cards sets display: grid, which beats the hidden attribute of a closed section's list
     assert "display: none" in rule(".apps ul[hidden]")

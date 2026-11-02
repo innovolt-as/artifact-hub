@@ -26,6 +26,7 @@ SUMMARY_MAX = 140
 GROUP_NAME_MAX = 40    # characters in a group name, after trimming
 GROUPS_MAX = 30        # groups per user
 VIEWS = ("icons", "cards")
+SECTIONS = ("fav", "rest")    # the sections of the front page whose open/closed state is stored per user (groups keep theirs)
 THEMES = ("auto", "light", "dark")
 SUMMARY_DOC = ("hub", "summary")      # db.doc("hub/summary") in apps using window.claude.use("db")
 SUMMARY_KEY = "hub/summary"           # /api/data/<slug>/hub/summary in apps using the data API
@@ -130,6 +131,27 @@ def set_view(con: sqlite3.Connection, email: str, view: str) -> None:
     if view not in VIEWS:
         raise ValueError(i18n.t("err.unknown_view", view=view))
     _put(con, email, "view", view)
+
+
+def get_section_open(con: sqlite3.Connection, email: str) -> dict[str, bool]:
+    """Whether Favourites ("fav") and Other ("rest") are open lists (True) or a grid of icons (False). What the user last
+    chose (prefs keys fav_open and rest_open); until then what the old view setting made of the page: open for
+    "cards", closed otherwise. Reading stores nothing, so an upgrade changes no value."""
+    fallback = get_prefs(con, email)["view"] == "cards"
+    out = {}
+    for section in SECTIONS:
+        try:
+            stored = _get(con, email, f"{section}_open", None)
+        except ValueError:  # the stored text is not JSON
+            stored = None
+        out[section] = stored if isinstance(stored, bool) else fallback
+    return out
+
+
+def set_section_open(con: sqlite3.Connection, email: str, section: str, open: bool) -> None:
+    if section not in SECTIONS:
+        raise ValueError(i18n.t("err.unknown_section", section=section))
+    _put(con, email, f"{section}_open", bool(open))
 
 
 def get_theme(con: sqlite3.Connection, email: str) -> str:

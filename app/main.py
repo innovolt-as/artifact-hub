@@ -791,20 +791,19 @@ def index(request: Request, user: str = Depends(require_user)):
         mine = [a for a in apps if a["slug"] in prefs["apps"]]  # only the apps this user has chosen
         stats = home.visit_stats(con, user)
         user_groups = home.get_groups(con, user)
+        section_open = home.get_section_open(con, user)
         locked = applock.locked_slugs(con, user)
     for a in apps:
         a["code_locked"] = a["slug"] in locked
-    summaries: dict[str, str] = {}
-    if prefs["view"] == "cards":
-        with db() as con:  # a new connection: the recipes read through doc_get/doc_list, which open their own
-            summaries = card_lines(con, user, mine, prefs["tz"])
+    with db() as con:  # a new connection: the recipes read through doc_get/doc_list, which open their own
+        summaries = card_lines(con, user, mine, prefs["tz"])
     favs, groups, rest = home.build_sections(mine, stats, prefs["pins"], user_groups)
     available = home.picker(apps, prefs["apps"], prefs["seen"], user_groups)
     now = time.localtime()  # fallback only; the page rewrites the date and greeting with the viewer's clock
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "groups": groups, "has_groups": bool(user_groups), "rest": rest,
+        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "fav_open": section_open["fav"], "rest_open": section_open["rest"], "favs": favs, "groups": groups, "has_groups": bool(user_groups), "rest": rest,
          "available": available, "any_apps": bool(apps), "has_new": any(a["unseen"] for a in apps), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
          "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale"), "tz": prefs["tz"] or "",
                        "offline_apps": [a["slug"] for a in apps if a["offline"] and a["kind"] != "link" and a["slug"] not in locked]}},
@@ -1400,6 +1399,8 @@ def api_me(user: str = Depends(api_user)):
 # ---------------------------------------------------------------- routes: front page prefs (app/home.py)
 @app.post("/api/prefs/view")
 async def prefs_view(request: Request, user: str = Depends(api_user)):
+    """Kept for pages opened before v1.7.0. It only sets the starting values of Favourites and Other for a user who has
+    not opened or closed them themselves (the front page no longer has a list/icons switch)."""
     _require_json(request)
     body = await request.json()
     view = body.get("view") if isinstance(body, dict) else None
@@ -1409,6 +1410,19 @@ async def prefs_view(request: Request, user: str = Depends(api_user)):
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
     return {"ok": True, "view": view}
+
+
+@app.post("/api/prefs/sections/open")
+async def prefs_sections_open(request: Request, user: str = Depends(api_user)):
+    """Fold Favourites ("fav") or Other ("rest") into a grid of icons, or open it as a list."""
+    body = await _groups_body(request, section=str, open=bool)
+    with db() as con:
+        con.execute("BEGIN IMMEDIATE")  # as _groups_call: one write transaction
+        try:
+            home.set_section_open(con, user, body["section"], body["open"])
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        return {"ok": True, "open": home.get_section_open(con, user)}
 
 
 @app.post("/api/prefs/theme")

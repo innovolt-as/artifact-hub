@@ -14,8 +14,11 @@ It is one FastAPI process with SQLite and plain files, behind Caddy, meant for o
 
 - **Login** with a magic link by e-mail, or with a password if you would rather not set up SMTP.
 - **A front page per user.** People pick the apps they want from the ones they can see and sort them into their own
-  groups: favourites first, then the groups in the order the person chose, then the rest. A group folds up with a tap
-  on its heading, and holding and dragging reorders apps and groups. It works as a home-screen app on iOS and Android.
+  groups: favourites first, then the groups in the order the person chose, then the rest. Every section is a list of
+  cards when open and a row of icons when closed; a tap on its heading switches, and the hub remembers it per section.
+  Tapping an icon opens the app, and holding one gives the favourite menu. Holding and dragging reorders apps. The
+  *Groups* window makes, renames, deletes and reorders groups, and *Arrange apps* ticks apps and puts them in groups.
+  It works as a home-screen app on iOS and Android.
 - **An admin page** (`/admin`): drag-and-drop upload of `.html` files or zipped folders, access per app, inviting
   people, titles and icons, and who used what in the last 7 days.
 - **Uploads** from the browser, from the terminal (`scripts/push.sh`) or from Claude.

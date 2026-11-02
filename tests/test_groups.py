@@ -536,8 +536,9 @@ def test_group_markup_open(hub, user_client):
     html = user_client.get("/").text
     sec = _sec(html, f"g-{gid}")
     assert f'<section id="g-{gid}" class="group" data-group="{gid}" data-order="group" data-open="1">' in sec
-    assert '<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true" data-label="Åpne eller lukk Jobb">' in sec
+    assert '<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true">Jobb<span class="gcount">' in sec
     assert 'Jobb<span class="gcount">· 2</span><span class="chev"></span></button></h3>' in sec
+    assert "data-label" not in sec
     assert sec.index('data-slug="b"') < sec.index('data-slug="a"') and 'data-slug="c"' not in sec
     assert "hidden" not in sec and "gclosed" not in sec
 
@@ -547,30 +548,30 @@ def test_closed_group_markup(hub, user_client):
     gid = _grp(hub, "Jobb", ["a", "b"], open_=False)
     sec = _sec(user_client.get("/").text, f"g-{gid}")
     assert 'data-open="0"' in sec and 'aria-expanded="false"' in sec and '<span class="gcount">· 2</span>' in sec
-    assert "<ul class=\"grid\" hidden>" in sec and 'data-slug="a"' in sec  # still rendered, only hidden
-    closed = sec[sec.index('<button type="button" class="gclosed"'):]
-    assert closed.count('class="icon icon-xs"') == 2
-    assert closed.count('aria-hidden="true"') == 2  # a screen reader gets the label, not the letters
-    head = sec[sec.index('class="gtoggle"'):sec.index('class="gclosed"')]
-    assert 'data-label="Åpne eller lukk Jobb"' in head and "aria-label" not in head  # named by its text and count
-    assert 'aria-expanded="false" aria-label="Åpne eller lukk Jobb"' in closed
+    assert '<ul class="cards" hidden>' in sec and 'data-slug="a"' in sec  # still rendered, only hidden
+    assert "gclosed" not in sec
+    grid = sec[sec.index('<div class="gicons">'):]
+    assert grid.count('<a class="gicon" href="/a/') == 2 and grid.count('class="icon"') == 2
+    assert grid.count('aria-hidden="true"') == 2  # a screen reader gets the name, not the letters
+    assert '<a class="gicon" href="/a/a/" data-slug="a">' in grid and "<span>A</span>" in grid
+    head = sec[sec.index('class="gtoggle"'):sec.index("</h3>")]
+    assert "data-label" not in head and "aria-label" not in head  # named by its text and count
 
 
-def test_closed_row_has_the_headings_label_escaped(hub, user_client):
+def test_closed_group_names_are_escaped_in_the_heading_label(hub, user_client):
     _front(hub, "a")
     gid = _grp(hub, '<b>x</b>"&', ["a"], open_=False)
     sec = _sec(user_client.get("/").text, f"g-{gid}")
-    row = sec[sec.index('<button type="button" class="gclosed"'):]
-    assert 'aria-expanded="false" aria-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in row and "<b>x</b>" not in sec
+    assert "&lt;b&gt;x&lt;/b&gt;&#34;&amp;<span" in sec and "<b>x</b>" not in sec
 
 
-def test_closed_group_in_cards_view_keeps_its_lines(hub, user_client):
+def test_closed_group_keeps_its_lines_in_the_hidden_list(hub, user_client):
     _front(hub, "a")
     gid = _grp(hub, "Jobb", ["a"], open_=False)
     with hub.db() as con:
         hub.home.set_view(con, U, "cards")
     sec = _sec(user_client.get("/").text, f"g-{gid}")
-    assert '<ul class="cards" hidden>' in sec and 'class="gclosed"' in sec
+    assert '<ul class="cards" hidden>' in sec and 'class="gicons"' in sec
 
 
 def test_pinned_app_is_not_in_its_group_on_the_page(hub, user_client):
@@ -581,7 +582,7 @@ def test_pinned_app_is_not_in_its_group_on_the_page(hub, user_client):
     html = user_client.get("/").text
     assert 'data-slug="a"' in _sec(html, "fav") and 'data-slug="a"' not in _sec(html, f"g-{gid}")
     assert '<span class="gcount">· 1</span>' in _sec(html, f"g-{gid}")
-    assert html[: html.index("<dialog")].count('data-slug="a"') == 1  # the picker below lists every app
+    assert html[: html.index("<dialog")].count('<li class="app pinned" data-slug="a"') == 1  # the picker below lists every app
 
 
 def test_gone_apps_not_shown_or_counted(hub, user_client):
@@ -589,12 +590,12 @@ def test_gone_apps_not_shown_or_counted(hub, user_client):
     gid = _grp(hub, "Jobb", ["a", "b", "slettet"], open_=False)
     sec = _sec(user_client.get("/").text, f"g-{gid}")
     assert "slettet" not in sec and '<span class="gcount">· 2</span>' in sec
-    assert sec.count('class="icon icon-xs"') == 2
+    assert sec.count('<a class="gicon"') == 2
     with hub.db() as con:  # access lost: still in the stored group, not on the page
         hub.home.set_added(con, U, "b", False)
     sec = _sec(user_client.get("/").text, f"g-{gid}")
     assert 'data-slug="b"' not in sec and '<span class="gcount">· 1</span>' in sec
-    assert sec.count('class="icon icon-xs"') == 1
+    assert sec.count('<a class="gicon"') == 1
 
 
 def test_group_with_only_gone_apps_is_not_shown(hub, user_client):
@@ -613,7 +614,7 @@ def test_group_name_escaped(hub, user_client):
     html = user_client.get("/").text
     sec = _sec(html, f"g-{gid}")
     assert "&lt;b&gt;x&lt;/b&gt;&#34;&amp;" in sec and "<b>x</b>" not in html
-    assert 'data-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in sec
+    assert "&lt;b&gt;x&lt;/b&gt;&#34;&amp;<span" in sec
 
 
 # ---------------------------------------------------------------- folding (home.js, hub.css)
@@ -623,9 +624,9 @@ def _static(name):
 
 def test_fold_wiring():
     js, css = _static("home.js"), _static("hub.css")
-    for needle in ("gtoggle", "gclosed", "/api/prefs/groups/open", "toggleGroup", "hubDragJustEnded"):
+    for needle in ("gtoggle", "gicons", "/api/prefs/groups/open", "toggleSection", "hubDragJustEnded"):
         assert needle in js
-    for needle in (".gclosed", ".gtoggle", '.group[data-open="0"]'):
+    for needle in (".gicons", ".gtoggle", '.apps > section[data-open="0"]'):
         assert needle in css
 
 
@@ -698,11 +699,11 @@ def test_picker_markup(hub, user_client):
     p = _picker(html)
     assert '<h1 id="pickerTitle" tabindex="-1" autofocus>Ordne apper</h1>' in p
     assert "Huk av det du vil ha på forsiden, og velg gruppe." in p
-    assert p.count('class="gpick"') == 2 and p.count('class="grename"') == p.count('class="gdelete"') == 1
-    assert p.count('class="gnew"') == 1 and "Ny gruppe" in p[p.index('class="gnew"'):]
+    assert p.count('class="gpick"') == 2
+    # «Arrange apps» only places apps: renaming, deleting and making a group are in «Groups»
+    assert 'class="grename"' not in p and 'class="gdelete"' not in p and 'class="gnew"' not in p
     g, rest = _pgroup(p, gid), _pgroup(p)
-    assert "<h2>Jobb</h2>" in g and 'class="grename"' in g and 'class="gdelete"' in g
-    assert 'class="grename"' not in rest and 'class="gdelete"' not in rest
+    assert "<h2>Jobb</h2>" in g
     pick = lambda sec: sec[sec.index('class="gpick"'):sec.index("</button>", sec.index('class="gpick"'))]  # noqa: E731
     assert ">Jobb<" in pick(g) and ">Velg gruppe<" in pick(rest)
     assert 'aria-haspopup="menu"' in pick(g) and 'aria-expanded="false"' in pick(g)
@@ -713,7 +714,7 @@ def test_picker_without_groups_hides_the_no_group_heading(hub, user_client):
     _front(hub, "a")
     p = _picker(user_client.get("/").text)
     assert '<section class="pgroup" data-gid="" hidden>' not in p  # the list itself shows
-    assert 'class="gnew"' in p and 'class="grename"' not in p
+    assert 'class="gnew"' not in p and 'class="grename"' not in p
     assert '<div class="gh" hidden><h2>Uten gruppe</h2>' in _pgroup(p)
 
 
@@ -725,12 +726,51 @@ def test_picker_name_escaped(hub, user_client):
     g = _pgroup(p, gid)
     assert f"<h2>{esc}</h2>" in g and f'<span class="gchip">{esc}</span>' in g  # the heading and the row's button
     assert f'aria-label="A: {esc}"' in g
-    assert f'aria-label="Gi nytt navn: {esc}"' in g and f'aria-label="Slett: {esc}"' in g
     assert "<b>x</b>" not in p
     # The page draws names into the sheet and the menu itself: only ever as text
     js = _static("home.js")
     assert "innerHTML" not in js and "insertAdjacentHTML" not in js and "outerHTML =" not in js
     assert "prompt(" not in js and "confirm(" not in js
+
+
+def _groups_window(html):
+    return html[html.find('id="groups"'):html.find('<template id="pgroupRow">')]
+
+
+def test_groups_window_markup(hub, user_client):
+    _front(hub, "a", "b", "c")
+    first = _grp(hub, "Jobb", ["a", "b"])
+    second = _grp(hub, "Tom")
+    third = _grp(hub, '<b>x</b>"&', ["c"])
+    html = user_client.get("/").text
+    assert '<button type="button" class="more" data-open-groups>Grupper</button>' in html
+    w = _groups_window(html)
+    assert '<dialog id="groups" class="sheet"' in html
+    assert '<h1 id="groupsTitle" tabindex="-1" autofocus>Grupper</h1>' in w
+    assert "Lag, gi nytt navn, slett, og dra for å endre rekkefølgen." in w
+    assert w.index(f'data-gid="{first}"') < w.index(f'data-gid="{second}"') < w.index(f'data-gid="{third}"')
+    assert w.count('class="grename"') == w.count('class="gdelete"') == 3
+    assert w.count('class="gnew"') == 1 and "Ny gruppe" in w[w.index('class="gnew"'):]
+    assert w.index(f'data-gid="{third}"') < w.index('class="gnew"')
+    assert '<small class="gn">2 apper</small>' in w and '<small class="gn">0 apper</small>' in w
+    assert '<small class="gn">1 app</small>' in w
+    esc = "&lt;b&gt;x&lt;/b&gt;&#34;&amp;"
+    assert f"<h2>{esc}</h2>" in w and "<b>x</b>" not in w
+    assert f'aria-label="Gi nytt navn: {esc}"' in w and f'aria-label="Slett: {esc}"' in w
+    assert 'data-close' in w
+
+
+def test_the_group_menu_still_offers_a_new_group():
+    js = _static("home.js")
+    assert "S.group_new_more" in js and 'item(S.group_new_more, null, () => nameField({ slug:' in js
+
+
+def test_groups_window_wiring():
+    js, css, drag = _static("home.js"), _static("hub.css"), _static("drag.js")
+    for needle in ("data-open-groups", "groupsDlg.showModal", "pgroupRow", "S.group_count"):
+        assert needle in js
+    assert "#groups .glist > .pgroup" in drag and "/api/prefs/groups/order" in drag
+    assert "#groups" in css and ".gname" in css
 
 
 def test_picker_wiring():
@@ -750,3 +790,34 @@ def test_picker_guards_double_taps_and_order():
         assert f'inTurn("{route}"' in body or "inTurn(url" in body
     assert 'send("/api/prefs/groups/' not in body
     assert "aria-busy" in body and "tabIndex = -1" in body and "deleting" in body
+
+
+def test_groups_window_drag_joins_the_line_and_shows_its_error_inside():
+    drag, home, css = _static("drag.js"), _static("home.js"), _static("hub.css")
+    # the order of the groups is sent in home.js's line of group requests, and «Done» waits for it
+    assert "window.hubGroupsSave" in home and "function turn(job)" in home and "const inTurn = (url, body) => turn(" in home
+    assert "track(p.catch" in home
+    assert "window.hubGroupsSave ? window.hubGroupsSave(send) : send()" in drag
+    # a failed drop in the window says so inside it; the front page keeps its alert
+    assert 'querySelector("#groups .gwerr")' in drag and "where.win && windowError(" in drag and "alert(" in drag
+    assert ".gwerr" in home and "#groups .gwerr" in css
+    # the last row's gap is its own margin, not the distance to a button that may be hidden
+    assert "items[i].matches(ROW) ? null : items[i].nextElementSibling" in drag
+
+
+def test_groups_window_has_an_error_line(hub, user_client):
+    _front(hub, "a")
+    w = _groups_window(user_client.get("/").text)
+    assert '<p class="gerr gwerr" role="alert"></p>' in w and w.index("gwerr") < w.index('class="glist"')
+
+
+def test_hub_css_scopes_section_spacing_and_taps():
+    css = _static("hub.css")
+    # the heading reset is for the open/closed sections, not the offline lists, which keep their spacing
+    assert ".apps > section[data-open] > .sec { margin: 0; }" in css and ".apps > section > .sec" not in css
+    # closed Favourites, groups and Other end 18 px below; the ids of the open rule would otherwise win
+    assert ':is(#fav, .group, #rest)[data-open="0"] { margin-bottom: 18px; }' in css
+    # the iPhone tap rule reaches the buttons of «Groups»; nothing is left of a picker «New group» button
+    assert "#groups button { touch-action: manipulation;" in css and "#picker .gnew" not in css and "#picker .gh button" not in css
+    js = _static("home.js")
+    assert 'picker.addEventListener("click", onListClick)' not in js and "onListClick" not in js

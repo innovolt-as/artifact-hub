@@ -136,7 +136,7 @@ two minutes away shows the front page again instead of the app left behind. The 
 
 ## A line on the front-page card
 
-In the card view, an app can show one line of text under its name, such as a count or today's total. The best way
+In a list (an open section), an app can show one line of text under its name, such as a count or today's total. The best way
 is a card recipe: a `<script data-hub-card>` block in the app's HTML with a function `hubCard` that computes the
 line from the data the app has stored. The hub runs it every time the front page is shown, so the line is always
 current and the app does not have to be opened to update it:

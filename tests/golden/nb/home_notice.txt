@@ -4,9 +4,6 @@ user@test.no
 @aria-label: Innstillinger
 Hei
 mandag 26. oktober
-@aria-label: Visning
-@title: Ikoner
-@title: Kort
 Passordet er byttet.
 +
 Legg til apper
@@ -14,4 +11,9 @@ Velg hvilke apper du vil ha på forsiden din
 Ordne apper
 Huk av det du vil ha på forsiden, og velg gruppe.
 Det finnes ingen apper ennå.
+Ferdig
+Grupper
+Lag, gi nytt navn, slett, og dra for å endre rekkefølgen.
+＋
+Ny gruppe
 Ferdig

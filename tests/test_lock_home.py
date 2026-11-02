@@ -70,7 +70,7 @@ def test_the_card_shows_a_small_lock(cards, user_client):
     assert "summary locked" not in _item(html, "ovn")
     with cards.db() as con:
         cards.home.set_view(con, USER, "icons")
-    assert "summary locked" not in user_client.get("/").text
+    assert user_client.get("/").text.count('class="summary locked"') == 1  # the list is there, closed or not
 
 
 def test_title_icon_and_description_stay(cards, user_client):
