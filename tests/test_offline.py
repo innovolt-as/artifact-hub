@@ -82,3 +82,95 @@ def test_connector_create_app_offline(mcp, token, hub):  # noqa: F811
     assert meta(hub, "radar")["offline"] is True
     call(mcp, token, "create_app", slug="plain", html=PAGE, title="P", offline=False)
     assert "offline" not in meta(hub, "plain")
+
+
+# ---------------------------------------------------------------- what the service worker gets from the server
+import json  # noqa: E402
+import re  # noqa: E402
+
+from tests.conftest import lock, make_client, unlock  # noqa: E402
+
+USER = "user@test.no"
+PRE = {"X-Hub-Precache": "1", "sec-fetch-dest": "empty"}
+
+
+def _page(hub, slug, offline=True):
+    hub.save_page(slug, "<html><head><title>t</title></head><body>x</body></html>", create=True, private=False, title=slug)
+    if offline:
+        hub.set_offline(slug, True)
+
+
+def _visits(hub, slug):
+    with hub.db() as con:
+        return con.execute("SELECT COUNT(*) FROM visits WHERE slug=?", (slug,)).fetchone()[0]
+
+
+def test_precache_does_not_count_as_visit(hub):
+    _page(hub, "a")
+    c = make_client(USER)
+    assert c.get("/a/a/", headers=PRE).status_code == 200
+    assert _visits(hub, "a") == 0
+    assert c.get("/a/a/").status_code == 200
+    assert _visits(hub, "a") == 1
+
+
+def test_precache_gets_the_banner(hub):
+    _page(hub, "a")
+    assert "<hub-banner" in make_client(USER).get("/a/a/", headers=PRE).text
+
+
+def test_precache_refuses_unmarked(hub):
+    _page(hub, "b", offline=False)
+    c = make_client(USER)
+    assert c.get("/a/b/", headers=PRE).status_code == 404
+    assert c.get("/a/b/").status_code == 200
+
+
+def test_precache_refuses_locked_even_unlocked(hub):
+    _page(hub, "a")
+    lock(USER, "a")
+    c = make_client(USER)
+    assert c.get("/a/a/", headers=PRE).status_code == 423
+    assert unlock(c, "a").status_code == 303
+    assert c.get("/a/a/").status_code == 200
+    assert c.get("/a/a/", headers=PRE).status_code == 423
+
+
+def test_precache_folder_files_as_normal(hub, admin_client, upload):
+    upload(admin_client, "f.zip", _folder(), title="F")
+    hub.set_offline("f", True)
+    r = admin_client.get("/a/f/index.html", headers=PRE)
+    assert r.status_code == 200 and "<hub-banner" in r.text
+    assert admin_client.get("/a/f/missing.png", headers=PRE).status_code == 404
+
+
+def test_shim_marks_offline_apps(hub):
+    _page(hub, "a")
+    _page(hub, "b", offline=False)
+    _page(hub, "c")
+    lock(USER, "c")
+    c = make_client(USER)
+    tag = lambda slug: re.search(r'<script src="/static/hub\.js"[^>]*>', c.get(f"/a/{slug}/", headers={"sec-fetch-dest": "empty"}).text).group(0)  # noqa: E731
+    assert ' data-offline="1"' in tag("a")
+    assert "data-offline" not in tag("b")
+    unlock(c, "c")
+    assert "data-offline" not in tag("c")
+
+
+def test_front_page_lists_offline_apps(hub, admin_client):
+    for slug in ("a", "b", "c"):
+        _page(hub, slug, offline=slug != "b")
+    lock(USER, "c")
+    admin_client.post("/api/link", data={"title": "L", "url": "https://example.com"})
+    c = make_client(USER)
+    r = c.get("/")
+    strings = json.loads(re.search(r'id="__hub_strings">(.*?)</script>', r.text, re.S).group(1))
+    assert strings["offline_apps"] == ["a"]
+
+
+def test_sw_served_at_root(client):
+    r = client.get("/sw.js")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/javascript")
+    assert r.headers["cache-control"] == "no-cache"
+    assert r.headers["service-worker-allowed"] == "/"
