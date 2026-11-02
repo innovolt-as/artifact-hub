@@ -518,6 +518,18 @@ def test_rest_is_other_when_every_group_is_hidden(hub, user_client):
     assert 'data-group=' not in html and "Andre" in _sec(html, "rest")
 
 
+def test_no_rest_heading_when_every_app_is_grouped_or_pinned(hub, user_client):
+    _front(hub, "a", "b")
+    _grp(hub, "Jobb", ["a"])
+    with hub.db() as con:
+        hub.home.set_pin(con, U, "b", True)
+    html = user_client.get("/").text
+    front = html[:html.index("<dialog")]
+    rest = _sec(front, "rest")
+    assert rest and "<ul" in rest  # kept for the offline layout and the refresh
+    assert "Andre" not in front and "Alle apper" not in front and 'class="sec"' not in rest
+
+
 def test_group_markup_open(hub, user_client):
     _front(hub, "a", "b", "c")
     gid = _grp(hub, "Jobb", ["b", "a"])
@@ -728,3 +740,13 @@ def test_picker_wiring():
         assert needle in js
     for needle in ("#picker .gpick", "#picker .gmenu", "#picker .gform"):
         assert needle in css
+
+
+def test_picker_guards_double_taps_and_order():
+    js = _static("home.js")
+    body = js[js.index("«Arrange apps»"):]
+    # one chain for every group request, so answers are drawn in the order they were asked
+    for route in ("/api/prefs/groups/app", "/api/prefs/groups/new", "/api/prefs/groups/rename", "/api/prefs/groups/delete"):
+        assert f'inTurn("{route}"' in body or "inTurn(url" in body
+    assert 'send("/api/prefs/groups/' not in body
+    assert "aria-busy" in body and "tabIndex = -1" in body and "deleting" in body

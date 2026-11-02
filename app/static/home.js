@@ -527,6 +527,27 @@
     const why = r.status === 400 ? await r.json().then((d) => d.detail, () => null) : null;
     throw new Error(typeof why === "string" && why ? why : S.save_failed);
   }
+  // Group requests go one after the other, so their answers are drawn in the order they were asked
+  let chain = Promise.resolve();
+  function inTurn(url, body) {
+    const p = chain.then(() => send(url, body));
+    chain = p.catch(() => {});
+    return p;
+  }
+  // The second tap of a double tap on a menu item must not tick or untick the row that is under it once the menu has
+  // closed. While the hub answers, the busy menu takes it; when the answer came first, the first click inside the menu's
+  // old place within 400 ms of the choice is dropped (detail 0 is a key, never dropped). A new menu ends that.
+  let hushed = null; // {until, box}
+  const hush = (box, chosenAt) => { hushed = { until: chosenAt + 400, box }; };
+  picker.addEventListener("click", (e) => {
+    if (!hushed || !e.detail || performance.now() > hushed.until) return;
+    const { left, right, top, bottom } = hushed.box;
+    if (e.clientX >= left && e.clientX <= right && e.clientY >= top && e.clientY <= bottom) {
+      hushed = null;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
   const pickList = () => picker.querySelector(".picklist");
   const noGroup = () => pickList().querySelector('.pgroup[data-gid=""]');
   const groupName = (sec) => sec.querySelector(".gh h2").textContent;
@@ -576,7 +597,11 @@
     none.querySelector("ul").replaceChildren(...rest);
     none.querySelector(".gh").hidden = !groups.length;
     none.hidden = groups.length > 0 && !rest.length;
-    had.forEach((sec, id) => { if (id && !groups.some((g) => g.id === id)) sec.remove(); });
+    had.forEach((sec, id) => {
+      if (!id || groups.some((g) => g.id === id)) return;
+      if (opened && sec.contains(opened.el)) closeOpen(); // its name field or delete question goes with it
+      sec.remove();
+    });
     none.before(...sections);
     if (focused && focused !== document.activeElement && list.contains(focused)) focused.focus({ preventScroll: true });
   }
@@ -615,9 +640,12 @@
     return { row, ok };
   }
 
-  // The group menu under a row: every group, «No group» and «New group …»; arrow keys move, Escape closes
+  // The group menu under a row: every group, «No group» and «New group …»; arrow keys move between the items (only the
+  // focused one is reached by Tab: tabindex -1, as for role=menu), Escape closes. After a choice it stays, busy, until
+  // the hub has answered, so a second tap lands on it and not on the rows under it.
   function groupMenu(li) {
     closeOpen();
+    hushed = null;
     clearErrors();
     const btn = li.querySelector(".gpick"), here = li.closest(".pgroup").dataset.gid;
     const m = el("div", "gmenu");
@@ -626,15 +654,16 @@
     const item = (text, checked, act, cls) => {
       const b = el("button", cls, text);
       b.type = "button";
+      b.tabIndex = -1;
       b.setAttribute("role", checked == null ? "menuitem" : "menuitemradio");
       if (checked != null) b.setAttribute("aria-checked", String(checked));
-      b.addEventListener("click", act);
+      b.addEventListener("click", () => { if (!m.hasAttribute("aria-busy")) act(); });
       m.append(b);
     };
     for (const sec of pickList().querySelectorAll(".pgroup")) {
-      if (sec.dataset.gid) item(groupName(sec), sec.dataset.gid === here, () => moveTo(li, sec.dataset.gid));
+      if (sec.dataset.gid) item(groupName(sec), sec.dataset.gid === here, () => moveTo(li, sec.dataset.gid, m));
     }
-    item(groupName(noGroup()), here === "", () => moveTo(li, null));
+    item(groupName(noGroup()), here === "", () => moveTo(li, null, m));
     item(S.group_new_more, null, () => nameField({ slug: li.dataset.slug, put: (f) => li.append(f), back: btn }), "gmore");
     m.addEventListener("keydown", (e) => {
       const items = [...m.querySelectorAll("button")], i = items.indexOf(document.activeElement);
@@ -648,15 +677,23 @@
     });
     li.append(m);
     btn.setAttribute("aria-expanded", "true");
-    opened = { el: m, done: (back) => { btn.setAttribute("aria-expanded", "false"); if (back) btn.focus(); } };
+    // The button sits right above the menu: back on it without scrolling (WebKit would scroll the list for it)
+    opened = { el: m, done: (back) => { btn.setAttribute("aria-expanded", "false"); if (back) btn.focus({ preventScroll: true }); } };
     (m.querySelector('[aria-checked="true"]') || m.firstElementChild).focus({ preventScroll: true });
     m.scrollIntoView({ block: "nearest" });
   }
-  function moveTo(li, id) {
-    closeOpen(true);
-    track(send("/api/prefs/groups/app", { slug: li.dataset.slug, id }).then(
-      (r) => { redraw(r.groups, li); li.querySelector(".gpick").focus({ preventScroll: true }); },
-      (e) => rowError(li, e.message),
+  function moveTo(li, id, m) {
+    const chosenAt = performance.now();
+    m.setAttribute("aria-busy", "true");
+    m.querySelectorAll("button").forEach((b) => b.setAttribute("aria-disabled", "true"));
+    const shut = () => {
+      if (opened?.el !== m) return; // closed meanwhile (a tap elsewhere, Escape)
+      hush(m.getBoundingClientRect(), chosenAt);
+      closeOpen(true);
+    };
+    track(inTurn("/api/prefs/groups/app", { slug: li.dataset.slug, id }).then(
+      (r) => { shut(); redraw(r.groups, li); li.querySelector(".gpick").focus({ preventScroll: true }); },
+      (e) => { shut(); rowError(li, e.message); },
     ));
   }
 
@@ -685,7 +722,7 @@
       ok.disabled = true;
       const url = gid ? "/api/prefs/groups/rename" : "/api/prefs/groups/new";
       const body = gid ? { id: gid, name: input.value } : slug ? { name: input.value, slug } : { name: input.value };
-      track(send(url, body).then((r) => {
+      track(inTurn(url, body).then((r) => {
         const here = opened?.el === f;
         if (here) closeOpen();
         const li = slug && pickList().querySelector(`li[data-slug="${CSS.escape(slug)}"]`);
@@ -702,8 +739,11 @@
     });
   }
 
-  // «Delete "x"? Its apps go to "Other".» under the group's heading
+  // «Delete "x"? Its apps go to "Other".» under the group's heading. A group whose delete is on its way is not asked again.
+  const deleting = new Set();
   function askDelete(sec) {
+    const id = sec.dataset.gid;
+    if (deleting.has(id)) return;
     closeOpen();
     clearErrors();
     const box = el("div", "gconfirm"), q = el("p", null, S.group_delete_ask.replace("{name}", () => groupName(sec)));
@@ -717,14 +757,17 @@
     row.firstElementChild.focus({ preventScroll: true }); // Cancel: Enter on what has focus must not delete
     box.scrollIntoView({ block: "nearest" });
     ok.addEventListener("click", () => {
-      if (ok.disabled) return;
+      if (ok.disabled || deleting.has(id)) return;
       ok.disabled = true;
-      track(send("/api/prefs/groups/delete", { id: sec.dataset.gid }).then((r) => {
+      deleting.add(id);
+      track(inTurn("/api/prefs/groups/delete", { id }).then((r) => {
+        deleting.delete(id);
         const here = opened?.el === box;
         if (here) closeOpen();
         redraw(r.groups);
         if (here) picker.querySelector(".gnew")?.focus({ preventScroll: true });
       }, (e) => {
+        deleting.delete(id);
         ok.disabled = false;
         err.textContent = e.message;
       }));

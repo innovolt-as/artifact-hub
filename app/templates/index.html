@@ -105,7 +105,7 @@
   </section>
   {% endfor %}
   <section id="rest">
-    {% if favs or has_groups %}<h3 class="sec">{{ t("home.other") if has_groups else t("home.all") }}</h3>{% endif %}
+    {% if rest and (favs or has_groups) %}<h3 class="sec">{{ t("home.other") if has_groups else t("home.all") }}</h3>{% endif %}
     <ul class="{{ 'grid' if view == 'icons' else 'cards' }}">
       {% for a in rest %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
