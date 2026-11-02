@@ -1,17 +1,19 @@
 // The hub's service worker (served at /sw.js, scope /). It keeps copies on the phone so the front page and the apps
-// marked «Virker uten nett» open without a connection:
+// marked «Works offline» open without a connection:
 //   hub-pages-v1   the front page (/), each marked app's page (/a/<slug>/) and the files it fetches from its folder,
 //                  and the state under /__hub/state: {"user": "<e-mail>", "offline": ["<slug>", ...]}
 //   hub-static-v1  /static/*, /icon/*, /manifest.webmanifest, and the Google Fonts a marked app uses
 // A copy is only ever something the server sent, never an app's data, and all copies belong to one user. Pages say
 // who is logged in and what is marked: hub:home from the front page (home.js), hub:app from every app page (hub.js),
-// and hub:forget from forget.js, which deletes the copies on logged-out pages and after «Slett mine data». A request
+// and hub:forget from forget.js, which deletes the copies on logged-out pages and after «Delete my data». A request
 // that logs someone in (a magic link, the login or password form) wipes the copies before the page it leads to.
-// The server gets WAIT_MS to answer before a copy is used. A request not handled below gets no respondWith and goes to
-// the network as if this worker were not there.
+// The server gets WAIT_MS to answer before a copy is used; once it has not, the network counts as down for DOWN_MS and
+// the files a page loads come from their copies at once. A request not handled below gets no respondWith and goes to
+// the network as if this worker were not there, and so does one whose handler fails.
 const PAGES = "hub-pages-v1", STATIC = "hub-static-v1";
 const STATE = "/__hub/state";
 const WAIT_MS = 3000;
+const DOWN_MS = 30000;
 // Never answered from here, also when a marked app asks: the API, logging in and out, settings, admin, the code
 // screen, the OAuth pages and the Claude connector
 const SKIP = ["/api/", "/login", "/auth", "/logout", "/password", "/settings", "/admin", "/lock/", "/oauth/", "/mcp",
@@ -34,9 +36,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // in the tab the banner and the code screen, so say what it is ("document", or "iframe" for a frame).
 function forward(req) {
   if (req.mode !== "navigate") return req;
-  const headers = new Headers(req.headers);
-  headers.set("X-Hub-Dest", req.destination);
-  return new Request(req, { headers });
+  try {
+    const headers = new Headers(req.headers);
+    headers.set("X-Hub-Dest", req.destination);
+    return new Request(req, { headers });
+  } catch {
+    return req; // a browser that will not build one: as it is
+  }
 }
 
 // ------------------------------------------------------------------ state
@@ -64,12 +70,21 @@ async function saveState() {
 }
 
 // Store an answer, unless the copies were wiped since it was asked for, nobody is logged in (a logged-out page
-// fetching the hub's files must not bring the caches back), or, for an app's file, the app is no longer marked
-function store(cacheName, url, res, g, slug) {
-  return queue(async () => {
-    if (g !== gen || !state.user || (slug && !state.offline.includes(slug))) return;
-    await (await caches.open(cacheName)).put(url, res);
-  }).catch(() => {}); // storage full, or the answer broke off: not stored
+// fetching the hub's files must not bring the caches back), or, for an app's file, the app is no longer marked. The
+// body is read before the queue, so one that stalls holds up nothing; an opaque answer (a font stylesheet loaded
+// without crossorigin) cannot be read here, and its put gets WAIT_MS in the queue.
+async function store(cacheName, url, res, g, slug) {
+  try {
+    const opaque = res.type === "opaque";
+    const kept = opaque ? res
+      : new Response(await res.arrayBuffer(), { status: res.status, statusText: res.statusText, headers: res.headers });
+    await queue(async () => {
+      if (g !== gen || !state.user || (slug && !state.offline.includes(slug))) return;
+      const put = (await caches.open(cacheName)).put(url, kept);
+      put.catch(() => {});
+      await (opaque ? Promise.race([put, sleep(WAIT_MS)]) : put);
+    });
+  } catch { /* storage full, or the answer broke off: not stored */ }
 }
 
 // Every hub-* cache, and nothing else on the phone
@@ -139,8 +154,13 @@ async function update(m) {
   const assets = new Set(Array.isArray(m.assets) ? m.assets.filter((u) => typeof u === "string") : []);
   const own = m.type === "hub:app" && m.offline ? m.slug : null;
   const jobs = [...assets].map((u) => keepFile(u, g, own));
-  if (list) jobs.push(keepFront(g), ...list.map((slug) => precache(slug, g)));
-  else if (m.offline) jobs.push(precache(m.slug, g));
+  if (list) jobs.push(keepFront(g, false), ...list.map((slug) => precache(slug, g)));
+  else {
+    // An app's home-screen icon has storage of its own, where the banner's link to / finds no copy unless one is kept
+    // from here (not from the stored copy of the app: that is not someone opening it)
+    if (!m.copy) jobs.push(keepFront(g, true));
+    if (m.offline) jobs.push(precache(m.slug, g));
+  }
   await Promise.all(jobs);
 }
 
@@ -160,13 +180,18 @@ async function keepFile(u, g, own) {
   } catch { /* offline: next time */ }
 }
 
-// The front page itself when there is no copy: on the first visit it loaded before the worker was there, and another
-// user's copy may just have been wiped
-async function keepFront(g) {
+// The front page itself when there is no copy: on the first visit it loaded before the worker was there, another
+// user's copy may just have been wiped, or the page is an app opened from its own home-screen icon. From an app page
+// (`withFiles`) also the hub's files the front page loads, which the front page itself sends with hub:home.
+async function keepFront(g, withFiles) {
   if (await copyOf(PAGES, here("/"))) return;
   try {
     const r = await fetch("/", { credentials: "same-origin", cache: "no-store" });
-    if (fine(r) && isHtml(r)) await store(PAGES, here("/"), r, g);
+    if (!fine(r) || !isHtml(r)) return;
+    const html = withFiles ? await r.clone().text() : "";
+    await store(PAGES, here("/"), r, g);
+    const files = html.matchAll(/(?:href|src)="(\/(?:static\/|icon\/|manifest\.webmanifest)[^"]*)"/g);
+    await Promise.all([...files].map((f) => keepFile(here(f[1].replaceAll("&amp;", "&")), g, null)));
   } catch { /* offline */ }
 }
 
@@ -197,23 +222,52 @@ self.addEventListener("fetch", (e) => {
   const path = url.pathname, nav = req.mode === "navigate";
   if (SKIP.some((p) => path.startsWith(p))) return;
   if (path === "/") {
-    e.respondWith(nav ? front(e, url) : frontFresh(e, url));
+    respond(e, () => (nav ? front(e, url) : frontFresh(e, url)));
     return;
   }
   const app = path.match(/^\/a\/([^/]+)\/(.*)$/);
   if (app) appFile(e, app[1], app[2], nav);
-  else if (isHubFile(path) && !nav) e.respondWith(hubFile(e, url));
+  else if (isHubFile(path) && !nav) respond(e, () => hubFile(e, url));
 });
+
+// Every answer from here: if anything in this worker fails, the request goes to the network (named as forward() does,
+// so an app's page still gets its banner and code screen)
+function respond(e, handler) {
+  const answer = (async () => handler())(); // runs at once, as before; a throw becomes a rejection
+  e.respondWith(answer.catch(() => fetch(forward(e.request))));
+}
+
+// The network counts as down until downUntil, from the moment it did not answer within WAIT_MS or failed. Only an
+// answer that comes in time ends it early: a late one is still a network that makes every file wait.
+let downUntil = 0;
+const isDown = () => Date.now() < downUntil;
+function fromNetwork(req) {
+  const asked = Date.now();
+  return fetch(req).then((r) => {
+    if (Date.now() - asked < WAIT_MS) downUntil = 0;
+    return r;
+  });
+}
 
 // The network's answer, unless it does not come within WAIT_MS, fails, or is a server error (Caddy's 502 while the hub
 // is upgraded): then the copy, if there is one, else the network's answer however late. `answer` sees every network
 // answer, also one that comes after the copy was used.
 async function networkFirst(e, copy, answer, req = e.request) {
-  const net = fetch(req);
+  const net = fromNetwork(req);
   e.waitUntil(net.then(answer).catch(() => {}));
   const first = await Promise.race([net, sleep(WAIT_MS)]).catch(() => null);
   if (first && first.status < 500) return first;
+  if (!first && !req.signal?.aborted) downUntil = Date.now() + DOWN_MS; // not when the page itself gave up the request
   return (await copy()) || net;
+}
+
+// A file a page loads: while the network is down its copy at once, with the network's answer stored in the background;
+// otherwise as networkFirst. Pages themselves always ask the network first.
+async function copyFirst(e, copy, answer, req = e.request) {
+  const stored = isDown() && (await copy());
+  if (!stored) return networkFirst(e, copy, answer, req);
+  e.waitUntil(fromNetwork(req).then(answer).catch(() => {}));
+  return stored;
 }
 
 // Opening the front page: the copy is marked data-hub-offline="1" for home.js. A redirect (the login page, when the
@@ -230,18 +284,18 @@ function front(e, url) {
 
 // home.js fetching the front page to refresh it in place: always the network, never the copy
 async function frontFresh(e, url) {
-  const g = gen, r = await fetch(e.request);
+  const g = gen, r = await fromNetwork(e.request);
   if (!url.search && fine(r) && isHtml(r)) e.waitUntil(store(PAGES, here("/"), r.clone(), g));
   return r;
 }
 
 // Under /a/<slug>/, only for a marked app. Its page comes from the network, else the copy hub:home or hub:app stored
 // (an opened page is not stored: the copy is the pre-cache one); opening it to a redirect, 404 or 423 deletes the
-// copies. Its other files come from the network and are stored, with the stored one as the fallback.
+// copies. Its other files come from the network and are stored, with the stored one as the fallback (copyFirst).
 function appFile(e, slug, rest, nav) {
   const marked = state ? state.offline.includes(slug) : null; // null: the worker has just started
   if (marked === false) return;
-  e.respondWith((async () => {
+  respond(e, async () => {
     if (marked === null) {
       await ready;
       if (!state.offline.includes(slug)) return fetch(forward(e.request)); // not marked after all: as from the network
@@ -255,13 +309,13 @@ function appFile(e, slug, rest, nav) {
         return undefined;
       }, forward(e.request));
     }
-    return networkFirst(e, () => pageCopy(url), (r) => { if (fine(r)) return store(PAGES, url, r.clone(), g, slug); },
+    return copyFirst(e, () => pageCopy(url), (r) => { if (fine(r)) return store(PAGES, url, r.clone(), g, slug); },
       forward(e.request));
-  })());
+  });
 }
 
 // The hub's own files. With ?v= the address changes with the file, so a stored one is used at once; without it the
-// network's comes first.
+// network's comes first, unless the network is down (copyFirst).
 async function hubFile(e, url) {
   const g = gen, keep = async (r) => { if (fine(r)) await store(STATIC, url.href, r.clone(), g); };
   if (url.searchParams.has("v")) {
@@ -271,14 +325,14 @@ async function hubFile(e, url) {
     e.waitUntil(keep(r));
     return r;
   }
-  return networkFirst(e, () => copyOf(STATIC, url.href), keep);
+  return copyFirst(e, () => copyOf(STATIC, url.href), keep);
 }
 
 // Google Fonts on a marked app's page: stored the first time, then used from the store. A stylesheet loaded without
 // crossorigin gives an opaque answer, which is kept too.
 function font(e, url) {
   if (!e.clientId || (state && !state.offline.length)) return;
-  e.respondWith((async () => {
+  respond(e, async () => {
     await ready;
     const client = await self.clients.get(e.clientId);
     const m = client && new URL(client.url).pathname.match(/^\/a\/([^/]+)\//);
@@ -288,5 +342,5 @@ function font(e, url) {
     const r = await fetch(e.request);
     if ((r.status === 200 && !r.redirected) || r.type === "opaque") e.waitUntil(store(STATIC, url.href, r.clone(), g));
     return r;
-  })());
+  });
 }

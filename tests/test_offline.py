@@ -296,3 +296,47 @@ def test_color_scheme_follows_theme(pw_mode, hub, user_client):
 def test_lock_keeps_the_background():
     js = (Path(__file__).parent.parent / "app" / "static" / "hub.js").read_text()
     assert 'documentElement.style.display = "none"' not in js
+
+
+# ---------------------------------------------------------------- final review fixes
+STATIC = Path(__file__).parent.parent / "app" / "static"
+
+
+def _fn(js, name):
+    """The source of a top-level function in sw.js, up to the next blank line."""
+    return re.search(rf"\n(?:async )?function {name}\(.*?\n\n", js, re.S).group(0)
+
+
+def test_sw_takes_the_network_as_down_for_a_while(client):
+    """Once the network has not answered in time, the files a page loads come from their copies at once instead of each
+    waiting 3 s more."""
+    js = client.get("/sw.js").text
+    assert "const DOWN_MS = 30000" in js
+    assert "downUntil = Date.now() + DOWN_MS" in _fn(js, "networkFirst")
+    assert "copyFirst(" in _fn(js, "hubFile")
+    assert "copyFirst(" in _fn(js, "appFile")
+    assert "copyFirst(" not in _fn(js, "front")
+
+
+def test_hub_scripts_keep_their_address(hub):
+    """Apps find the shim with querySelector('script[src="/static/hub.js"]') to read data-user (Treningsprogram picks its
+    localStorage namespace from it), so its address must never change."""
+    _page(hub, "a")
+    page = make_client(USER).get("/a/a/").text
+    assert '<script src="/static/hub.js" data-slug="a" data-user="user@test.no"' in page
+    assert "/static/hub.js?" not in page and "/static/pull.js?" not in page and '<script src="/static/pull.js"' in page
+
+
+def test_sw_every_answer_falls_back_to_the_network(client):
+    js = client.get("/sw.js").text
+    assert js.count("respondWith(") == 1
+    assert ".catch(() => fetch(forward(e.request)))" in _fn(js, "respond")
+    fwd = _fn(js, "forward")
+    assert "try {" in fwd and "catch" in fwd and "return req;" in fwd.split("catch", 1)[1]
+
+
+def test_sw_reads_the_body_before_the_queue(client):
+    """A body that stalls must not hold the queue (wipes, and after a login the fallback for /)."""
+    body = _fn(client.get("/sw.js").text, "store")
+    assert body.index("arrayBuffer()") < body.index("queue(")
+    assert "new Response(" in body
