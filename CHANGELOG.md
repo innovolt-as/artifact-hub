@@ -2,6 +2,11 @@
 
 ## v1.5.0 (2026-11-02)
 
+### Before you upgrade
+
+- Going back to an earlier version afterwards needs one extra step, since phones keep the new service worker: see
+  "Going back to a version before v1.5.0" in [docs/UPGRADING.md](docs/UPGRADING.md).
+
 ### New
 
 - Apps can work offline. Turn on *Works offline* in an app's settings on the admin page and the hub stores the app on

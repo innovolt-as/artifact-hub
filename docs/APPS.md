@@ -114,9 +114,14 @@ offline use has to do its own bookkeeping:
   app's folder would take over and hide the hub's copy.
 
 The hub stores a copy by fetching the app's page with an `X-Hub-Precache: 1` header. That is not counted as a visit in
-the statistics. The server is asked first, so a connection always gives the current app. The copy is refreshed when the front page is opened online, and dropped when the switch is turned off. An
-app behind a [code lock](#code-lock) is never stored, and turning the lock on for an app deletes the copy on that
-device.
+the statistics. The server is asked first, so a connection gives the current app when the server answers within about
+3 seconds. Once it has not, the files the app loads come from their copies for the next 30 seconds, or until the
+server answers in time again, so a weak connection does not add a wait for each file.
+
+The page's copy is refreshed whenever the front page or the app is opened online. The files from the app's folder are
+stored when the app itself is opened online: a refresh from the front page fetches only the page. The copies are
+dropped when the switch is turned off. An app behind a [code lock](#code-lock) is never stored, and turning the lock
+on for an app deletes the copy on that device.
 
 ### Back to the front page
 

@@ -42,6 +42,39 @@ changes until you change the tag.
 back and `data/` is left alone, since new versions only ever add to the database. Restore the backup only if the
 new version did change your data: see [Restoring](BACKUP.md#restoring).
 
+## Going back to a version before v1.5.0
+
+From v1.5.0 the hub has a service worker (`/sw.js`) that keeps copies of the front page and of apps marked *Works
+offline* on each phone. Older versions have no `/sw.js`, but a 404 for it does not remove a worker a phone already
+has: the phone keeps the v1.5.0 worker and its copies, and can show them when the older hub is slow to answer.
+
+So before you go back, serve this worker from `/sw.js` for a while, long enough for the phones to open the hub once:
+
+```js
+// Retires the hub's service worker: deletes the hub's own copies (caches named hub-*), never an app's data, then
+// unregisters and reloads the pages it controlled
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil((async () => {
+  for (const name of await caches.keys()) if (name.startsWith("hub-")) await caches.delete(name);
+  await self.registration.unregister();
+  for (const client of await self.clients.matchAll({ type: "window" })) client.navigate(client.url);
+})()));
+```
+
+Save it as `sw-retire.js` next to `docker-compose.yml`, put it in place of the hub's worker in
+`docker-compose.override.yml`, and run `docker compose up -d`:
+
+```yaml
+services:
+  hub:
+    volumes:
+      - ./sw-retire.js:/srv/app/static/sw.js:ro
+```
+
+A phone that opens the hub then deletes the copies and drops the worker; it has no fetch handler, so nothing is
+answered from a copy meanwhile. An app's own data on the phone stays. Once the phones have been by, take the lines
+out again and go back as above.
+
 ## Switching login mode
 
 From magic links to passwords:
