@@ -1462,15 +1462,22 @@ async def _groups_body(request: Request, **fields: type | tuple) -> dict:
     """The JSON body of a groups route with each field present and of its type (`None` allowed where the type
     is a tuple with type(None)); 400 otherwise."""
     _require_json(request)
-    body = await request.json()
+    try:
+        body = await request.json()
+    except ValueError:  # malformed JSON (or not UTF-8)
+        raise HTTPException(400, "Send " + json.dumps({k: "..." for k in fields})) from None
     if not isinstance(body, dict) or not all(k in body and isinstance(body[k], t) for k, t in fields.items()):
         raise HTTPException(400, "Send " + json.dumps({k: "..." for k in fields}))
     return body
 
 
 def _groups_call(user: str, fn, *args) -> dict:
-    """Run a home.py groups change: 400 for a refused value, 404 for a group that is not there."""
+    """Run a home.py groups change: 400 for a refused value, 404 for a group that is not there.
+
+    All groups are one stored value, so the read-modify-write is one write transaction: a second change made at the
+    same moment waits for this one instead of overwriting it with what it read before."""
     with db() as con:
+        con.execute("BEGIN IMMEDIATE")  # sqlite3 begins no transaction of its own before this, so no clash
         try:
             fn(con, user, *args)
         except ValueError as e:

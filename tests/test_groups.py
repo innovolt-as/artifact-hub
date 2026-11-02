@@ -3,6 +3,8 @@ import json
 
 import pytest
 
+from tests.conftest import make_client
+
 PAGE = "<!doctype html><html><head><title>A</title></head><body>a</body></html>"
 X = "x@t.no"
 
@@ -390,3 +392,40 @@ def test_routes_leave_apps_pins_and_seen_alone(hub, user_client):
 def test_markup_in_a_name_is_stored_as_typed(hub, user_client):
     r = _post(user_client, "new", name='<b>x</b> "q" & co')
     assert r.json()["groups"][0]["name"] == '<b>x</b> "q" & co'
+
+
+def test_two_changes_at_the_same_moment_both_survive(hub, user_client, monkeypatch):
+    """A fold arrives while a drag-save is half done: it must wait, not be overwritten (one JSON value holds all groups)."""
+    import threading
+
+    user = "user@test.no"
+    with hub.db() as con:  # the test user's own groups
+        g1 = hub.home.create_group(con, user, "A")["id"]
+        g2 = hub.home.create_group(con, user, "B")["id"]
+    real, state = hub.home.get_groups, {"first": True, "waited": None}
+    other = threading.Thread(target=lambda: state.setdefault(
+        "status", make_client(user).post("/api/prefs/groups/open", json={"id": g2, "open": False}).status_code))
+
+    def get_groups(con, email):
+        groups = real(con, email)  # read by the drag-save...
+        if state["first"]:
+            state["first"] = False
+            other.start()  # ...then the fold is sent from another connection
+            other.join(1)
+            state["waited"] = other.is_alive()  # with the lock it is still waiting; without it, it has already written
+        return groups
+
+    monkeypatch.setattr(hub.home, "get_groups", get_groups)
+    r = _post(user_client, "order", order=[g2, g1])
+    other.join(10)
+    monkeypatch.undo()
+    assert r.status_code == 200 and state["status"] == 200 and state["waited"] is True
+    assert [(g["id"], g["open"]) for g in _groups(hub, user)] == [(g2, False), (g1, True)]
+
+
+def test_malformed_json_is_400_on_the_group_routes(hub, user_client):
+    for route in ("new", "rename", "delete", "app", "apps", "order", "open"):
+        r = user_client.post(f"/api/prefs/groups/{route}", content=b"{nope", headers={"content-type": "application/json"})
+        assert r.status_code == 400, route
+        r = user_client.post(f"/api/prefs/groups/{route}", content=b"\xff\xfe", headers={"content-type": "application/json"})
+        assert r.status_code == 400, route

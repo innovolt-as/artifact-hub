@@ -1,6 +1,6 @@
 """Front page data, per logged-in user: which apps they have chosen for it, which apps they have seen in the
-"Velg apper" list, which apps they open, what they pin, the groups they sort apps into, how they view the list, and the one-line summary each
-app can leave for its card.
+"Velg apper" list, which apps they open, what they pin, the groups they sort apps into, how they view the list, and the
+one-line summary each app can leave for its card.
 
 Everything takes an open connection from main.db() (rows as sqlite3.Row) and an e-mail; nothing here
 is shared between users, except the summary line of apps with shared data (app/shared.py).
