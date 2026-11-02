@@ -336,3 +336,20 @@ dialog { overscroll-behavior: contain; }
   #appSheet[open] { animation: sheet-up .24s cubic-bezier(.2, .8, .2, 1); }
 }
 @keyframes sheet-up { from { transform: translateY(100%); } }
+
+/* ---------------------------------------------------------------- the stored front page (home.js: layout C) */
+.offline-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 10px 3px 8px; border-radius: 999px; background: rgb(255 255 255 / .12); border: 1px solid rgb(255 255 255 / .18); color: #f3f6fb; }
+.offline-badge .d { width: 7px; height: 7px; border-radius: 50%; background: #f0a33a; }
+html[data-hub-offline="1"] .topbar nav,
+html[data-hub-offline="1"] .pin,
+html[data-hub-offline="1"] .more,
+html[data-hub-offline="1"] .addcard,
+html[data-hub-offline="1"] .viewtog,
+html[data-hub-offline="1"] #offline-no .summary { display: none; }
+#offline-ok, #offline-no { margin-bottom: 20px; }
+.offcap { margin: -4px 0 10px; font-size: 12.5px; color: var(--muted); }
+#offline-no .app { opacity: .45; }
+#offline-no .icon { filter: grayscale(1); }
+.hub-toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 40; max-width: calc(100vw - 32px); padding: 10px 16px; border-radius: 12px; background: #1d1c1a; color: #f3f6fb; font-size: 14px; box-shadow: 0 8px 24px rgb(0 0 0 / .3); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hub-toast { background: #ece9e2; color: #1d1c1a; } }
+:root[data-theme="dark"] .hub-toast { background: #ece9e2; color: #1d1c1a; }

@@ -87,6 +87,7 @@ def test_connector_create_app_offline(mcp, token, hub):  # noqa: F811
 # ---------------------------------------------------------------- what the service worker gets from the server
 import json  # noqa: E402
 import re  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 from tests.conftest import lock, make_client, unlock  # noqa: E402
 
@@ -249,3 +250,15 @@ def test_forwarded_navigation_gets_the_code_screen(hub):
 def test_sw_names_forwarded_navigations(client):
     js = client.get("/sw.js").text
     assert '"X-Hub-Dest"' in js and "req.destination" in js
+
+
+def test_offline_strings_reach_the_page(hub, admin_client):
+    _page(hub, "a", offline=True)
+    r = make_client(USER).get("/")
+    strings = json.loads(re.search(r'id="__hub_strings">(.*?)</script>', r.text, re.S).group(1))
+    for key in ("offline_badge", "offline_ok", "offline_no", "offline_back", "needs_net"):
+        assert strings[key]
+    assert "{app}" in strings["needs_net"]
+    css = (Path(__file__).parent.parent / "app" / "static" / "hub.css").read_text()
+    for sel in (".offline-badge", "#offline-no", ".hub-toast"):
+        assert sel in css

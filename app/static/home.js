@@ -56,7 +56,8 @@
   const pressView = (view) =>
     document.querySelectorAll("[data-set-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.setView === view)));
 
-  function apply(doc, quiet) {
+  // force: swap the whole #home, whatever is unchanged (the offline layout has moved the cards around)
+  function apply(doc, quiet, force = false) {
     const fresh = doc.getElementById("home");
     const next = snapshot(fresh);
     const redrawn = [...cardsOf(fresh)].filter(([k]) => shown.cards.get(k) !== next.cards.get(k)); // new here or changed
@@ -65,7 +66,7 @@
     const focused = document.activeElement;
     const focusLi = focused && home.contains(focused) ? focused.closest("li.app") : null;
     let swapped;
-    if (next.frame === shown.frame && redrawn.every(([k]) => live.has(k))) {
+    if (!force && next.frame === shown.frame && redrawn.every(([k]) => live.has(k))) {
       swapped = redrawn.map(([k, li]) => { // same layout: only the changed cards
         const n = document.importNode(li, true);
         live.get(k).replaceWith(n);
@@ -97,7 +98,10 @@
   }
 
   // Wait while a favourite is dragged, the pin menu is open or "Velg apper" is open; each of them sends hub:idle
-  const busy = () => !!(root.dataset.hubDrag || menu || picker.open);
+  // and, while offline, a finger on the screen
+  let touching = 0;
+  const offline = () => root.dataset.hubOffline === "1";
+  const busy = () => !!(root.dataset.hubDrag || menu || picker.open || (offline() && touching));
   const idle = () =>
     new Promise((resolve) => {
       if (!busy()) return resolve();
@@ -124,7 +128,9 @@
     if (!doc.getElementById("home")) return false; // e.g. the login page after the session ran out
     do { await idle(); } while (busy()); // don't move cards under a finger: something may have started while fetching
     try {
-      apply(doc, quiet);
+      const back = offline(); // the copy is showing and the server answered: draw the real page, without blinking
+      apply(doc, quiet || back, back);
+      if (back) leaveOffline();
     } catch (e) {
       console.error(e);
       return false;
@@ -144,7 +150,85 @@
 
   // Back on the page: from another tab or app, or from the browser's back/forward cache
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
-  addEventListener("pageshow", (e) => { if (e.persisted) refresh(); });
+  addEventListener("pageshow", (e) => { if (e.persisted || offline()) refresh(); });
+
+  // ------------------------------------------------------------ the stored front page (layout C)
+  // The service worker answers with its copy of this page and sets data-hub-offline on <html>. Only apps marked
+  // «Virker uten nett» and found in the cache can open, so they get a section of their own and the rest is greyed.
+  // Nothing here saves anything: the stars, the view toggle and «Velg apper» are hidden (hub.css) and guarded below.
+  let toast = null, toastTimer = null;
+  function showToast(text) {
+    toast?.remove();
+    clearTimeout(toastTimer);
+    toast = document.createElement("div");
+    toast.className = "hub-toast";
+    toast.setAttribute("role", "status");
+    toast.textContent = text;
+    document.body.append(toast);
+    toastTimer = setTimeout(() => { toast?.remove(); toast = null; }, 2500);
+  }
+  function leaveOffline() {
+    delete root.dataset.hubOffline;
+    document.querySelector(".offline-badge")?.remove();
+    clearTimeout(toastTimer);
+    toast?.remove();
+    toast = null;
+  }
+  async function enterOffline() {
+    const bar = document.querySelector(".topbar .hero-row");
+    if (bar) {
+      const badge = document.createElement("span");
+      badge.className = "offline-badge";
+      const dot = document.createElement("span");
+      dot.className = "d";
+      badge.append(dot, S.offline_badge);
+      bar.append(badge);
+    }
+    const apps = document.querySelector("#home .apps");
+    if (!apps) return;
+    const cards = ["fav", "top", "rest"].flatMap((id) => [...apps.querySelectorAll("#" + id + " li.app")]);
+    const marked = new Set(S.offline_apps || []);
+    const stored = await Promise.all(cards.map(async (li) => {
+      if (!marked.has(li.dataset.slug)) return false;
+      try { return !!(await caches.match("/a/" + li.dataset.slug + "/")); } catch { return false; }
+    }));
+    if (!offline() || !apps.isConnected) return; // the server answered meanwhile
+    const kind = apps.dataset.view === "icons" ? "grid" : "cards";
+    const section = (id, title, items, caption) => {
+      if (!items.length) return null;
+      const sec = document.createElement("section");
+      sec.id = id;
+      const h = document.createElement("h3");
+      h.className = "sec";
+      h.textContent = title;
+      const ul = document.createElement("ul");
+      ul.className = kind;
+      ul.append(...items);
+      sec.append(h);
+      if (caption) {
+        sec.className = "offsec";
+        const p = document.createElement("p");
+        p.className = "offcap";
+        p.textContent = caption;
+        sec.append(p);
+      }
+      sec.append(ul);
+      return sec;
+    };
+    const ok = section("offline-ok", S.offline_ok, cards.filter((_, i) => stored[i]));
+    const no = section("offline-no", S.offline_no, cards.filter((_, i) => !stored[i]), S.offline_back);
+    apps.querySelectorAll("#fav, #top, #rest").forEach((s) => s.remove());
+    apps.prepend(...[ok, no].filter(Boolean));
+  }
+  if (offline()) enterOffline().catch((e) => console.error(e));
+  addEventListener("online", () => { if (offline()) refresh(); });
+  setInterval(() => { if (offline() && !document.hidden) refresh(); }, 5000);
+  for (const ev of ["touchstart", "touchend", "touchcancel"]) {
+    document.addEventListener(ev, (e) => {
+      touching = e.touches.length;
+      if (!touching && offline()) document.dispatchEvent(new Event("hub:idle"));
+    }, { capture: true, passive: true });
+  }
 
   // The viewer's time zone decides "today" for the card lines; tell the hub when it differs. The page was just
   // drawn, so the refresh that follows doesn't blink.
@@ -214,6 +298,7 @@
     document.dispatchEvent(new Event("hub:idle"));
   }
   function openMenu(li, x, y) {
+    if (offline()) return;
     if (menu) menu.remove();
     menu = document.createElement("div");
     menu.className = "pinmenu";
@@ -245,13 +330,13 @@
     const li = at(e, ".grid .app");
     if (!li) return;
     e.preventDefault();
-    if (!root.dataset.hubDrag) openMenu(li, e.clientX, e.clientY);
+    if (!offline() && !root.dataset.hubDrag) openMenu(li, e.clientX, e.clientY);
   });
   document.addEventListener("touchstart", (e) => {
     swallow = null; // a long press sends no click, so clear it before the next tap
     clearTimeout(timer);
     const li = at(e, ".grid .app");
-    if (!li || li.closest("#fav") || e.touches.length !== 1) return;
+    if (!li || li.closest("#fav") || offline() || e.touches.length !== 1) return;
     const t = e.touches[0];
     timer = setTimeout(() => { swallow = li; openMenu(li, t.clientX, t.clientY); }, 500);
   }, { passive: true });
@@ -266,6 +351,14 @@
 
   document.addEventListener("click", (e) => {
     if (menu && !menu.contains(e.target)) closeMenu();
+    if (offline()) { // nothing saves offline; a grey card says why it does not open
+      const grey = at(e, "#offline-no .app a");
+      if (grey) {
+        e.preventDefault();
+        showToast(S.needs_net.replace("{app}", grey.closest(".app").querySelector("h2")?.textContent || ""));
+      }
+      return;
+    }
     const pin = at(e, ".pin");
     if (pin) {
       e.preventDefault();

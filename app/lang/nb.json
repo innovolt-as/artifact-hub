@@ -198,6 +198,11 @@
     "God ettermiddag",
     "God kveld"
   ],
+  "js.home.needs_net": "{app} trenger nett",
+  "js.home.offline_back": "Kommer tilbake som vanlig når du har nett.",
+  "js.home.offline_badge": "Uten nett",
+  "js.home.offline_no": "Trenger nett",
+  "js.home.offline_ok": "Virker uten nett",
   "js.home.pin": "Legg til i favoritter",
   "js.home.save_failed": "Kunne ikke lagre. Prøv igjen.",
   "js.home.unpin": "Fjern fra favoritter",
