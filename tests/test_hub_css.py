@@ -12,7 +12,7 @@ def rule(selector: str) -> str:
     return re.search(rf"^\s*{re.escape(selector)} \{{(.*?)\}}", CSS, re.M | re.S).group(1)
 
 
-@pytest.mark.parametrize("selector", [".sheet-in", "#picker ul", ".view", ".sheet .editor form"])
+@pytest.mark.parametrize("selector", [".sheet-in", "#picker .picklist", ".view", ".sheet .editor form"])
 def test_what_is_in_a_sheet_keeps_its_height(selector):
     # flex: 1 has a basis of 0, and on an iPhone the sheet then collapsed to its padding at the bottom of the screen
     assert "flex: 1 1 auto" in rule(selector)
@@ -31,3 +31,8 @@ def test_the_stylesheet_address_follows_its_content(client):
 def test_a_switch_shows_on_a_phone_without_color_mix():
     # Safari before 16.2 and Chrome before 111 drop the color-mix line, and the switch would have no track when off
     assert re.search(r"background: var\(--line\); background: color-mix", rule(".sw"))
+
+
+def test_a_hidden_list_stays_hidden():
+    # .grid and .cards set display: grid, which beats the hidden attribute of a closed group's list
+    assert "display: none" in rule(".apps ul[hidden]")

@@ -25,40 +25,63 @@ def _sections(hub, email, apps, now=NOW):
     with hub.db() as con:
         stats = hub.home.visit_stats(con, email, now=now)
         pins = hub.home.get_prefs(con, email)["pins"]
-    return hub.home.build_sections(apps, stats, pins)
+    with hub.db() as con:
+        groups = hub.home.get_groups(con, email)
+    return hub.home.build_sections(apps, stats, pins, groups)
 
 
 def _slugs(items):
     return [a["slug"] for a in items]
 
 
-def test_most_used_order_and_limit(hub):
-    for slug, n in {"a": 3, "b": 5, "c": 1, "d": 2, "e": 4}.items():
-        _visit(hub, "x@t.no", slug, n)
-    favs, top, rest = _sections(hub, "x@t.no", _apps("a", "b", "c", "d", "e"))
-    assert favs == [] and _slugs(top) == ["b", "e", "a", "d"]
-    assert _slugs(rest) == ["c"]
+def test_no_most_used(hub):
+    _visit(hub, "x@t.no", "b", 10)
+    favs, groups, rest = _sections(hub, "x@t.no", _apps("a", "b", "c"))
+    assert favs == [] and groups == [] and _slugs(rest) == ["a", "b", "c"]  # stats do not reorder or lift anything
 
 
-def test_favorites_do_not_take_most_used_slots(hub):
-    for slug, n in {"a": 3, "b": 5, "c": 1, "d": 2, "e": 4, "f": 6}.items():
-        _visit(hub, "x@t.no", slug, n)
+def test_sections_order(hub):
     with hub.db() as con:
-        for s in ["c", "f", "a"]:
-            hub.home.set_pin(con, "x@t.no", s, True)
-    favs, top, rest = _sections(hub, "x@t.no", _apps("a", "b", "c", "d", "e", "f", "g"))
-    assert _slugs(favs) == ["c", "f", "a"] and all(a["pinned"] for a in favs)
-    assert _slugs(top) == ["b", "e", "d"] and not any(a["pinned"] for a in top)
-    assert _slugs(rest) == ["g"]
+        g1 = hub.home.create_group(con, "x@t.no", "Jobb")["id"]
+        g2 = hub.home.create_group(con, "x@t.no", "Fritid")["id"]
+        for slug in ["d", "b"]:
+            hub.home.set_app_group(con, "x@t.no", slug, g1)
+        hub.home.set_app_group(con, "x@t.no", "a", g2)
+        hub.home.set_pin(con, "x@t.no", "e", True)
+        hub.home.set_pin(con, "x@t.no", "c", True)
+    favs, groups, rest = _sections(hub, "x@t.no", _apps("a", "b", "c", "d", "e", "f", "g"))
+    assert _slugs(favs) == ["e", "c"] and all(a["pinned"] for a in favs)
+    assert [(g["name"], _slugs(apps)) for g, apps in groups] == [("Jobb", ["d", "b"]), ("Fritid", ["a"])]
+    assert _slugs(rest) == ["f", "g"] and not any(a["pinned"] for a in rest)
+
+
+def test_pinned_only_in_favourites(hub):
+    with hub.db() as con:
+        g = hub.home.create_group(con, "x@t.no", "Jobb")["id"]
+        for slug in ["a", "b"]:
+            hub.home.set_app_group(con, "x@t.no", slug, g)
+        hub.home.set_pin(con, "x@t.no", "a", True)
+    favs, groups, rest = _sections(hub, "x@t.no", _apps("a", "b", "c"))
+    assert _slugs(favs) == ["a"] and _slugs(groups[0][1]) == ["b"] and _slugs(rest) == ["c"]
+
+
+def test_empty_group_hidden(hub):
+    with hub.db() as con:
+        hub.home.create_group(con, "x@t.no", "Tom")
+        h = hub.home.create_group(con, "x@t.no", "Bare fast")["id"]
+        hub.home.set_app_group(con, "x@t.no", "a", h)
+        hub.home.set_pin(con, "x@t.no", "a", True)
+    favs, groups, rest = _sections(hub, "x@t.no", _apps("a", "b"))
+    assert groups == [] and _slugs(favs) == ["a"] and _slugs(rest) == ["b"]
 
 
 def test_many_pins_all_shown(hub):
     with hub.db() as con:
         for s in ["e", "d", "c", "b", "a"]:
             hub.home.set_pin(con, "x@t.no", s, True)
-    favs, top, rest = _sections(hub, "x@t.no", _apps("a", "b", "c", "d", "e", "f"))
+    favs, groups, rest = _sections(hub, "x@t.no", _apps("a", "b", "c", "d", "e", "f"))
     assert _slugs(favs) == ["e", "d", "c", "b", "a"]
-    assert top == [] and _slugs(rest) == ["f"]
+    assert groups == [] and _slugs(rest) == ["f"]
 
 
 def test_old_visits_ignored_and_purged(hub):
@@ -69,13 +92,13 @@ def test_old_visits_ignored_and_purged(hub):
         hub.home.record_visit(con, "x@t.no", "c", now=NOW)
         rows = con.execute("SELECT slug FROM visits WHERE email=?", ("x@t.no",)).fetchall()
     assert sorted(r["slug"] for r in rows) == ["a", "c"]
-    _, top, _ = _sections(hub, "x@t.no", _apps("a", "b"))
-    assert top == []
+    favs, groups, rest = _sections(hub, "x@t.no", _apps("a", "b"))
+    assert favs == [] and groups == [] and _slugs(rest) == ["a", "b"]
 
 
-def test_no_visits_no_pins_hides_section(hub):
-    favs, top, rest = _sections(hub, "x@t.no", _apps("a", "b"))
-    assert favs == [] and top == [] and _slugs(rest) == ["a", "b"]
+def test_no_pins_no_groups_hides_sections(hub):
+    favs, groups, rest = _sections(hub, "x@t.no", _apps("a", "b"))
+    assert favs == [] and groups == [] and _slugs(rest) == ["a", "b"]
 
 
 def test_users_isolated(hub):
@@ -84,23 +107,26 @@ def test_users_isolated(hub):
         hub.home.set_pin(con, "x@t.no", "b", True)
         hub.home.set_view(con, "x@t.no", "cards")
         assert hub.home.get_prefs(con, "y@t.no") == {"view": "icons", "pins": [], "apps": [], "seen": None, "tz": None}
-    favs, top, _ = _sections(hub, "y@t.no", _apps("a", "b"))
-    assert favs == [] and top == []
+    favs, groups, _ = _sections(hub, "y@t.no", _apps("a", "b"))
+    assert favs == [] and groups == []
 
 
 def test_unknown_or_hidden_pin_skipped(hub):
     with hub.db() as con:
         hub.home.set_pin(con, "x@t.no", "finnes-ikke", True)
-    favs, top, rest = _sections(hub, "x@t.no", _apps("a"))
-    assert favs == [] and top == [] and _slugs(rest) == ["a"]
+    favs, groups, rest = _sections(hub, "x@t.no", _apps("a"))
+    assert favs == [] and groups == [] and _slugs(rest) == ["a"]
 
 
 def test_new_dot(hub):
     apps = _apps("a", "b", "c", updated=200)
     _visit(hub, "x@t.no", "a", at=100)
     _visit(hub, "x@t.no", "b", at=300)
-    favs, top, rest = _sections(hub, "x@t.no", apps, now=400)
-    flags = {a["slug"]: a["new"] for a in favs + top + rest}
+    with hub.db() as con:
+        g = hub.home.create_group(con, "x@t.no", "G")["id"]
+        hub.home.set_app_group(con, "x@t.no", "b", g)
+    favs, groups, rest = _sections(hub, "x@t.no", apps, now=400)
+    flags = {a["slug"]: a["new"] for a in favs + [a for _, grouped in groups for a in grouped] + rest}
     assert flags == {"a": True, "b": False, "c": False}
 
 
@@ -245,12 +271,11 @@ def _two_public_pages(hub):
 
 def test_index_sections(hub, user_client):
     _two_public_pages(hub)
+    _visit(hub, "user@test.no", "a", 10)
     html = user_client.get("/").text
-    assert 'id="top"' not in html and 'data-slug="a"' in _section(html, "rest")
-    _visit(hub, "user@test.no", "a")
-    html = user_client.get("/").text
-    assert 'data-slug="a"' in _section(html, "top") and 'data-slug="a"' not in _section(html, "rest")
-    assert 'data-slug="b"' in _section(html, "rest") and 'id="fav"' not in html
+    assert 'id="top"' not in html and "Mest brukt" not in html
+    assert 'data-slug="a"' in _section(html, "rest") and 'data-slug="b"' in _section(html, "rest")
+    assert 'id="fav"' not in html and 'class="sec"' not in _section(html, "rest")
 
 
 def test_index_favorites_section(hub, user_client):
@@ -261,8 +286,8 @@ def test_index_favorites_section(hub, user_client):
     html = user_client.get("/").text
     fav = _section(html, "fav")
     assert "Favoritter" in fav and 'data-slug="b"' in fav and 'data-slug="a"' not in fav
-    assert 'data-slug="a"' in _section(html, "top") and 'data-slug="b"' not in _section(html, "top")
-    assert html.index('id="fav"') < html.index('id="top"') < html.index('id="rest"')
+    assert 'data-slug="a"' in _section(html, "rest") and 'data-slug="b"' not in _section(html, "rest")
+    assert 'data-order="pins"' in fav and html.index('id="fav"') < html.index('id="rest"')
 
 
 def test_favorite_labels(hub, user_client):
@@ -311,8 +336,8 @@ def test_admin_page_header_unchanged(admin_client):
 
 def test_new_dot_ignores_same_second(hub):
     _visit(hub, "x@t.no", "a", at=200)
-    _, top, _ = _sections(hub, "x@t.no", [{"slug": "a", "title": "a", "updated": 200.7}], now=300)
-    assert top[0]["new"] is False
+    _, _, rest = _sections(hub, "x@t.no", [{"slug": "a", "title": "a", "updated": 200.7}], now=300)
+    assert rest[0]["new"] is False
 
 
 def test_manifest_served(hub, client):
@@ -364,13 +389,14 @@ def test_set_added_marks_seen(hub):
     assert sorted(_prefs(hub, "x@t.no")["seen"]) == ["a", "b"]
 
 
-def test_picker_puts_unseen_first(hub):
-    out = hub.home.picker(_apps("a", "b", "c", "d"), ["b"], ["a", "b"])
-    assert _slugs(out) == ["c", "d", "a", "b"]
-    assert [a["unseen"] for a in out] == [True, True, False, False]
-    assert [a["added"] for a in out] == [False, False, False, True]
-    assert not any(a["unseen"] for a in hub.home.picker(_apps("a", "b"), [], None))
-    assert not hub.home.picker(_apps("a"), ["a"], [])[0]["unseen"]
+def test_picker_marks_added_and_unseen(hub):
+    rows = lambda out: [a for _, apps in out for a in apps]  # noqa: E731
+    out = rows(hub.home.picker(_apps("a", "b", "c", "d"), ["b"], ["a", "b"], []))
+    assert _slugs(out) == ["a", "b", "c", "d"]  # the new ones keep their place (tests/test_groups.py: grouped)
+    assert [a["unseen"] for a in out] == [False, False, True, True]
+    assert [a["added"] for a in out] == [False, True, False, False]
+    assert not any(a["unseen"] for a in rows(hub.home.picker(_apps("a", "b"), [], None, [])))
+    assert not rows(hub.home.picker(_apps("a"), ["a"], [], []))[0]["unseen"]
 
 
 def test_add_for_only_users_with_choices(hub):
@@ -455,7 +481,7 @@ def test_new_address_keeps_app_on_front_page(hub, make_page, admin_client, user_
     assert 'data-slug="a2"' in _section(user_client.get("/").text, "rest")
 
 
-# ---------------------------------------------------------------- the "Velg apper" list on the front page
+# ---------------------------------------------------------------- the «Ordne apper» sheet on the front page
 def _picker(html):
     return html[html.find('id="picker"'):html.find("</dialog>")]
 
@@ -466,7 +492,7 @@ def test_empty_front_page_shows_add_card(hub, make_page, user_client):
     assert 'class="addcard"' in html and "Legg til apper" in html and "Velg hvilke apper du vil ha på forsiden din" in html
     assert "Ingen apper ennå" not in html and 'class="more"' not in html
     p = _picker(html)
-    assert "Velg apper" in p and 'data-slug="a"' in p and "Alfa" in p and "checked" not in p
+    assert "Ordne apper" in p and 'data-slug="a"' in p and "Alfa" in p and "checked" not in p
 
 
 def test_after_choosing_small_button_and_checked(hub, make_page, user_client):
@@ -474,17 +500,17 @@ def test_after_choosing_small_button_and_checked(hub, make_page, user_client):
     make_page("b", title="Beta")
     user_client.post("/api/prefs/apps", json={"slug": "a", "added": True})
     html = user_client.get("/").text
-    assert 'class="more"' in html and "Legg til eller fjern apper" in html and 'class="addcard"' not in html
+    assert 'class="more"' in html and "＋ Ordne apper" in html and 'class="addcard"' not in html
     assert re.search(r'data-slug="a"[^>]*checked', _picker(html)) and not re.search(r'data-slug="b"[^>]*checked', _picker(html))
 
 
-def test_new_apps_first_with_dot_until_seen(hub, make_page, user_client):
+def test_new_apps_marked_with_dot_until_seen(hub, make_page, user_client):
     make_page("a", title="Alfa")
     user_client.post("/api/prefs/apps", json={"slug": "a", "added": True})
     make_page("b", title="Beta")
     html = user_client.get("/").text
     p = _picker(html)
-    assert p.index('data-slug="b"') < p.index('data-slug="a"') and p.count(">Ny<") == 1
+    assert p.index('data-slug="a"') < p.index('data-slug="b"') and p.count(">Ny<") == 1  # alphabetical, not lifted
     more = html[html.find('class="more"'):]
     assert 'class="dot"' in more[:more.find("</button>")]
     user_client.post("/api/prefs/seen", json={})

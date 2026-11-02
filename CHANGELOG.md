@@ -1,6 +1,28 @@
 # Changelog
 
-## v1.5.1 (2026-11-02)
+## v1.6.0 (unreleased)
+
+### Before you upgrade
+
+- A hub left open as a home-screen app keeps the old scripts until it is reloaded, so groups can look wrong offline
+  until then. After upgrading, close the home-screen app and open it again once.
+
+### New
+
+- Everyone can make their own groups on the front page. *Arrange apps* (formerly *Choose apps*, opened by *＋ Add or remove apps*)
+  is where you tick the apps you want, choose a group for each, and make, rename and delete groups. The front page shows
+  *Favourites* first, then your groups in your order, then *Other* with the apps that are in no group (*All apps* while
+  you have no groups). A group folds up and opens again when you tap its heading or its row of icons, and the hub
+  remembers it on your account. Hold an app and drag it to reorder inside favourites or a group; hold a heading to
+  move the group. Groups are yours alone: other people do not see them. Deleting a group sends its apps to *Other*.
+  You can have up to 30 groups.
+
+### Changed
+
+- *Most used* is gone from the front page, replaced by groups. An app you have put in favourites shows only there, not
+  also in its group. The offline front page from v1.5.0 looks and works as before.
+- The sheet no longer lists new apps first: a new app sits under *No group* in alphabetical order, and is still marked
+  *New*.
 
 ### Fixed
 

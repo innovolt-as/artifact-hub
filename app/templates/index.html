@@ -21,6 +21,27 @@
 </li>
 {%- endmacro %}
 
+{# «Arrange apps»: one app (tick, icon, name, the button with its group) and a group's heading, whose empty copy in
+   <template id="pgroupNew"> home.js fills for a group it adds #}
+{% macro pick_row(a, g) -%}
+<li data-slug="{{ a.slug }}" data-sort="{{ a.sort }}"><label>
+  <input type="checkbox" data-slug="{{ a.slug }}"{% if a.added %} checked{% endif %}>
+  <span class="tick" aria-hidden="true"></span>
+  {{ icon(a) }}
+  <span class="txt">
+    <b>{{ a.title }}{% if a.unseen %} <span class="new">{{ t("home.new") }}</span>{% endif %}{% if a.admin_only %} <span class="lockmark" title="{{ t('home.admin_only') }}">🔒</span>{% endif %}</b>
+    {% if a.description %}<small>{{ a.description }}</small>{% endif %}
+  </span>
+</label><button type="button" class="gpick" aria-haspopup="menu" aria-expanded="false" aria-label="{{ a.title }}: {{ g.name if g else t('js.home.group_pick') }}"><span class="gchip">{{ g.name if g else t("js.home.group_pick") }}</span></button></li>
+{%- endmacro %}
+
+{% macro pick_head(g) -%}
+<div class="gh"><h2>{{ g.name if g }}</h2>
+  <button type="button" class="grename"{% if g %} aria-label="{{ t('js.home.group_rename') }}: {{ g.name }}" title="{{ t('js.home.group_rename') }}"{% endif %}><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg></button>
+  <button type="button" class="gdelete"{% if g %} aria-label="{{ t('js.home.group_delete') }}: {{ g.name }}" title="{{ t('js.home.group_delete') }}"{% endif %}><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg></button>
+</div>
+{%- endmacro %}
+
 {% block topbar %}
 <div class="topbar">
   <div class="hero-in hero-row">
@@ -58,7 +79,7 @@
 {% block body %}
 <div id="home">
 {% if notice %}<p class="notice muted">{{ notice }}</p>{% endif %}
-{% if not favs and not top and not rest %}
+{% if not favs and not groups and not rest %}
   <button type="button" class="addcard" data-open-picker>
     <span class="plus" aria-hidden="true">+</span>
     <b>{{ t("home.add_apps") }}</b>
@@ -67,23 +88,24 @@
 {% else %}
 <div class="apps" data-view="{{ view }}">
   {% if favs %}
-  <section id="fav">
+  <section id="fav" data-order="pins">
     <h3 class="sec">{{ t("home.favorites") }}</h3>
     <ul class="{{ 'grid top4' if view == 'icons' else 'cards' }}">
       {% for a in favs %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
   </section>
   {% endif %}
-  {% if top %}
-  <section id="top">
-    <h3 class="sec">{{ t("home.top") }} <span>{{ t("home.top_for_you") }}</span></h3>
-    <ul class="{{ 'grid top4' if view == 'icons' else 'cards' }}">
-      {% for a in top %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
+  {% for g, members in groups %}
+  <section id="g-{{ g.id }}" class="group" data-group="{{ g.id }}" data-order="group" data-open="{{ '1' if g.open else '0' }}">
+    <h3 class="sec"><button type="button" class="gtoggle" aria-expanded="{{ 'true' if g.open else 'false' }}" data-label="{{ t('home.group_toggle', name=g.name) }}">{{ g.name }}<span class="gcount">· {{ members|length }}</span><span class="chev"></span></button></h3>
+    <ul class="{{ 'grid' if view == 'icons' else 'cards' }}"{% if not g.open %} hidden{% endif %}>
+      {% for a in members %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
+    {% if not g.open %}<button type="button" class="gclosed" aria-expanded="false" aria-label="{{ t('home.group_toggle', name=g.name) }}">{% for a in members %}{{ icon(a, "icon icon-xs", true) }}{% endfor %}</button>{% endif %}
   </section>
-  {% endif %}
+  {% endfor %}
   <section id="rest">
-    {% if favs or top %}<h3 class="sec">{{ t("home.all") }}</h3>{% endif %}
+    {% if rest and (favs or has_groups) %}<h3 class="sec">{{ t("home.other") if has_groups else t("home.all") }}</h3>{% endif %}
     <ul class="{{ 'grid' if view == 'icons' else 'cards' }}">
       {% for a in rest %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
@@ -99,25 +121,29 @@
       <h1 id="pickerTitle" tabindex="-1" autofocus>{{ t("home.picker_title") }}</h1>
       <p>{{ t("home.picker_hint") }}</p>
     </header>
-    {% if available %}
-    <ul>
-      {% for a in available %}
-      <li><label>
-        <input type="checkbox" data-slug="{{ a.slug }}"{% if a.added %} checked{% endif %}>
-        {{ icon(a) }}
-        <span class="txt">
-          <b>{{ a.title }}{% if a.unseen %} <span class="new">{{ t("home.new") }}</span>{% endif %}{% if a.admin_only %} <span class="lockmark" title="{{ t('home.admin_only') }}">🔒</span>{% endif %}</b>
-          {% if a.description %}<small>{{ a.description }}</small>{% endif %}
-        </span>
-        <span class="tick" aria-hidden="true"></span>
-      </label></li>
+    {% if any_apps %}
+    <div class="picklist">
+      {% for g, rows in available %}
+      {% if g %}
+      <section class="pgroup" data-gid="{{ g.id }}">
+        {{ pick_head(g) }}
+        <ul>{% for a in rows %}{{ pick_row(a, g) }}{% endfor %}</ul>
+      </section>
+      {% else %}
+      <section class="pgroup" data-gid=""{% if has_groups and not rows %} hidden{% endif %}>
+        <div class="gh"{% if not has_groups %} hidden{% endif %}><h2>{{ t("home.no_group") }}</h2></div>
+        <ul>{% for a in rows %}{{ pick_row(a, none) }}{% endfor %}</ul>
+      </section>
+      {% endif %}
       {% endfor %}
-    </ul>
+      <button type="button" class="gnew"><span aria-hidden="true">＋</span> {{ t("js.home.group_new") }}</button>
+    </div>
     {% else %}
     <p class="none">{{ t("home.none") }}</p>
     {% endif %}
     <footer><button type="button" class="primary" data-close>{{ t("home.done") }}</button></footer>
   </div>
+  <template id="pgroupNew"><section class="pgroup" data-gid="">{{ pick_head(none) }}<ul></ul></section></template>
 </dialog>
 <script type="application/json" id="__hub_strings">{{ js_strings|tojson }}</script>
 <script src="/static/home.js" defer></script>

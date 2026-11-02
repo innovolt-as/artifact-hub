@@ -769,6 +769,7 @@ def index(request: Request, user: str = Depends(require_user)):
         prefs = home.get_prefs(con, user)
         mine = [a for a in apps if a["slug"] in prefs["apps"]]  # only the apps this user has chosen
         stats = home.visit_stats(con, user)
+        user_groups = home.get_groups(con, user)
         locked = applock.locked_slugs(con, user)
     for a in apps:
         a["code_locked"] = a["slug"] in locked
@@ -776,14 +777,14 @@ def index(request: Request, user: str = Depends(require_user)):
     if prefs["view"] == "cards":
         with db() as con:  # a new connection: the recipes read through doc_get/doc_list, which open their own
             summaries = card_lines(con, user, mine, prefs["tz"])
-    favs, top, rest = home.build_sections(mine, stats, prefs["pins"])
-    available = home.picker(apps, prefs["apps"], prefs["seen"])
+    favs, groups, rest = home.build_sections(mine, stats, prefs["pins"], user_groups)
+    available = home.picker(apps, prefs["apps"], prefs["seen"], user_groups)
     now = time.localtime()  # fallback only; the page rewrites the date and greeting with the viewer's clock
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "top": top, "rest": rest,
-         "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
+        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "groups": groups, "has_groups": bool(user_groups), "rest": rest,
+         "available": available, "any_apps": bool(apps), "has_new": any(a["unseen"] for a in apps), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
          "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale"), "tz": prefs["tz"] or "",
                        "offline_apps": [a["slug"] for a in apps if a["offline"] and a["kind"] != "link" and a["slug"] not in locked]}},
     )
@@ -1458,9 +1459,100 @@ async def prefs_apps(request: Request, user: str = Depends(api_user)):
     return {"ok": True, "apps": apps}
 
 
+async def _groups_body(request: Request, **fields: type | tuple) -> dict:
+    """The JSON body of a groups route with each field present and of its type (`None` allowed where the type
+    is a tuple with type(None)); 400 otherwise."""
+    _require_json(request)
+    try:
+        body = await request.json()
+    except ValueError:  # malformed JSON (or not UTF-8)
+        raise HTTPException(400, "Send " + json.dumps({k: "..." for k in fields})) from None
+    if not isinstance(body, dict) or not all(k in body and isinstance(body[k], t) for k, t in fields.items()):
+        raise HTTPException(400, "Send " + json.dumps({k: "..." for k in fields}))
+    return body
+
+
+def _groups_call(user: str, fn, *args) -> dict:
+    """Run a home.py groups change: 400 for a refused value, 404 for a group that is not there.
+
+    All groups are one stored value, so the read-modify-write is one write transaction: a second change made at the
+    same moment waits for this one instead of overwriting it with what it read before."""
+    with db() as con:
+        con.execute("BEGIN IMMEDIATE")  # sqlite3 begins no transaction of its own before this, so no clash
+        try:
+            fn(con, user, *args)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        except KeyError:
+            raise HTTPException(404) from None
+        return {"ok": True, "groups": home.get_groups(con, user)}
+
+
+def _require_visible(user: str, slug: str) -> None:
+    if slug not in {a["slug"] for a in list_artifacts(user)}:
+        raise HTTPException(404)
+
+
+@app.post("/api/prefs/groups/new")
+async def prefs_groups_new(request: Request, user: str = Depends(api_user)):
+    """A new group last in the user's list; with `slug`, that app moves into it."""
+    body = await _groups_body(request, name=str)
+    slug = body.get("slug")
+    if slug is not None:
+        if not isinstance(slug, str):
+            raise HTTPException(400, 'Send {"name": "...", "slug": "..."}')
+        _require_visible(user, slug)
+    return _groups_call(user, home.create_group, body["name"], slug)
+
+
+@app.post("/api/prefs/groups/rename")
+async def prefs_groups_rename(request: Request, user: str = Depends(api_user)):
+    body = await _groups_body(request, id=str, name=str)
+    return _groups_call(user, home.rename_group, body["id"], body["name"])
+
+
+@app.post("/api/prefs/groups/delete")
+async def prefs_groups_delete(request: Request, user: str = Depends(api_user)):
+    body = await _groups_body(request, id=str)
+    return _groups_call(user, home.delete_group, body["id"])
+
+
+@app.post("/api/prefs/groups/app")
+async def prefs_groups_app(request: Request, user: str = Depends(api_user)):
+    """Put an app last in a group, or (id null) out of its group."""
+    body = await _groups_body(request, slug=str, id=(str, type(None)))
+    _require_visible(user, body["slug"])
+    return _groups_call(user, home.set_app_group, body["slug"], body["id"])
+
+
+@app.post("/api/prefs/groups/apps")
+async def prefs_groups_apps(request: Request, user: str = Depends(api_user)):
+    """Save the order of the apps in one group."""
+    body = await _groups_body(request, id=str, order=list)
+    if not all(isinstance(s, str) for s in body["order"]):
+        raise HTTPException(400, 'Send {"id": "...", "order": ["slug", ...]}')
+    return _groups_call(user, home.set_group_apps, body["id"], body["order"])
+
+
+@app.post("/api/prefs/groups/order")
+async def prefs_groups_order(request: Request, user: str = Depends(api_user)):
+    """Save the order of the user's groups."""
+    body = await _groups_body(request, order=list)
+    if not all(isinstance(s, str) for s in body["order"]):
+        raise HTTPException(400, 'Send {"order": ["id", ...]}')
+    return _groups_call(user, home.set_group_order, body["order"])
+
+
+@app.post("/api/prefs/groups/open")
+async def prefs_groups_open(request: Request, user: str = Depends(api_user)):
+    """Fold a group or open it."""
+    body = await _groups_body(request, id=str, open=bool)
+    return _groups_call(user, home.set_group_open, body["id"], body["open"])
+
+
 @app.post("/api/prefs/seen")
 def prefs_seen(request: Request, user: str = Depends(api_user)):
-    """The user opened the "Choose apps" list: nothing in it is new any more."""
+    """The user opened the «Arrange apps» list: nothing in it is new any more."""
     _require_json(request)
     with db() as con:
         home.mark_seen(con, user, [a["slug"] for a in list_artifacts(user)])

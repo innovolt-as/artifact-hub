@@ -1,6 +1,6 @@
 """Front page data, per logged-in user: which apps they have chosen for it, which apps they have seen in the
-"Velg apper" list, which apps they open, what they pin, how they view the list, and the one-line summary each
-app can leave for its card.
+«Arrange apps» list, which apps they open, what they pin, the groups they sort apps into, how they view the list, and the
+one-line summary each app can leave for its card.
 
 Everything takes an open connection from main.db() (rows as sqlite3.Row) and an e-mail; nothing here
 is shared between users, except the summary line of apps with shared data (app/shared.py).
@@ -8,6 +8,7 @@ is shared between users, except the summary line of apps with shared data (app/s
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 import time
 from typing import NamedTuple
@@ -17,12 +18,13 @@ from app import i18n
 from app.shared import SHARED
 
 DAY = 86400
-MOST_USED_DAYS = 30    # what counts towards "Mest brukt"
+MOST_USED_DAYS = 30    # the window of visit_stats (opens in the last 30 days)
 KEEP_DAYS = 90         # visits older than this are deleted
 REVISIT_GAP = 600      # opening the same app again within 10 minutes (reloads) is not a new visit
-MOST_USED_MAX = 4
 STATS_DAYS = 7         # the admin statistics cover the last week
 SUMMARY_MAX = 140
+GROUP_NAME_MAX = 40    # characters in a group name, after trimming
+GROUPS_MAX = 30        # groups per user
 VIEWS = ("icons", "cards")
 THEMES = ("auto", "light", "dark")
 SUMMARY_DOC = ("hub", "summary")      # db.doc("hub/summary") in apps using window.claude.use("db")
@@ -206,22 +208,175 @@ def add_for(con: sqlite3.Connection, emails, slug: str) -> None:
 
 
 def rename(con: sqlite3.Connection, old: str, new: str) -> None:
-    """An app got a new address: it stays chosen, pinned and seen for everyone."""
+    """An app got a new address: it stays chosen, pinned, seen and in its group for everyone."""
     for row in con.execute("SELECT email, key, value FROM prefs WHERE key IN ('apps', 'seen', 'pins')").fetchall():
         value = json.loads(row["value"])
         if isinstance(value, list) and old in value:
             _put(con, row["email"], row["key"], [new if s == old else s for s in value if s != new])
+    for row in con.execute("SELECT email FROM prefs WHERE key='groups'").fetchall():
+        groups = get_groups(con, row["email"])
+        if any(old in g["slugs"] for g in groups):
+            for g in groups:
+                g["slugs"] = [new if s == old else s for s in g["slugs"] if s != new]
+            _put(con, row["email"], "groups", groups)
 
 
-def picker(apps: list[dict], chosen: list[str], seen: list[str] | None) -> list[dict]:
-    """The "Velg apper" list: marks each app added/unseen; unseen first, each group in the given order.
+# ---------------------------------------------------------------- groups
+# Stored whole under the prefs key "groups": [{"id", "name", "slugs", "open"}], in the order shown. Every change
+# re-reads and cleans the stored list first, so an order or move saved from a stale page only touches what is
+# still there: apps that moved to another group stay put, and a deleted group does not come back.
+def get_groups(con: sqlite3.Connection, email: str) -> list[dict]:
+    """The user's groups, each {"id", "name", "slugs", "open"}. Entries that are not well-formed and repeated ids
+    are dropped; an app stays only in the first group that has it."""
+    try:
+        stored = _get(con, email, "groups", [])
+    except ValueError:  # the stored text is not JSON
+        return []
+    groups: list[dict] = []
+    ids: set[str] = set()
+    taken: set[str] = set()
+    for g in stored if isinstance(stored, list) else []:
+        if not isinstance(g, dict) or not isinstance(g.get("id"), str) or not g["id"] or g["id"] in ids:
+            continue
+        if not isinstance(g.get("name"), str) or not g["name"].strip():
+            continue
+        ids.add(g["id"])
+        slugs = [s for s in dict.fromkeys(_slugs(g.get("slugs"))) if s not in taken]
+        taken.update(slugs)
+        groups.append({"id": g["id"], "name": g["name"].strip(), "slugs": slugs,
+                       "open": g["open"] if isinstance(g.get("open"), bool) else True})
+    return groups
+
+
+def _find(groups: list[dict], gid: str) -> dict:
+    for g in groups:
+        if g["id"] == gid:
+            return g
+    raise KeyError(gid)
+
+
+def _group_name(name: object, others: list[dict]) -> str:
+    """`name` trimmed; ValueError unless it is 1-40 characters and no other group has it (ignoring case)."""
+    clean = name.strip() if isinstance(name, str) else ""
+    if not 1 <= len(clean) <= GROUP_NAME_MAX:
+        raise ValueError(i18n.t("err.group_name"))
+    if any(g["name"].casefold() == clean.casefold() for g in others):
+        raise ValueError(i18n.t("err.group_taken", name=clean))
+    return clean
+
+
+def _take_out(groups: list[dict], slug: str) -> None:
+    for g in groups:
+        g["slugs"] = [s for s in g["slugs"] if s != slug]
+
+
+def create_group(con: sqlite3.Connection, email: str, name: str, slug: str | None = None) -> dict:
+    """A new open group last in the list; with `slug`, that app moves into it."""
+    groups = get_groups(con, email)
+    clean = _group_name(name, groups)
+    if len(groups) >= GROUPS_MAX:
+        raise ValueError(i18n.t("err.group_max"))
+    group = {"id": secrets.token_hex(4), "name": clean, "slugs": [], "open": True}
+    while any(g["id"] == group["id"] for g in groups):  # 32 bits: a clash is unlikely, but cheap to rule out
+        group["id"] = secrets.token_hex(4)
+    if slug is not None:
+        _take_out(groups, slug)
+        group["slugs"].append(slug)
+    groups.append(group)
+    _put(con, email, "groups", groups)
+    return group
+
+
+def rename_group(con: sqlite3.Connection, email: str, gid: str, name: str) -> dict:
+    groups = get_groups(con, email)
+    group = _find(groups, gid)
+    group["name"] = _group_name(name, [g for g in groups if g is not group])
+    _put(con, email, "groups", groups)
+    return group
+
+
+def delete_group(con: sqlite3.Connection, email: str, gid: str) -> None:
+    """Its apps have no group afterwards."""
+    groups = get_groups(con, email)
+    _find(groups, gid)
+    _put(con, email, "groups", [g for g in groups if g["id"] != gid])
+
+
+def set_app_group(con: sqlite3.Connection, email: str, slug: str, gid: str | None) -> None:
+    """Take the app out of any group; unless `gid` is None, put it last in that group."""
+    groups = get_groups(con, email)
+    target = _find(groups, gid) if gid is not None else None
+    _take_out(groups, slug)
+    if target is not None:
+        target["slugs"].append(slug)
+    _put(con, email, "groups", groups)
+
+
+def _merge(old: list[str], order: list[str]) -> list[str]:
+    """`old` reordered by `order`: the items of `order` that are in `old` (no duplicates, anything else ignored), in
+    that order, and each item `order` left out right after the one it followed in `old` (the nearest one `order`
+    has), or first when none came before it. The page sends only what it shows (no pinned apps, no empty groups), and
+    a drop there must not move what it doesn't show to the end."""
+    shown = [s for s in dict.fromkeys(order) if s in old]
+    after: dict[str | None, list[str]] = {}
+    anchor = None
+    for s in old:
+        if s in shown:
+            anchor = s
+        else:
+            after.setdefault(anchor, []).append(s)
+    out = list(after.get(None, []))
+    for s in shown:
+        out += [s, *after.get(s, [])]
+    return out
+
+
+def set_group_apps(con: sqlite3.Connection, email: str, gid: str, order: list[str]) -> list[str]:
+    """Reorder one group (_merge): slugs not in this group are ignored, even if the page still thinks they are."""
+    groups = get_groups(con, email)
+    group = _find(groups, gid)
+    group["slugs"] = _merge(group["slugs"], order)
+    _put(con, email, "groups", groups)
+    return group["slugs"]
+
+
+def set_group_order(con: sqlite3.Connection, email: str, order: list[str]) -> list[str]:
+    """Reorder the groups by id (_merge): ids that are gone are ignored, none is brought back."""
+    groups = get_groups(con, email)
+    by_id = {g["id"]: g for g in groups}
+    ids = _merge([g["id"] for g in groups], order)
+    _put(con, email, "groups", [by_id[i] for i in ids])
+    return ids
+
+
+def set_group_open(con: sqlite3.Connection, email: str, gid: str, open: bool) -> None:
+    groups = get_groups(con, email)
+    _find(groups, gid)["open"] = open
+    _put(con, email, "groups", groups)
+
+
+def picker(
+    apps: list[dict], chosen: list[str], seen: list[str] | None, groups: list[dict]
+) -> list[tuple[dict | None, list[dict]]]:
+    """The «Arrange apps» list: (group, its apps) for each group in order, empty ones too, holding the apps in `apps`
+    in the group's order; then (None, the apps in no group) in the order given (list_artifacts sorts by title). Every
+    app is listed once, pinned or not. Marks each app added/unseen and its place in `apps` (sort, for the page).
 
     Unseen = came after the user last opened the list. Before the first opening nothing is unseen, and an
     app on the front page always counts as seen."""
-    for a in apps:
+    by_slug = {a["slug"]: a for a in apps}
+    for i, a in enumerate(apps):
         a["added"] = a["slug"] in chosen
         a["unseen"] = seen is not None and not a["added"] and a["slug"] not in seen
-    return [a for a in apps if a["unseen"]] + [a for a in apps if not a["unseen"]]
+        a["sort"] = i
+    out: list[tuple[dict | None, list[dict]]] = []
+    listed: set[str] = set()
+    for g in groups:
+        members = [by_slug[s] for s in g["slugs"] if s in by_slug and s not in listed]
+        listed.update(a["slug"] for a in members)
+        out.append((g, members))
+    out.append((None, [a for a in apps if a["slug"] not in listed]))
+    return out
 
 
 # ---------------------------------------------------------------- summaries
@@ -274,11 +429,14 @@ def summaries(con: sqlite3.Connection, email: str, slugs: list[str], shared: set
 
 
 # ---------------------------------------------------------------- sections
-def build_sections(apps: list[dict], stats: dict, pins: list[str]) -> tuple[list[dict], list[dict], list[dict]]:
-    """Split the visible apps into "Favoritter", "Mest brukt" and the rest; marks each with pinned/new.
+def build_sections(
+    apps: list[dict], stats: dict, pins: list[str], groups: list[dict]
+) -> tuple[list[dict], list[tuple[dict, list[dict]]], list[dict]]:
+    """Split the visible apps into "Favoritter", the user's groups and the rest; marks each with pinned/new.
 
-    Favoritter: every pinned app, in pin order. Mest brukt: the four most opened in the last 30 days
-    (ties: latest open) that are not favourites. Each app appears once.
+    Favoritter: every pinned app, in pin order. Then (group, apps) for each group in order, holding its
+    unpinned apps that are on the page, in the group's order; a group with none is left out. Then the rest,
+    in the order given. Each app appears once; slugs that are not in `apps` (deleted, no longer visible) are skipped.
     """
     by_slug = {a["slug"]: a for a in apps}
     for a in apps:
@@ -286,9 +444,11 @@ def build_sections(apps: list[dict], stats: dict, pins: list[str]) -> tuple[list
         a["pinned"] = a["slug"] in pins
         a["new"] = bool(seen) and seen["last"] < int(a["updated"])  # visits are whole seconds, mtimes are not
     favs = [by_slug[p] for p in pins if p in by_slug]
-    top = sorted(
-        (a for a in apps if not a["pinned"] and stats.get(a["slug"], {}).get("count")),
-        key=lambda a: (-stats[a["slug"]]["count"], -stats[a["slug"]]["last"]),
-    )[:MOST_USED_MAX]
-    shown = {a["slug"] for a in favs + top}
-    return favs, top, [a for a in apps if a["slug"] not in shown]
+    shown = {a["slug"] for a in favs}
+    grouped: list[tuple[dict, list[dict]]] = []
+    for g in groups:
+        members = [by_slug[s] for s in g["slugs"] if s in by_slug and s not in shown]
+        shown.update(a["slug"] for a in members)
+        if members:
+            grouped.append((g, members))
+    return favs, grouped, [a for a in apps if a["slug"] not in shown]
