@@ -18,10 +18,9 @@ from app import i18n
 from app.shared import SHARED
 
 DAY = 86400
-MOST_USED_DAYS = 30    # what counts towards "Mest brukt"
+MOST_USED_DAYS = 30    # the window of visit_stats (opens in the last 30 days)
 KEEP_DAYS = 90         # visits older than this are deleted
 REVISIT_GAP = 600      # opening the same app again within 10 minutes (reloads) is not a new visit
-MOST_USED_MAX = 4
 STATS_DAYS = 7         # the admin statistics cover the last week
 SUMMARY_MAX = 140
 GROUP_NAME_MAX = 40    # characters in a group name, after trimming
@@ -402,11 +401,14 @@ def summaries(con: sqlite3.Connection, email: str, slugs: list[str], shared: set
 
 
 # ---------------------------------------------------------------- sections
-def build_sections(apps: list[dict], stats: dict, pins: list[str]) -> tuple[list[dict], list[dict], list[dict]]:
-    """Split the visible apps into "Favoritter", "Mest brukt" and the rest; marks each with pinned/new.
+def build_sections(
+    apps: list[dict], stats: dict, pins: list[str], groups: list[dict]
+) -> tuple[list[dict], list[tuple[dict, list[dict]]], list[dict]]:
+    """Split the visible apps into "Favoritter", the user's groups and the rest; marks each with pinned/new.
 
-    Favoritter: every pinned app, in pin order. Mest brukt: the four most opened in the last 30 days
-    (ties: latest open) that are not favourites. Each app appears once.
+    Favoritter: every pinned app, in pin order. Then (group, apps) for each group in order, holding its
+    unpinned apps that are on the page, in the group's order; a group with none is left out. Then the rest,
+    in the order given. Each app appears once; slugs that are not in `apps` (deleted, no longer visible) are skipped.
     """
     by_slug = {a["slug"]: a for a in apps}
     for a in apps:
@@ -414,9 +416,11 @@ def build_sections(apps: list[dict], stats: dict, pins: list[str]) -> tuple[list
         a["pinned"] = a["slug"] in pins
         a["new"] = bool(seen) and seen["last"] < int(a["updated"])  # visits are whole seconds, mtimes are not
     favs = [by_slug[p] for p in pins if p in by_slug]
-    top = sorted(
-        (a for a in apps if not a["pinned"] and stats.get(a["slug"], {}).get("count")),
-        key=lambda a: (-stats[a["slug"]]["count"], -stats[a["slug"]]["last"]),
-    )[:MOST_USED_MAX]
-    shown = {a["slug"] for a in favs + top}
-    return favs, top, [a for a in apps if a["slug"] not in shown]
+    shown = {a["slug"] for a in favs}
+    grouped: list[tuple[dict, list[dict]]] = []
+    for g in groups:
+        members = [by_slug[s] for s in g["slugs"] if s in by_slug and s not in shown]
+        shown.update(a["slug"] for a in members)
+        if members:
+            grouped.append((g, members))
+    return favs, grouped, [a for a in apps if a["slug"] not in shown]

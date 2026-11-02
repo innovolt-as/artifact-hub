@@ -429,3 +429,129 @@ def test_malformed_json_is_400_on_the_group_routes(hub, user_client):
         assert r.status_code == 400, route
         r = user_client.post(f"/api/prefs/groups/{route}", content=b"\xff\xfe", headers={"content-type": "application/json"})
         assert r.status_code == 400, route
+
+
+# ---------------------------------------------------------------- the front page
+U = "user@test.no"
+
+
+def _front(hub, *slugs):
+    """Public apps `slugs` on user@test.no's front page (title = upper-case slug)."""
+    for s in slugs:
+        _page(hub, s, title=s.upper())
+    with hub.db() as con:
+        for s in slugs:
+            hub.home.set_added(con, U, s, True)
+
+
+def _grp(hub, name, slugs=(), open_=True):
+    with hub.db() as con:
+        g = hub.home.create_group(con, U, name)
+        for s in slugs:
+            hub.home.set_app_group(con, U, s, g["id"])
+        if not open_:
+            hub.home.set_group_open(con, U, g["id"], False)
+    return g["id"]
+
+
+def _sec(html, sid):
+    start = html.find(f'<section id="{sid}"')
+    return "" if start < 0 else html[start:html.find("</section>", start)]
+
+
+def test_rest_is_all_apps_without_groups(hub, user_client):
+    _front(hub, "a", "b")
+    html = user_client.get("/").text
+    assert 'class="group"' not in html and 'data-group=' not in html
+    with hub.db() as con:
+        hub.home.set_pin(con, U, "a", True)
+    rest = _sec(user_client.get("/").text, "rest")
+    assert "Alle apper" in rest and "Andre" not in rest
+
+
+def test_rest_is_other_when_groups_exist(hub, user_client):
+    _front(hub, "a", "b")
+    _grp(hub, "Jobb", ["a"])
+    html = user_client.get("/").text
+    rest = _sec(html, "rest")
+    assert "Andre" in rest and "Alle apper" not in rest and 'data-slug="b"' in rest and 'data-slug="a"' not in rest
+    assert html.index('class="group"') < html.index('id="rest"')
+
+
+def test_rest_is_other_when_every_group_is_hidden(hub, user_client):
+    _front(hub, "a")
+    _grp(hub, "Tom")  # no apps: not shown, but the user has a group
+    html = user_client.get("/").text
+    assert 'data-group=' not in html and "Andre" in _sec(html, "rest")
+
+
+def test_group_markup_open(hub, user_client):
+    _front(hub, "a", "b", "c")
+    gid = _grp(hub, "Jobb", ["b", "a"])
+    html = user_client.get("/").text
+    sec = _sec(html, f"g-{gid}")
+    assert f'<section id="g-{gid}" class="group" data-group="{gid}" data-order="group" data-open="1">' in sec
+    assert '<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true" aria-label="Åpne eller lukk Jobb">' in sec
+    assert 'Jobb<span class="gcount">· 2</span><span class="chev"></span></button></h3>' in sec
+    assert sec.index('data-slug="b"') < sec.index('data-slug="a"') and 'data-slug="c"' not in sec
+    assert "hidden" not in sec and "gclosed" not in sec
+
+
+def test_closed_group_markup(hub, user_client):
+    _front(hub, "a", "b", "c")
+    gid = _grp(hub, "Jobb", ["a", "b"], open_=False)
+    sec = _sec(user_client.get("/").text, f"g-{gid}")
+    assert 'data-open="0"' in sec and 'aria-expanded="false"' in sec and '<span class="gcount">· 2</span>' in sec
+    assert "<ul class=\"grid\" hidden>" in sec and 'data-slug="a"' in sec  # still rendered, only hidden
+    closed = sec[sec.index('<button type="button" class="gclosed"'):]
+    assert closed.count('class="icon icon-xs"') == 2
+
+
+def test_closed_group_in_cards_view_keeps_its_lines(hub, user_client):
+    _front(hub, "a")
+    gid = _grp(hub, "Jobb", ["a"], open_=False)
+    with hub.db() as con:
+        hub.home.set_view(con, U, "cards")
+    sec = _sec(user_client.get("/").text, f"g-{gid}")
+    assert '<ul class="cards" hidden>' in sec and 'class="gclosed"' in sec
+
+
+def test_pinned_app_is_not_in_its_group_on_the_page(hub, user_client):
+    _front(hub, "a", "b")
+    gid = _grp(hub, "Jobb", ["a", "b"])
+    with hub.db() as con:
+        hub.home.set_pin(con, U, "a", True)
+    html = user_client.get("/").text
+    assert 'data-slug="a"' in _sec(html, "fav") and 'data-slug="a"' not in _sec(html, f"g-{gid}")
+    assert '<span class="gcount">· 1</span>' in _sec(html, f"g-{gid}")
+    assert html[: html.index("<dialog")].count('data-slug="a"') == 1  # the picker below lists every app
+
+
+def test_gone_apps_not_shown_or_counted(hub, user_client):
+    _front(hub, "a", "b")
+    gid = _grp(hub, "Jobb", ["a", "b", "slettet"], open_=False)
+    sec = _sec(user_client.get("/").text, f"g-{gid}")
+    assert "slettet" not in sec and '<span class="gcount">· 2</span>' in sec
+    assert sec.count('class="icon icon-xs"') == 2
+    with hub.db() as con:  # access lost: still in the stored group, not on the page
+        hub.home.set_added(con, U, "b", False)
+    sec = _sec(user_client.get("/").text, f"g-{gid}")
+    assert 'data-slug="b"' not in sec and '<span class="gcount">· 1</span>' in sec
+    assert sec.count('class="icon icon-xs"') == 1
+
+
+def test_group_with_only_gone_apps_is_not_shown(hub, user_client):
+    _front(hub, "a")
+    _grp(hub, "Jobb", ["slettet"])
+    html = user_client.get("/").text
+    assert "Jobb" not in html and 'data-group=' not in html
+
+
+def test_group_name_escaped(hub, user_client):
+    _front(hub, "a")
+    name = '<b>x</b>"&'
+    gid = _grp(hub, name, ["a"])
+    html = user_client.get("/").text
+    sec = _sec(html, f"g-{gid}")
+    assert "&lt;b&gt;x&lt;/b&gt;&#34;&amp;" in sec and "<b>x</b>" not in html
+    assert 'aria-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in sec

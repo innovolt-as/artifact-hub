@@ -58,7 +58,7 @@
 {% block body %}
 <div id="home">
 {% if notice %}<p class="notice muted">{{ notice }}</p>{% endif %}
-{% if not favs and not top and not rest %}
+{% if not favs and not groups and not rest %}
   <button type="button" class="addcard" data-open-picker>
     <span class="plus" aria-hidden="true">+</span>
     <b>{{ t("home.add_apps") }}</b>
@@ -67,23 +67,24 @@
 {% else %}
 <div class="apps" data-view="{{ view }}">
   {% if favs %}
-  <section id="fav">
+  <section id="fav" data-order="pins">
     <h3 class="sec">{{ t("home.favorites") }}</h3>
     <ul class="{{ 'grid top4' if view == 'icons' else 'cards' }}">
       {% for a in favs %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
   </section>
   {% endif %}
-  {% if top %}
-  <section id="top">
-    <h3 class="sec">{{ t("home.top") }} <span>{{ t("home.top_for_you") }}</span></h3>
-    <ul class="{{ 'grid top4' if view == 'icons' else 'cards' }}">
-      {% for a in top %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
+  {% for g, members in groups %}
+  <section id="g-{{ g.id }}" class="group" data-group="{{ g.id }}" data-order="group" data-open="{{ '1' if g.open else '0' }}">
+    <h3 class="sec"><button type="button" class="gtoggle" aria-expanded="{{ 'true' if g.open else 'false' }}" aria-label="{{ t('home.group_toggle', name=g.name) }}">{{ g.name }}<span class="gcount">· {{ members|length }}</span><span class="chev"></span></button></h3>
+    <ul class="{{ 'grid' if view == 'icons' else 'cards' }}"{% if not g.open %} hidden{% endif %}>
+      {% for a in members %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
+    {% if not g.open %}<button type="button" class="gclosed">{% for a in members %}{{ icon(a, "icon icon-xs") }}{% endfor %}</button>{% endif %}
   </section>
-  {% endif %}
+  {% endfor %}
   <section id="rest">
-    {% if favs or top %}<h3 class="sec">{{ t("home.all") }}</h3>{% endif %}
+    {% if favs or has_groups %}<h3 class="sec">{{ t("home.other") if has_groups else t("home.all") }}</h3>{% endif %}
     <ul class="{{ 'grid' if view == 'icons' else 'cards' }}">
       {% for a in rest %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>

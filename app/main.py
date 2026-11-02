@@ -769,6 +769,7 @@ def index(request: Request, user: str = Depends(require_user)):
         prefs = home.get_prefs(con, user)
         mine = [a for a in apps if a["slug"] in prefs["apps"]]  # only the apps this user has chosen
         stats = home.visit_stats(con, user)
+        user_groups = home.get_groups(con, user)
         locked = applock.locked_slugs(con, user)
     for a in apps:
         a["code_locked"] = a["slug"] in locked
@@ -776,13 +777,13 @@ def index(request: Request, user: str = Depends(require_user)):
     if prefs["view"] == "cards":
         with db() as con:  # a new connection: the recipes read through doc_get/doc_list, which open their own
             summaries = card_lines(con, user, mine, prefs["tz"])
-    favs, top, rest = home.build_sections(mine, stats, prefs["pins"])
+    favs, groups, rest = home.build_sections(mine, stats, prefs["pins"], user_groups)
     available = home.picker(apps, prefs["apps"], prefs["seen"])
     now = time.localtime()  # fallback only; the page rewrites the date and greeting with the viewer's clock
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "top": top, "rest": rest,
+        {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "groups": groups, "has_groups": bool(user_groups), "rest": rest,
          "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
          "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale"), "tz": prefs["tz"] or "",
                        "offline_apps": [a["slug"] for a in apps if a["offline"] and a["kind"] != "link" and a["slug"] not in locked]}},
