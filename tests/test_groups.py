@@ -506,6 +506,18 @@ def test_closed_group_markup(hub, user_client):
     assert "<ul class=\"grid\" hidden>" in sec and 'data-slug="a"' in sec  # still rendered, only hidden
     closed = sec[sec.index('<button type="button" class="gclosed"'):]
     assert closed.count('class="icon icon-xs"') == 2
+    assert closed.count('aria-hidden="true"') == 2  # a screen reader gets the label, not the letters
+    head = sec[sec.index('class="gtoggle"'):sec.index('class="gclosed"')]
+    label = 'aria-label="Åpne eller lukk Jobb"'
+    assert label in head and 'aria-expanded="false" ' + label in closed
+
+
+def test_closed_row_has_the_headings_label_escaped(hub, user_client):
+    _front(hub, "a")
+    gid = _grp(hub, '<b>x</b>"&', ["a"], open_=False)
+    sec = _sec(user_client.get("/").text, f"g-{gid}")
+    row = sec[sec.index('<button type="button" class="gclosed"'):]
+    assert 'aria-expanded="false" aria-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in row and "<b>x</b>" not in sec
 
 
 def test_closed_group_in_cards_view_keeps_its_lines(hub, user_client):

@@ -74,16 +74,24 @@
   // a group that was closed when the page was fetched)
   function syncClosed(section) {
     let row = section.querySelector(".gclosed");
-    if (section.dataset.open === "1") return row?.remove();
+    if (section.dataset.open === "1") {
+      const had = row && row === document.activeElement; // the row goes away: keep keyboard focus in the group
+      row?.remove();
+      if (had) section.querySelector(".gtoggle")?.focus({ preventScroll: true });
+      return;
+    }
     if (!row) {
       row = document.createElement("button");
       row.type = "button";
       row.className = "gclosed";
+      row.setAttribute("aria-expanded", "false");
+      row.setAttribute("aria-label", section.querySelector(".gtoggle")?.getAttribute("aria-label") || "");
       section.append(row);
     }
     row.replaceChildren(...[...section.querySelectorAll("li.app .icon")].map((ic) => {
       const c = ic.cloneNode(true);
       c.classList.add("icon-xs");
+      c.setAttribute("aria-hidden", "true");
       return c;
     }));
   }
@@ -100,13 +108,15 @@
     const id = section.dataset.group, open = section.dataset.open !== "1";
     setOpen(section, open);
     folding.set(id, open ? "1" : "0");
-    const done = () => { if (folding.get(id) === (open ? "1" : "0")) folding.delete(id); };
+    const wanted = open ? "1" : "0";
+    const done = () => { if (folding.get(id) === wanted) folding.delete(id); };
     post("/api/prefs/groups/open", { id, open }).then(
       () => refresh({ after: true }).finally(done),
       () => {
+        const latest = folding.get(id) === wanted; // a later toggle of this group has its own save to answer for
         done();
         const now = document.getElementById("g-" + id); // #home may have been swapped meanwhile
-        if (now) setOpen(now, !open);
+        if (now && latest) setOpen(now, !open);
         failed();
       },
     );

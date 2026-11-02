@@ -80,7 +80,7 @@
     <ul class="{{ 'grid' if view == 'icons' else 'cards' }}"{% if not g.open %} hidden{% endif %}>
       {% for a in members %}{{ app_item(a, view, summaries.get(a.slug)) }}{% endfor %}
     </ul>
-    {% if not g.open %}<button type="button" class="gclosed">{% for a in members %}{{ icon(a, "icon icon-xs") }}{% endfor %}</button>{% endif %}
+    {% if not g.open %}<button type="button" class="gclosed" aria-expanded="false" aria-label="{{ t('home.group_toggle', name=g.name) }}">{% for a in members %}{{ icon(a, "icon icon-xs", true) }}{% endfor %}</button>{% endif %}
   </section>
   {% endfor %}
   <section id="rest">
