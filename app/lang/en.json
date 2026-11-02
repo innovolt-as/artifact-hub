@@ -185,6 +185,8 @@
   "home.favorites": "Favourites",
   "home.group_toggle": "Open or close {name}",
   "home.groups_button": "Groups",
+  "home.groups_hint": "Make, rename, delete, and drag to change the order.",
+  "home.groups_title": "Groups",
   "home.hello": "Hello",
   "home.new": "New",
   "home.new_apps": "New apps",
@@ -202,6 +204,8 @@
     "Good afternoon",
     "Good evening"
   ],
+  "js.home.group_count": "{n} apps",
+  "js.home.group_count_one": "1 app",
   "js.home.group_delete": "Delete",
   "js.home.group_delete_ask": "Delete \"{name}\"? Its apps go to \"Other\".",
   "js.home.group_name": "Group name",

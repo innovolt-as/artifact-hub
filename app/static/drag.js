@@ -16,6 +16,9 @@
  * by name, no data-order) lift for that menu only: they do not move. A short tap still opens the app, and moving more
  * than SLOP px before the hold is up is a scroll, not a drag. The right mouse button keeps its own menu (home.js).
  *
+ * Holding a group's row in the «Groups» window (#groups, not its buttons) works the same: the rows move up and down and
+ * the drop saves the order of the groups.
+ *
  * Holding a group's heading (.gtoggle) the same way lifts the whole group section, open or closed, as one block. It
  * moves up and down among the other groups only (Favourites and the rest stay put), and the drop saves the order of
  * the groups (/api/prefs/groups/order {order: [ids]}). Groups differ in height, so a group lands where its top is
@@ -42,6 +45,7 @@
   const CARD = ".apps > section[data-order] > ul:not([hidden]) > .app"; // a card that can be dragged
   const ICON = '.apps > section[data-open="0"] > .gicons > .gicon';    // an icon in a closed section
   const GROUP = ".apps > section.group[data-group][data-order]";        // a group that can be dragged
+  const ROW = "#groups .glist > .pgroup[data-gid]";                      // a group's row in the «Groups» window
   // Where each kind of drop is saved, and what it sends: the keys (slugs or group ids) in their new order
   const SAVES = {
     pins: { url: "/api/prefs/pins", body: (keys) => ({ order: keys }) },
@@ -50,9 +54,9 @@
   };
   // What moves with a lifted card (the cards of its list), icon (the icons of its grid) or group (the groups), in page
   // order, and its key in a save
-  const KINDS = { card: ".app", icon: ".gicon", block: "section.group[data-group]" };
+  const KINDS = { card: ".app", icon: ".gicon", block: "section.group[data-group], .pgroup[data-gid]" };
   const members = (kind, list) => [...list.children].filter((n) => n.matches(KINDS[kind]));
-  const keyOf = (kind, n) => (kind === "block" ? n.dataset.group : n.dataset.slug);
+  const keyOf = (kind, n) => (kind === "block" ? n.dataset.group ?? n.dataset.gid : n.dataset.slug);
 
   let press = null;  // a pointer held on a card or a group heading, not lifted yet
   let drag = null;   // the lifted card or group, until it has landed
@@ -77,7 +81,7 @@
   // A refresh may have swapped the page since the press: find the card, icon or group again, a card or an icon only
   // in the section it was pressed in
   function find(p) {
-    if (p.kind === "block") return [...document.querySelectorAll(GROUP)].find((n) => n.dataset.group === p.key);
+    if (p.kind === "block") return [...document.querySelectorAll(p.row ? ROW : GROUP)].find((n) => (n.dataset.group ?? n.dataset.gid) === p.key);
     const sel = p.kind === "icon" ? ICON : CARD;
     return [...document.querySelectorAll(sel)].find((n) => n.dataset.slug === p.key && n.closest("section").id === p.sec);
   }
@@ -251,7 +255,7 @@
     try {
       const o = order(d);
       const before = d.items.map((x) => keyOf(d.kind, x));
-      const where = { block: d.block, sec: d.sec, key: d.block ? "groups" : d.sec };
+      const where = { block: d.block, sec: d.sec, key: d.block ? "groups" : d.sec, win: d.el.matches(ROW) };
       const n = d.to === d.from ? 0 : ++saved;
       if (n) latest.set(where.key, n);
       const keys = o.map((x) => keyOf(d.kind, x));
@@ -322,7 +326,7 @@
   // Back to the order before the drop, gliding. Found by section and key: a refresh may have swapped the page
   // meanwhile, or opened or closed the section; in a section both its list and its grid (if it shows one) go back.
   function restore(where, keys) {
-    if (where.block) return slideBack(document.querySelector(".apps"), "block", keys);
+    if (where.block) return slideBack(document.querySelector(where.win ? "#groups .glist" : ".apps"), "block", keys);
     const sec = document.getElementById(where.sec);
     slideBack(sec?.querySelector(":scope > ul"), "card", keys);
     slideBack(sec?.querySelector(":scope > .gicons"), "icon", keys);
@@ -350,12 +354,14 @@
     cancelPress(); // a second finger: no lift
     if (drag || !e.isPrimary || e.button !== 0) return; // the right button is for the menu
     if (root.dataset.hubOffline) return;
-    const group = at(e, ".gtoggle")?.closest(GROUP);
-    const li = group ? null : at(e, CARD) || at(e, ICON);
+    // A group by its heading on the page, or by its row (not its buttons or the field under it) in the «Groups» window
+    const row = at(e, ROW);
+    const group = row ? (at(e, ".gh") && !at(e, "button") ? row : null) : at(e, ".gtoggle")?.closest(GROUP);
+    const li = group || row ? null : at(e, CARD) || at(e, ICON);
     if (!group && !li) return;
     press = {
       id: e.pointerId, kind: group ? "block" : li.matches(".gicon") ? "icon" : "card",
-      key: group ? group.dataset.group : li.dataset.slug,
+      key: group ? group.dataset.group ?? group.dataset.gid : li.dataset.slug, row: !!row, // a row of the window, not a group on the page (same ids)
       sec: (group || li.closest("section")).id, mouse: e.pointerType === "mouse", target: e.target,
       x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, timer: setTimeout(lift, HOLD),
     };

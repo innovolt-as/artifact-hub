@@ -185,6 +185,8 @@
   "home.favorites": "Favoritter",
   "home.group_toggle": "Åpne eller lukk {name}",
   "home.groups_button": "Grupper",
+  "home.groups_hint": "Lag, gi nytt navn, slett, og dra for å endre rekkefølgen.",
+  "home.groups_title": "Grupper",
   "home.hello": "Hei",
   "home.new": "Ny",
   "home.new_apps": "Nye apper",
@@ -202,6 +204,8 @@
     "God ettermiddag",
     "God kveld"
   ],
+  "js.home.group_count": "{n} apper",
+  "js.home.group_count_one": "1 app",
   "js.home.group_delete": "Slett",
   "js.home.group_delete_ask": "Slette «{name}»? Appene går til «Andre».",
   "js.home.group_name": "Navn på gruppen",

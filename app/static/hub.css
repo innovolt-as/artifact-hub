@@ -138,8 +138,8 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .addcard .plus { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; background: var(--accent); color: var(--accent-fg); font-size: 38px; line-height: 1; }
 .addcard b { font-size: 18px; }
 .addcard > span:last-child { color: var(--muted); font-size: 14px; max-width: 260px; }
-.more { position: relative; display: block; margin: 28px auto 0; font: inherit; font-size: 14px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--muted); cursor: pointer; }
-.more + .more { margin-top: 12px; }
+.mores { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 28px; }
+.more { position: relative; display: block; min-height: 44px; font: inherit; font-size: 14px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--muted); cursor: pointer; }
 .more:hover { color: var(--fg); border-color: var(--accent); }
 .more .dot { top: 0; right: 4px; box-shadow: 0 0 0 2px var(--bg); }
 
@@ -149,20 +149,20 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 /* flex: 1 1 auto here and in what a sheet holds, never flex: 1. Its basis of 0 made a sheet on an iPhone as tall as its
    padding, at the bottom of the screen, because nothing else sets a sheet's height. */
 .sheet-in { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-#picker header { padding: 18px 18px 8px; }
-#picker h1 { font-size: 19px; margin: 0; outline: none; }  /* takes focus when opened, so no tick shows a focus ring */
-#picker header p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+:is(#picker, #groups) header { padding: 18px 18px 8px; }
+:is(#picker, #groups) h1 { font-size: 19px; margin: 0; outline: none; }  /* takes focus when opened, so no tick shows a focus ring */
+:is(#picker, #groups) header p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
 /* The list scrolls; under it, each group's heading (✎, 🗑) and its apps, then «No group» and the «New group» button.
    A row: the tick and the app (a label) and the button with its group; the group menu, the name field and the delete
    question open inside the sheet, under what they belong to (home.js) */
 #picker .picklist { padding: 4px 8px 8px; overflow: auto; min-height: 0; flex: 1 1 auto; overscroll-behavior: contain; overflow-anchor: none; }
 #picker .picklist ul { list-style: none; margin: 0; padding: 0; }
 #picker .pgroup[hidden], #picker .gh[hidden] { display: none; }
-#picker .gh { display: flex; align-items: center; gap: 4px; margin: 10px 4px 0 8px; min-height: 44px; }
-#picker .gh h2 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; overflow-wrap: anywhere; }
-#picker .gh button { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: none; color: var(--fg); cursor: pointer; }
+:is(#picker, #groups) .gh { display: flex; align-items: center; gap: 4px; margin: 10px 4px 0 8px; min-height: 44px; }
+:is(#picker, #groups) .gh h2 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; overflow-wrap: anywhere; }
+:is(#picker, #groups) .gh button { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: none; color: var(--fg); cursor: pointer; }
 #picker .gh button, #picker .gmenu button, #picker .gnew { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-#picker .gh button:hover { border-color: var(--accent); }
+:is(#picker, #groups) .gh button:hover { border-color: var(--accent); }
 #picker li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-radius: 12px; }
 #picker li label { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 4px 10px 8px; border-radius: 12px; cursor: pointer; }
 #picker li label:hover { background: var(--bg); }
@@ -192,22 +192,33 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 #picker .gmenu button[aria-checked="true"]::before { content: "✓"; }
 #picker .gmenu button:hover, #picker .gmenu button:focus-visible { background: var(--bg); outline: none; }
 #picker .gmenu .gmore { color: var(--accent); font-weight: 600; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; }
-#picker .gform, #picker .gconfirm { margin: 6px 4px 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
-#picker .gform label { display: block; font-size: 13px; color: var(--muted); }
-#picker .gform input { display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); font: inherit; font-size: 16px; }  /* 16 px: iOS zooms into anything smaller */
-#picker .gconfirm p { margin: 0; overflow-wrap: anywhere; }
-#picker .gbtns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
-#picker .gbtns button { min-height: 44px; padding: 10px 16px; }
-#picker .gbtns .plain { font: inherit; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--fg); cursor: pointer; }
-#picker .gbtns .danger { font: inherit; font-weight: 600; border: 0; border-radius: 8px; background: var(--danger); color: #fff; cursor: pointer; }
-#picker .gerr { margin: 6px 0 0; color: var(--danger); font-size: 13.5px; overflow-wrap: anywhere; }
+:is(#picker, #groups) .gform, :is(#picker, #groups) .gconfirm { margin: 6px 4px 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+:is(#picker, #groups) .gform label { display: block; font-size: 13px; color: var(--muted); }
+:is(#picker, #groups) .gform input { display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); font: inherit; font-size: 16px; }  /* 16 px: iOS zooms into anything smaller */
+:is(#picker, #groups) .gconfirm p { margin: 0; overflow-wrap: anywhere; }
+:is(#picker, #groups) .gbtns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+:is(#picker, #groups) .gbtns button { min-height: 44px; padding: 10px 16px; }
+:is(#picker, #groups) .gbtns .plain { font: inherit; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--fg); cursor: pointer; }
+:is(#picker, #groups) .gbtns .danger { font: inherit; font-weight: 600; border: 0; border-radius: 8px; background: var(--danger); color: #fff; cursor: pointer; }
+:is(#picker, #groups) .gerr { margin: 6px 0 0; color: var(--danger); font-size: 13.5px; overflow-wrap: anywhere; }
 #picker li > .gerr { margin: 0 8px 8px; }
-#picker .gerr:empty { display: none; }
-#picker .gnew { display: flex; align-items: center; gap: 8px; width: calc(100% - 8px); min-height: 48px; margin: 14px 4px 6px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 12px; background: none; color: var(--accent); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
-#picker .gnew:hover { border-color: var(--accent); }
-#picker .gnew[hidden] { display: none; }
-#picker footer { padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
-#picker footer button { width: 100%; padding: 13px; font-size: 16px; }
+:is(#picker, #groups) .gerr:empty { display: none; }
+:is(#picker, #groups) .gnew { display: flex; align-items: center; gap: 8px; width: calc(100% - 8px); min-height: 48px; margin: 14px 4px 6px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 12px; background: none; color: var(--accent); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+:is(#picker, #groups) .gnew:hover { border-color: var(--accent); }
+:is(#picker, #groups) .gnew[hidden] { display: none; }
+:is(#picker, #groups) footer { padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+:is(#picker, #groups) footer button { width: 100%; padding: 13px; font-size: 16px; }
+/* «Groups»: the same sheet. The list holds one bordered row for each group (name and number of apps, ✎, 🗑); a row is held
+   and dragged to move it (drag.js), so it can't be selected or get the system menu on a long press. */
+#groups .glist { padding: 4px 8px 8px; overflow: auto; min-height: 0; flex: 1 1 auto; overscroll-behavior: contain; overflow-anchor: none; }
+#groups .pgroup { margin: 0 4px 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+#groups .gh { margin: 0; padding: 6px 6px 6px 14px; min-height: 56px; gap: 6px; cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+#groups .gname { flex: 1 1 auto; min-width: 0; }
+#groups .gh h2 { font-size: 15.5px; letter-spacing: 0; text-transform: none; color: var(--fg); font-weight: 650; }
+#groups .gn { display: block; color: var(--muted); font-size: 13px; }
+#groups .gform, #groups .gconfirm { margin: 0 8px 10px; }
+#groups .pgroup.lifted { position: relative; z-index: 5; transition: none; box-shadow: 0 12px 30px -8px rgb(0 0 0 / .35); }
+#groups .pgroup.sliding { transition: transform .2s; }
 @media (max-width: 640px) {
   .sheet { width: 100%; max-width: 100%; max-height: 86vh; margin: auto 0 0; border-radius: 18px 18px 0 0; }
 }
@@ -391,6 +402,7 @@ dialog { overscroll-behavior: contain; }
 .offline-badge .d { width: 7px; height: 7px; border-radius: 50%; background: #f0a33a; }
 html[data-hub-offline="1"] .topbar nav,
 html[data-hub-offline="1"] .pin,
+html[data-hub-offline="1"] .mores,
 html[data-hub-offline="1"] .more,
 html[data-hub-offline="1"] .addcard,
 html[data-hub-offline="1"] #offline-no .summary { display: none; }

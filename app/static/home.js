@@ -15,6 +15,7 @@
 (function () {
   const root = document.documentElement;
   const picker = document.getElementById("picker");
+  const groupsDlg = document.getElementById("groups"); // «Groups»: make, rename, delete and order the groups
   const S = JSON.parse(document.getElementById("__hub_strings").textContent);
   const failed = () => alert(S.save_failed);
   const post = (url, body) =>
@@ -173,19 +174,20 @@
       li?.querySelector(focused.matches(".pin") ? ".pin" : "a")?.focus({ preventScroll: true });
     }
 
-    const list = "#picker .picklist, #picker .sheet-in > p.none";
-    const oldList = document.querySelector(list), newList = doc.querySelector(list);
-    if (!picker.open && oldList && newList) oldList.replaceWith(document.importNode(newList, true));
+    for (const [dlg, list] of [[picker, "#picker .picklist, #picker .sheet-in > p.none"], [groupsDlg, "#groups .glist"]]) {
+      const oldList = document.querySelector(list), newList = doc.querySelector(list);
+      if (!dlg.open && oldList && newList) oldList.replaceWith(document.importNode(newList, true));
+    }
     const strings = doc.getElementById("__hub_strings");
     if (strings) Object.assign(S, JSON.parse(strings.textContent));
     stamp();
   }
 
-  // Wait while a card, an icon or a group is dragged, the pin menu is open or «Arrange apps» is open; each of them
+  // Wait while a card, an icon or a group is dragged, the pin menu is open or «Arrange apps» or «Groups» is open; each of them
   // sends hub:idle; and, while offline, a finger on the screen
   let touching = 0;
   const offline = () => root.dataset.hubOffline === "1";
-  const busy = () => !!(root.dataset.hubDrag || menu || picker.open || (offline() && touching));
+  const busy = () => !!(root.dataset.hubDrag || menu || picker.open || groupsDlg.open || (offline() && touching));
   const idle = () =>
     new Promise((resolve) => {
       if (!busy()) return resolve();
@@ -486,11 +488,12 @@
       return;
     }
     if (at(e, "[data-open-picker]")) openPicker();
+    else if (at(e, "[data-open-groups]")) groupsDlg.showModal();
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
   addEventListener("scroll", closeMenu, { passive: true });
 
-  // ------------------------------------------------------------ «Arrange apps»
+  // ------------------------------------------------------------ «Arrange apps» and «Groups»
   // Each tick and each group change is saved at once; closing the list refreshes the page if anything changed. A group
   // change redraws the list from the groups the hub answers with (drawGroups), and a refused one says why inside the
   // list. The group menu, the name field and the delete question open inside the list, under the row or heading they
@@ -546,6 +549,8 @@
     }
   }, true);
   const pickList = () => picker.querySelector(".picklist");
+  const groupsList = () => groupsDlg.querySelector(".glist");
+  const activeList = () => (groupsDlg.open ? groupsList() : pickList()); // where a name field or question was opened
   const noGroup = () => pickList().querySelector('.pgroup[data-gid=""]');
   const groupName = (sec) => sec.querySelector(".gh h2").textContent;
   const el = (tag, cls, text) => {
@@ -557,7 +562,8 @@
   function nameGroup(sec, name) {
     sec.querySelector(".gh h2").textContent = name;
     for (const [sel, word] of [[".grename", S.group_rename], [".gdelete", S.group_delete]]) {
-      const b = sec.querySelector(sel);
+      const b = sec.querySelector(sel); // «Arrange apps» has no such buttons
+      if (!b) continue;
       b.setAttribute("aria-label", word + ": " + name);
       b.title = word;
     }
@@ -602,13 +608,38 @@
     none.before(...sections);
     if (focused && focused !== document.activeElement && list.contains(focused)) focused.focus({ preventScroll: true });
   }
+  // «Groups»: a row for each group in the group's order, with the number of apps it shows in «Arrange apps»
+  function drawWindow(groups) {
+    const list = groupsList(), focused = document.activeElement;
+    const slugs = new Set([...(pickList()?.querySelectorAll("li[data-slug]") || [])].map((li) => li.dataset.slug));
+    const had = new Map([...list.querySelectorAll(".pgroup")].map((sec) => [sec.dataset.gid, sec]));
+    const sections = groups.map((g) => {
+      let sec = had.get(g.id);
+      if (!sec) {
+        sec = document.getElementById("pgroupRow").content.firstElementChild.cloneNode(true);
+        sec.dataset.gid = g.id;
+      }
+      nameGroup(sec, g.name);
+      const n = g.slugs.filter((s) => slugs.has(s)).length;
+      sec.querySelector(".gn").textContent = (n === 1 ? S.group_count_one : S.group_count).replace("{n}", n);
+      return sec;
+    });
+    had.forEach((sec, id) => {
+      if (groups.some((g) => g.id === id)) return;
+      if (opened && sec.contains(opened.el)) closeOpen(); // its name field or delete question goes with it
+      sec.remove();
+    });
+    list.querySelector(".gnew").before(...sections);
+    if (focused && focused !== document.activeElement && list.contains(focused)) focused.focus({ preventScroll: true });
+  }
   // Safari does no scroll anchoring: keep the first row or heading in view where it was while rows move above it
   function redraw(groups, moving = null) {
-    const list = pickList(), top = list.getBoundingClientRect().top;
+    const list = activeList(), top = list.getBoundingClientRect().top;
     const anchor = [...list.querySelectorAll("li[data-slug], .gh, .gnew")]
       .find((n) => !moving?.contains(n) && n.getBoundingClientRect().bottom > top);
     const before = anchor?.getBoundingClientRect().top;
-    drawGroups(groups);
+    if (pickList()) drawGroups(groups);
+    drawWindow(groups);
     if (anchor?.isConnected) list.scrollTop += anchor.getBoundingClientRect().top - before;
     changed = true;
   }
@@ -727,7 +758,7 @@
         if (!here) return;
         if (li) li.querySelector(".gpick").focus({ preventScroll: true }); // the app is in its new group
         else if (gid) back.focus();
-        else pickList().querySelector(`.pgroup[data-gid="${CSS.escape(r.groups[r.groups.length - 1].id)}"] .grename`)?.focus();
+        else activeList().querySelector(`.pgroup[data-gid="${CSS.escape(r.groups[r.groups.length - 1].id)}"] .grename`)?.focus();
       }, (e) => {
         ok.disabled = false;
         err.textContent = e.message;
@@ -762,7 +793,7 @@
         const here = opened?.el === box;
         if (here) closeOpen();
         redraw(r.groups);
-        if (here) picker.querySelector(".gnew")?.focus({ preventScroll: true });
+        if (here) activeList().querySelector(".gnew")?.focus({ preventScroll: true });
       }, (e) => {
         deleting.delete(id);
         ok.disabled = false;
@@ -771,7 +802,7 @@
     });
   }
 
-  picker.addEventListener("click", (e) => {
+  const onListClick = (e) => {
     const pick = at(e, ".gpick");
     if (pick) {
       const li = pick.closest("li");
@@ -788,7 +819,9 @@
     if (del) return askDelete(del.closest(".pgroup"));
     const add = at(e, ".gnew");
     if (add) nameField({ put: (f) => add.after(f), hide: add, back: add });
-  });
+  };
+  picker.addEventListener("click", onListClick);
+  groupsDlg.addEventListener("click", onListClick);
   // A finger or a button going down outside the group menu closes it (its own button toggles it on the click)
   picker.addEventListener("pointerdown", (e) => {
     if (!opened?.el.matches(".gmenu") || opened.el.contains(e.target)) return;
@@ -796,14 +829,16 @@
   });
   // Escape closes what is open in the list, not the list
   let ateEscape = false;
-  picker.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape" || !opened) return;
-    e.preventDefault();
-    ateEscape = true;
-    setTimeout(() => { ateEscape = false; });
-    closeOpen(true);
-  });
-  picker.addEventListener("cancel", (e) => { if (ateEscape) e.preventDefault(); });
+  for (const dlg of [picker, groupsDlg]) {
+    dlg.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || !opened) return;
+      e.preventDefault();
+      ateEscape = true;
+      setTimeout(() => { ateEscape = false; });
+      closeOpen(true);
+    });
+    dlg.addEventListener("cancel", (e) => { if (ateEscape) e.preventDefault(); });
+  }
 
   document.addEventListener("change", (e) => {
     const cb = at(e, "#picker input[type=checkbox]");
@@ -814,16 +849,19 @@
     ));
   });
   // The dialog itself, its footer and the <template> are never swapped, only the list inside
-  picker.querySelector("[data-close]").addEventListener("click", () => picker.close());
-  picker.addEventListener("click", (e) => { if (e.target === picker) picker.close(); }); // the backdrop
-  picker.addEventListener("close", () => {
-    closeOpen();
-    clearErrors();
-    document.dispatchEvent(new Event("hub:idle"));
-    Promise.all(saving).then(() => {
-      if (!changed) return;
-      changed = false;
-      refresh({ after: true });
+  for (const dlg of [picker, groupsDlg]) {
+    dlg.querySelector("[data-close]").addEventListener("click", () => dlg.close());
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); }); // the backdrop
+    dlg.addEventListener("close", () => {
+      closeOpen();
+      clearErrors();
+      document.dispatchEvent(new Event("hub:idle"));
+      if (dlg === groupsDlg) changed = true; // a drag in the window saves without telling this file
+      Promise.all(saving).then(() => {
+        if (!changed) return;
+        changed = false;
+        refresh({ after: true });
+      });
     });
-  });
+  }
 })();

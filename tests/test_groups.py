@@ -698,11 +698,11 @@ def test_picker_markup(hub, user_client):
     p = _picker(html)
     assert '<h1 id="pickerTitle" tabindex="-1" autofocus>Ordne apper</h1>' in p
     assert "Huk av det du vil ha på forsiden, og velg gruppe." in p
-    assert p.count('class="gpick"') == 2 and p.count('class="grename"') == p.count('class="gdelete"') == 1
-    assert p.count('class="gnew"') == 1 and "Ny gruppe" in p[p.index('class="gnew"'):]
+    assert p.count('class="gpick"') == 2
+    # «Arrange apps» only places apps: renaming, deleting and making a group are in «Groups»
+    assert 'class="grename"' not in p and 'class="gdelete"' not in p and 'class="gnew"' not in p
     g, rest = _pgroup(p, gid), _pgroup(p)
-    assert "<h2>Jobb</h2>" in g and 'class="grename"' in g and 'class="gdelete"' in g
-    assert 'class="grename"' not in rest and 'class="gdelete"' not in rest
+    assert "<h2>Jobb</h2>" in g
     pick = lambda sec: sec[sec.index('class="gpick"'):sec.index("</button>", sec.index('class="gpick"'))]  # noqa: E731
     assert ">Jobb<" in pick(g) and ">Velg gruppe<" in pick(rest)
     assert 'aria-haspopup="menu"' in pick(g) and 'aria-expanded="false"' in pick(g)
@@ -713,7 +713,7 @@ def test_picker_without_groups_hides_the_no_group_heading(hub, user_client):
     _front(hub, "a")
     p = _picker(user_client.get("/").text)
     assert '<section class="pgroup" data-gid="" hidden>' not in p  # the list itself shows
-    assert 'class="gnew"' in p and 'class="grename"' not in p
+    assert 'class="gnew"' not in p and 'class="grename"' not in p
     assert '<div class="gh" hidden><h2>Uten gruppe</h2>' in _pgroup(p)
 
 
@@ -725,12 +725,51 @@ def test_picker_name_escaped(hub, user_client):
     g = _pgroup(p, gid)
     assert f"<h2>{esc}</h2>" in g and f'<span class="gchip">{esc}</span>' in g  # the heading and the row's button
     assert f'aria-label="A: {esc}"' in g
-    assert f'aria-label="Gi nytt navn: {esc}"' in g and f'aria-label="Slett: {esc}"' in g
     assert "<b>x</b>" not in p
     # The page draws names into the sheet and the menu itself: only ever as text
     js = _static("home.js")
     assert "innerHTML" not in js and "insertAdjacentHTML" not in js and "outerHTML =" not in js
     assert "prompt(" not in js and "confirm(" not in js
+
+
+def _groups_window(html):
+    return html[html.find('id="groups"'):html.find('<template id="pgroupRow">')]
+
+
+def test_groups_window_markup(hub, user_client):
+    _front(hub, "a", "b", "c")
+    first = _grp(hub, "Jobb", ["a", "b"])
+    second = _grp(hub, "Tom")
+    third = _grp(hub, '<b>x</b>"&', ["c"])
+    html = user_client.get("/").text
+    assert '<button type="button" class="more" data-open-groups>Grupper</button>' in html
+    w = _groups_window(html)
+    assert '<dialog id="groups" class="sheet"' in html
+    assert '<h1 id="groupsTitle" tabindex="-1" autofocus>Grupper</h1>' in w
+    assert "Lag, gi nytt navn, slett, og dra for å endre rekkefølgen." in w
+    assert w.index(f'data-gid="{first}"') < w.index(f'data-gid="{second}"') < w.index(f'data-gid="{third}"')
+    assert w.count('class="grename"') == w.count('class="gdelete"') == 3
+    assert w.count('class="gnew"') == 1 and "Ny gruppe" in w[w.index('class="gnew"'):]
+    assert w.index(f'data-gid="{third}"') < w.index('class="gnew"')
+    assert '<small class="gn">2 apper</small>' in w and '<small class="gn">0 apper</small>' in w
+    assert '<small class="gn">1 app</small>' in w
+    esc = "&lt;b&gt;x&lt;/b&gt;&#34;&amp;"
+    assert f"<h2>{esc}</h2>" in w and "<b>x</b>" not in w
+    assert f'aria-label="Gi nytt navn: {esc}"' in w and f'aria-label="Slett: {esc}"' in w
+    assert 'data-close' in w
+
+
+def test_the_group_menu_still_offers_a_new_group():
+    js = _static("home.js")
+    assert "S.group_new_more" in js and 'item(S.group_new_more, null, () => nameField({ slug:' in js
+
+
+def test_groups_window_wiring():
+    js, css, drag = _static("home.js"), _static("hub.css"), _static("drag.js")
+    for needle in ("data-open-groups", "groupsDlg.showModal", "pgroupRow", "S.group_count"):
+        assert needle in js
+    assert "#groups .glist > .pgroup" in drag and "/api/prefs/groups/order" in drag
+    assert "#groups" in css and ".gname" in css
 
 
 def test_picker_wiring():

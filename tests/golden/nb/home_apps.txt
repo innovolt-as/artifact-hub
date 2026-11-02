@@ -50,6 +50,9 @@ Ny app
 Ny
 @aria-label: Ny app: Velg gruppe
 Velg gruppe
+Ferdig
+Grupper
+Lag, gi nytt navn, slett, og dra for å endre rekkefølgen.
 ＋
 Ny gruppe
 Ferdig

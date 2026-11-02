@@ -45,10 +45,18 @@
 {%- endmacro %}
 
 {% macro pick_head(g) -%}
-<div class="gh"><h2>{{ g.name if g }}</h2>
-  <button type="button" class="grename"{% if g %} aria-label="{{ t('js.home.group_rename') }}: {{ g.name }}" title="{{ t('js.home.group_rename') }}"{% endif %}><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg></button>
-  <button type="button" class="gdelete"{% if g %} aria-label="{{ t('js.home.group_delete') }}: {{ g.name }}" title="{{ t('js.home.group_delete') }}"{% endif %}><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg></button>
-</div>
+<div class="gh"><h2>{{ g.name if g }}</h2></div>
+{%- endmacro %}
+
+{# The «Groups» window: one row for a group (name, number of apps, rename, delete); its empty copy in
+   <template id="pgroupRow"> home.js fills for a group it adds #}
+{% macro group_row(g, n) -%}
+<section class="pgroup" data-gid="{{ g.id if g }}">
+  <div class="gh"><div class="gname"><h2>{{ g.name if g }}</h2><small class="gn">{{ (t('js.home.group_count_one') if n == 1 else t('js.home.group_count', n=n)) if g }}</small></div>
+    <button type="button" class="grename"{% if g %} aria-label="{{ t('js.home.group_rename') }}: {{ g.name }}" title="{{ t('js.home.group_rename') }}"{% endif %}><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg></button>
+    <button type="button" class="gdelete"{% if g %} aria-label="{{ t('js.home.group_delete') }}: {{ g.name }}" title="{{ t('js.home.group_delete') }}"{% endif %}><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg></button>
+  </div>
+</section>
 {%- endmacro %}
 
 {% block topbar %}
@@ -113,8 +121,10 @@
     </ul>
     {% if rest and not rest_open %}{{ gicons(rest) }}{% endif %}
   </section>
-  <button type="button" class="more" data-open-picker>{{ t("home.edit") }}{% if has_new %}<span class="dot" title="{{ t('home.new_apps') }}"></span>{% endif %}</button>
-  <button type="button" class="more" data-open-groups>{{ t("home.groups_button") }}</button>
+  <div class="mores">
+    <button type="button" class="more" data-open-picker>{{ t("home.edit") }}{% if has_new %}<span class="dot" title="{{ t('home.new_apps') }}"></span>{% endif %}</button>
+    <button type="button" class="more" data-open-groups>{{ t("home.groups_button") }}</button>
+  </div>
 </div>
 {% endif %}
 </div>
@@ -140,7 +150,6 @@
       </section>
       {% endif %}
       {% endfor %}
-      <button type="button" class="gnew"><span aria-hidden="true">＋</span> {{ t("js.home.group_new") }}</button>
     </div>
     {% else %}
     <p class="none">{{ t("home.none") }}</p>
@@ -148,6 +157,21 @@
     <footer><button type="button" class="primary" data-close>{{ t("home.done") }}</button></footer>
   </div>
   <template id="pgroupNew"><section class="pgroup" data-gid="">{{ pick_head(none) }}<ul></ul></section></template>
+</dialog>
+
+<dialog id="groups" class="sheet" aria-labelledby="groupsTitle">
+  <div class="sheet-in">
+    <header>
+      <h1 id="groupsTitle" tabindex="-1" autofocus>{{ t("home.groups_title") }}</h1>
+      <p>{{ t("home.groups_hint") }}</p>
+    </header>
+    <div class="glist">
+      {% for g, rows in available if g %}{{ group_row(g, rows|length) }}{% endfor %}
+      <button type="button" class="gnew"><span aria-hidden="true">＋</span> {{ t("js.home.group_new") }}</button>
+    </div>
+    <footer><button type="button" class="primary" data-close>{{ t("home.done") }}</button></footer>
+  </div>
+  <template id="pgroupRow">{{ group_row(none, 0) }}</template>
 </dialog>
 <script type="application/json" id="__hub_strings">{{ js_strings|tojson }}</script>
 <script src="{{ static_url('home.js') }}" defer></script>

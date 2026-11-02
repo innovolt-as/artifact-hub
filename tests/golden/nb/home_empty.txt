@@ -11,3 +11,8 @@ Ordne apper
 Huk av det du vil ha på forsiden, og velg gruppe.
 Det finnes ingen apper ennå.
 Ferdig
+Grupper
+Lag, gi nytt navn, slett, og dra for å endre rekkefølgen.
+＋
+Ny gruppe
+Ferdig
