@@ -112,6 +112,18 @@
   // Only when the session started at the front page (hub-start) and the page is not asking to stay (hubStay).
   let stay = false;
   window.hubStay = (on) => { stay = !!on; };
+  // Text the user typed and has not saved keeps the page too: record typed fields, forget them on submit.
+  const typed = new Set();
+  const isField = (el) => el instanceof Element && !el.closest("hub-banner") && (el.isContentEditable
+    || el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && /^(text|search|email|url|tel|number|password)?$/.test(el.getAttribute("type") || "")));
+  document.addEventListener("input", (e) => { if (isField(e.target)) typed.add(e.target); }, true);
+  document.addEventListener("submit", (e) => { for (const el of e.target.elements || []) typed.delete(el); }, true);
+  const holdsText = () => {
+    try {
+      return [...typed].some((el) => el.isConnected && el.getClientRects().length > 0
+        && (el.isContentEditable ? el.textContent !== "" : el.value !== "" && el.value !== el.defaultValue));
+    } catch (e) { return true; } // an error in the check means stay: never lose text
+  };
   try {
     if (!sessionStorage.getItem("hub-start")) sessionStorage.setItem("hub-start", location.pathname);
     const standalone = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
@@ -119,7 +131,7 @@
       const AWAY_MS = 120000;
       let left = null;
       const back = () => {
-        if (left !== null && !stay && Date.now() - left >= AWAY_MS) location.replace("/");
+        if (left !== null && !stay && Date.now() - left >= AWAY_MS && !holdsText()) location.replace("/");
         left = null;
       };
       document.addEventListener("visibilitychange", () => { if (document.hidden) left = Date.now(); else back(); });

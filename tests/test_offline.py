@@ -270,3 +270,4 @@ def test_hub_js_has_the_away_rule():
     for part in ("hubStay", "hub-start", "120000", "display-mode: standalone"):
         assert part in js
     assert "hub-start" in (static / "home.js").read_text()
+    assert 'addEventListener("input"' in js and "holdsText" in js and "defaultValue" in js
