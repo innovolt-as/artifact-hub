@@ -1,4 +1,7 @@
 """Pull to refresh (static/pull.js): loaded on the hub's own pages and in every app page."""
+import re
+
+PULL_HUB = r'<script src="/static/pull\.js\?v=[0-9a-f]{8}" defer></script>'  # hub pages: versioned
 
 
 def test_pull_js_in_app_pages(admin_client, upload):
@@ -9,8 +12,8 @@ def test_pull_js_in_app_pages(admin_client, upload):
 
 
 def test_pull_js_on_hub_pages(user_client, client):
-    assert '<script src="/static/pull.js" defer></script>' in user_client.get("/").text
-    assert '<script src="/static/pull.js" defer></script>' in client.get("/login").text
+    assert re.search(PULL_HUB, user_client.get("/").text)
+    assert re.search(PULL_HUB, client.get("/login").text)
 
 
 def test_pull_js_only_as_home_screen_app(client):

@@ -135,5 +135,5 @@
 <script type="application/json" id="known">{{ known|tojson }}</script>
 
 {% include "_admin_js.html" %}
-<script src="/static/admin-apps.js"></script>
+<script src="{{ static_url('admin-apps.js') }}"></script>
 {% endblock %}

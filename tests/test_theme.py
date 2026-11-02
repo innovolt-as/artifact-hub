@@ -41,7 +41,7 @@ def test_login_page_follows_the_device(client):
     assert "data-theme" not in client.get("/login").text.split("<head>")[0]
 
 
-THEME_JS = '<script src="/static/theme.js"'
+THEME_JS = '<script src="/static/theme.js?v='
 
 
 def test_theme_script_is_on_the_hubs_pages_but_not_on_apps_or_login(make_page, user_client, client):
