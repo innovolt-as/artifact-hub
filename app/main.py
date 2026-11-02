@@ -65,6 +65,7 @@ SITE_NAME = os.environ.get("SITE_NAME", "Artifact Hub")
 # Optional branding: files with these names in BRANDING_DIR replace the defaults in app/static/
 BRANDING_DIR = Path(os.environ.get("BRANDING_DIR") or DB_PATH.parent / "branding")
 PRECACHE_HEADER = "x-hub-precache"  # the service worker sends it when it fetches a copy of an app
+DEST_HEADER = "x-hub-dest"  # and this, naming the destination, on a navigation it passes on (Sec-Fetch-Dest says empty)
 BRANDING_FILES = ("logo.svg", "favicon-32.png", "apple-touch-icon.png")
 
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
@@ -904,13 +905,13 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
         if meta.get("offline") is not True:
             raise HTTPException(404)
     if protected and not unlocked(request, user, slug):
-        if request.headers.get("sec-fetch-dest", "document") == "document":
+        if _opened(request):
             return _lock_screen(request, user, slug, request.url.path + (f"?{request.url.query}" if request.url.query else ""))
         raise _locked_error()
     if path in ("", "index.html") and not precache:
         _log_visit(user, slug)
     # only a page the browser opens gets the banner, not HTML an app fetches or shows in an iframe
-    with_banner = precache or request.headers.get("sec-fetch-dest", "document") == "document"
+    with_banner = precache or _opened(request)
     offline = meta.get("offline") is True and not protected
     if root.is_file():
         if path not in ("", "index.html"):
@@ -927,6 +928,15 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
         return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected, offline=offline)
     # a locked app's files must not outlive the unlock in the browser's cache
     return FileResponse(target, headers={"Cache-Control": "no-store"} if protected else None)
+
+
+def _opened(request: Request) -> bool:
+    """A page the browser opens in its tab, not HTML an app fetches or shows in a frame. A navigation the service worker
+    passes on arrives as Sec-Fetch-Dest: empty, with the real destination in X-Hub-Dest (static/sw.js)."""
+    dest = request.headers.get("sec-fetch-dest", "document")
+    if dest == "empty":
+        dest = request.headers.get(DEST_HEADER, dest)
+    return dest == "document"
 
 
 # Apps are used on phones and must never scroll sideways. iOS zooms in on inputs under 16px and

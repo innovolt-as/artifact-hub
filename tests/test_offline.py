@@ -200,3 +200,52 @@ def test_pages_register_the_worker(client):
     for name in ("home.js", "hub.js"):
         js = client.get(f"/static/{name}").text
         assert "serviceWorker" in js and "/sw.js" in js, name
+
+
+def test_messages_go_to_the_hub_worker(client):
+    """The registration register("/sw.js") gives, not navigator.serviceWorker.ready: under an app with its own worker
+    that is the app's."""
+    for name in ("home.js", "hub.js", "settings-lock.js"):
+        js = client.get(f"/static/{name}").text
+        assert 'register("/sw.js")' in js and "reg.installing || reg.waiting" in js, name
+        assert ".ready.then(" not in js and "sw.ready" not in js, name
+
+
+def test_lock_forgets_the_copy(client):
+    js = client.get("/static/settings-lock.js").text
+    assert "hub-pages-v1" in js and '"hub:app"' in js and "offline: false" in js
+
+
+def test_sw_wipes_on_login(client):
+    js = client.get("/sw.js").text
+    logins = re.search(r"const LOGINS = \[(.*?)\];", js, re.S).group(1)
+    for pair in ('["GET", "/auth"]', '["POST", "/login"]', '["POST", "/password"]'):
+        assert pair in logins, pair
+
+
+# A navigation the service worker passes on arrives as Sec-Fetch-Dest: empty; sw.js names what it was in X-Hub-Dest
+FWD = {"sec-fetch-dest": "empty", "sec-fetch-mode": "same-origin", "X-Hub-Dest": "document"}
+
+
+def test_forwarded_navigation_gets_the_banner(hub):
+    _page(hub, "a")
+    c = make_client(USER)
+    assert "<hub-banner" in c.get("/a/a/", headers=FWD).text
+    assert "<hub-banner" not in c.get("/a/a/", headers={**FWD, "X-Hub-Dest": "iframe"}).text
+    assert "<hub-banner" not in c.get("/a/a/", headers={"sec-fetch-dest": "empty"}).text
+    assert "<hub-banner" not in c.get("/a/a/", headers={**FWD, "sec-fetch-dest": "iframe"}).text  # only empty is named
+
+
+def test_forwarded_navigation_gets_the_code_screen(hub):
+    _page(hub, "a")
+    lock(USER, "a")
+    c = make_client(USER)
+    r = c.get("/a/a/", headers=FWD)
+    assert r.status_code == 423 and 'action="/lock/a"' in r.text
+    r = c.get("/a/a/", headers={"sec-fetch-dest": "empty"})
+    assert r.status_code == 423 and 'action="/lock/a"' not in r.text
+
+
+def test_sw_names_forwarded_navigations(client):
+    js = client.get("/sw.js").text
+    assert '"X-Hub-Dest"' in js and "req.destination" in js

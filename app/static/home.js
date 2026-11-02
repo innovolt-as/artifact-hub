@@ -161,16 +161,29 @@
   // ------------------------------------------------------------ the copy on the phone (static/sw.js)
   // The hub's service worker keeps this page and the apps marked «Virker uten nett». Unless this is that copy, tell it
   // who is logged in, which apps those are, and the hub's files this page uses (it did not see them load on the first
-  // visit). Without service workers the page works as before.
+  // visit). The worker is the one register() gives, once active (not navigator.serviceWorker.ready, which may be an
+  // app's own). Without service workers the page works as before.
+  async function hubWorker(sw) {
+    const reg = await sw.register("/sw.js");
+    const next = reg.installing || reg.waiting;
+    if (next) {
+      await new Promise((resolve) => {
+        const done = () => { if (next.state === "activated" || next.state === "redundant") resolve(); };
+        next.addEventListener("statechange", done);
+        done();
+      });
+    }
+    return reg.active;
+  }
   try {
     const sw = navigator.serviceWorker;
-    sw?.register("/sw.js").catch(() => {});
     const user = document.querySelector(".topbar .who")?.textContent.trim();
-    if (sw && user && root.dataset.hubOffline !== "1") {
+    const worker = sw ? hubWorker(sw) : null;
+    worker?.catch(() => {});
+    if (worker && user && root.dataset.hubOffline !== "1") {
       const assets = [...document.querySelectorAll("link[rel=stylesheet], link[rel=manifest], script[src], img[src]")]
         .map((el) => el.href || el.src).filter((u) => u && u.startsWith(location.origin + "/"));
-      sw.ready.then((reg) => reg.active?.postMessage({ type: "hub:home", user, offline: S.offline_apps || [], assets }))
-        .catch(() => {});
+      worker.then((w) => w?.postMessage({ type: "hub:home", user, offline: S.offline_apps || [], assets })).catch(() => {});
     }
   } catch { /* no service workers here */ }
 
