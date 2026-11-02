@@ -2,11 +2,14 @@
 // long-press / right-click menu in the icon view) and the "Choose apps" list. Prefs live on the account
 // (/api/prefs/*). The page never reloads: it fetches itself again, swaps in what changed and blinks those cards.
 //
+// Groups fold and unfold on a tap (toggleGroup); the choice is saved on the account like the other prefs.
+//
 // Shared with pull.js and drag.js:
 //   window.hubRefresh() -> Promise<boolean>  true when the page was updated, false when fetching it failed
 //   "hub:menu" on document, detail {li, x, y} opens the pin/unpin menu (drag.js: long press on a favourite)
 //   "hub:idle" on document                    a drag or the menu is done, so a waiting refresh may run
 //   <html data-hub-drag="1">                  set by drag.js while a favourite is being dragged
+//   window.hubDragJustEnded() -> boolean      drag.js: a tap that ends a drag must not fold the group under it
 (function () {
   const root = document.documentElement;
   const picker = document.getElementById("picker");
@@ -42,17 +45,72 @@
   const cardsOf = (home) => new Map([...home.querySelectorAll("li.app[data-slug]")].map((li) => [keyOf(li), li]));
   // What the server drew: each card's HTML by section/slug, and the rest of #home with the cards as placeholders
   // (sections, slug order, the dot on "Choose apps"...). Taken from server markup only, never from the live page,
-  // so classes like blink or a drag's inline styles don't count as changes.
+  // so classes like blink or a drag's inline styles don't count as changes. Whether a group is open is kept out of the
+  // frame (open: group id -> "1"/"0"): a fold, here or in another tab, is applied to the live group and neither swaps
+  // #home nor blinks a card.
+  const groupsOf = (home) => [...home.querySelectorAll("section.group[data-group]")];
   function snapshot(home) {
     const frame = home.cloneNode(true);
     frame.querySelectorAll("li.app[data-slug]").forEach((li) => li.replaceWith("[" + li.dataset.slug + "]"));
+    groupsOf(frame).forEach((g) => {
+      g.removeAttribute("data-open");
+      g.querySelector(".gtoggle")?.removeAttribute("aria-expanded");
+      g.querySelector("ul")?.removeAttribute("hidden");
+      g.querySelector(".gclosed")?.remove();
+    });
     return {
       cards: new Map([...cardsOf(home)].map(([k, li]) => [k, li.outerHTML])),
+      open: new Map(groupsOf(home).map((g) => [g.dataset.group, g.dataset.open])),
       frame: frame.outerHTML,
       view: home.querySelector(".apps")?.dataset.view,
     };
   }
   let shown = snapshot(document.getElementById("home"));
+
+  // ------------------------------------------------------------ folding groups
+  // Group id -> "1"/"0" for a fold whose save is under way; refreshes leave those groups as they are
+  const folding = new Map();
+  // A closed group shows its apps as one row of small icons, copied from its cards (the server draws the same row for
+  // a group that was closed when the page was fetched)
+  function syncClosed(section) {
+    let row = section.querySelector(".gclosed");
+    if (section.dataset.open === "1") return row?.remove();
+    if (!row) {
+      row = document.createElement("button");
+      row.type = "button";
+      row.className = "gclosed";
+      section.append(row);
+    }
+    row.replaceChildren(...[...section.querySelectorAll("li.app .icon")].map((ic) => {
+      const c = ic.cloneNode(true);
+      c.classList.add("icon-xs");
+      return c;
+    }));
+  }
+  function setOpen(section, open) {
+    section.dataset.open = open ? "1" : "0";
+    section.querySelector(".gtoggle")?.setAttribute("aria-expanded", String(open));
+    const list = section.querySelector("ul");
+    if (list) list.hidden = !open;
+    syncClosed(section);
+  }
+  // Flips at once, saves, and flips back (with the usual alert) if the save fails
+  function toggleGroup(section) {
+    if (offline()) return; // nothing saves offline
+    const id = section.dataset.group, open = section.dataset.open !== "1";
+    setOpen(section, open);
+    folding.set(id, open ? "1" : "0");
+    const done = () => { if (folding.get(id) === (open ? "1" : "0")) folding.delete(id); };
+    post("/api/prefs/groups/open", { id, open }).then(
+      () => refresh({ after: true }).finally(done),
+      () => {
+        done();
+        const now = document.getElementById("g-" + id); // #home may have been swapped meanwhile
+        if (now) setOpen(now, !open);
+        failed();
+      },
+    );
+  }
 
   const pressView = (view) =>
     document.querySelectorAll("[data-set-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.setView === view)));
@@ -66,19 +124,25 @@
     const live = cardsOf(home);
     const focused = document.activeElement;
     const focusLi = focused && home.contains(focused) ? focused.closest("li.app") : null;
-    let swapped;
+    let swapped, redrawnGroups;
     if (!force && next.frame === shown.frame && redrawn.every(([k]) => live.has(k))) {
       swapped = redrawn.map(([k, li]) => { // same layout: only the changed cards
         const n = document.importNode(li, true);
         live.get(k).replaceWith(n);
         return n;
       });
+      for (const g of groupsOf(home)) if (swapped.some((n) => g.contains(n))) syncClosed(g); // its icons changed
     } else {
       const n = document.importNode(fresh, true);
       home.replaceWith(n);
       home = n;
       const now = cardsOf(n);
       swapped = redrawn.map(([k]) => now.get(k));
+    }
+    // Open or closed as the server has it, except a group folded here whose save has not been answered yet
+    for (const g of groupsOf(home)) {
+      const want = folding.has(g.dataset.group) ? folding.get(g.dataset.group) : next.open.get(g.dataset.group);
+      if (want && g.dataset.open !== want) setOpen(g, want === "1");
     }
     // A new view redraws every card; that is not a change to blink about
     if (!quiet && !(shown.view && next.view && shown.view !== next.view)) swapped.forEach((li) => li.classList.add("blink"));
@@ -215,7 +279,9 @@
     }
     const apps = document.querySelector("#home .apps");
     if (!apps) return;
-    const cards = ["fav", "top", "rest"].flatMap((id) => [...apps.querySelectorAll("#" + id + " li.app")]);
+    // Favourites, every group (open or closed: its hidden cards count too) and the rest, in page order
+    const pageSections = "#fav, section.group, #rest";
+    const cards = [...apps.querySelectorAll(pageSections)].flatMap((s) => [...s.querySelectorAll("li.app")]);
     const marked = new Set(S.offline_apps || []);
     const stored = await Promise.all(cards.map(async (li) => {
       if (!marked.has(li.dataset.slug)) return false;
@@ -247,7 +313,7 @@
     };
     const ok = section("offline-ok", S.offline_ok, cards.filter((_, i) => stored[i]));
     const no = section("offline-no", S.offline_no, cards.filter((_, i) => !stored[i]), S.offline_back);
-    apps.querySelectorAll("#fav, #top, #rest").forEach((s) => s.remove());
+    apps.querySelectorAll(pageSections).forEach((s) => s.remove());
     apps.prepend(...[ok, no].filter(Boolean));
   }
   if (offline()) enterOffline().catch((e) => console.error(e));
@@ -388,6 +454,12 @@
         e.preventDefault();
         showToast(S.needs_net.replace("{app}", grey.closest(".app").querySelector("h2")?.textContent || ""));
       }
+      return;
+    }
+    const fold = at(e, ".gtoggle, .gclosed");
+    if (fold) {
+      e.preventDefault();
+      if (!window.hubDragJustEnded?.()) toggleGroup(fold.closest("section.group"));
       return;
     }
     const pin = at(e, ".pin");

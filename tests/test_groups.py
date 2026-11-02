@@ -1,5 +1,6 @@
 """Each user's own groups for the front page (app/home.py, prefs key "groups")."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -555,3 +556,24 @@ def test_group_name_escaped(hub, user_client):
     sec = _sec(html, f"g-{gid}")
     assert "&lt;b&gt;x&lt;/b&gt;&#34;&amp;" in sec and "<b>x</b>" not in html
     assert 'aria-label="Åpne eller lukk &lt;b&gt;x&lt;/b&gt;&#34;&amp;"' in sec
+
+
+# ---------------------------------------------------------------- folding (home.js, hub.css)
+def _static(name):
+    return (Path(__file__).resolve().parent.parent / "app" / "static" / name).read_text("utf-8")
+
+
+def test_fold_wiring():
+    js, css = _static("home.js"), _static("hub.css")
+    for needle in ("gtoggle", "gclosed", "/api/prefs/groups/open", "toggleGroup", "hubDragJustEnded"):
+        assert needle in js
+    for needle in (".gclosed", ".gtoggle", '.group[data-open="0"]'):
+        assert needle in css
+
+
+def test_offline_layout_collects_every_group():
+    js = _static("home.js")
+    start = js.index("async function enterOffline")
+    body = js[start:js.index("if (offline()) enterOffline()", start)]
+    assert "section.group" in body and '"top"' not in body and "#top" not in body
+    assert "#top" not in js

@@ -71,13 +71,21 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .sec { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin: 0 0 10px; }
 .sec span { text-transform: none; letter-spacing: 0; font-weight: 400; }
 #fav, .group { margin-bottom: 26px; }
-.gtoggle { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 32px; padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+/* A group's heading is a button: name, count, chevron at the far end (› closed, ⌄ open) */
+.group > .sec { margin: 0; }
+.gtoggle { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; padding: 0 2px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.gtoggle:focus-visible, .gclosed:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
 /* .grid and .cards set display, which would beat the hidden attribute of a closed group's list */
 .apps ul[hidden] { display: none; }
+.group[data-open="0"] > ul { display: none; }
+.group[data-open="1"] > ul { margin-top: 2px; }
 .gcount { color: var(--muted); }
-.chev { flex: none; width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); }
-.gtoggle[aria-expanded="true"] .chev { transform: translateY(1px) rotate(-135deg); }
-.gclosed { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; padding: 8px 0; border: 0; background: none; cursor: pointer; }
+.chev { flex: none; margin-left: auto; margin-right: 8px; width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateX(-1px) rotate(-45deg); }
+.gtoggle[aria-expanded="true"] .chev { transform: translateY(-2px) rotate(45deg); }
+/* A closed group: its apps as one row of small icons (wrapping), the whole row a tap target */
+.gclosed { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 8px; width: 100%; min-height: 44px; padding: 6px 2px; border: 0; background: none; color: var(--muted); font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.gclosed .icon { flex: none; }
+.group[data-open="0"] { margin-bottom: 18px; }
 .app { position: relative; min-width: 0; }
 .app a { -webkit-touch-callout: none; }
 .cards .app a { user-select: none; -webkit-user-select: none; }
