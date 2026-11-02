@@ -31,3 +31,8 @@ def test_the_stylesheet_address_follows_its_content(client):
 def test_a_switch_shows_on_a_phone_without_color_mix():
     # Safari before 16.2 and Chrome before 111 drop the color-mix line, and the switch would have no track when off
     assert re.search(r"background: var\(--line\); background: color-mix", rule(".sw"))
+
+
+def test_a_hidden_list_stays_hidden():
+    # .grid and .cards set display: grid, which beats the hidden attribute of a closed group's list
+    assert "display: none" in rule(".apps ul[hidden]")

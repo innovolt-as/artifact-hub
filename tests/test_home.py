@@ -46,8 +46,7 @@ def test_sections_order(hub):
         g2 = hub.home.create_group(con, "x@t.no", "Fritid")["id"]
         for slug in ["d", "b"]:
             hub.home.set_app_group(con, "x@t.no", slug, g1)
-        for slug in ["a"]:
-            hub.home.set_app_group(con, "x@t.no", slug, g2)
+        hub.home.set_app_group(con, "x@t.no", "a", g2)
         hub.home.set_pin(con, "x@t.no", "e", True)
         hub.home.set_pin(con, "x@t.no", "c", True)
     favs, groups, rest = _sections(hub, "x@t.no", _apps("a", "b", "c", "d", "e", "f", "g"))
@@ -70,8 +69,7 @@ def test_empty_group_hidden(hub):
     with hub.db() as con:
         hub.home.create_group(con, "x@t.no", "Tom")
         h = hub.home.create_group(con, "x@t.no", "Bare fast")["id"]
-        for slug in ["a"]:
-            hub.home.set_app_group(con, "x@t.no", slug, h)
+        hub.home.set_app_group(con, "x@t.no", "a", h)
         hub.home.set_pin(con, "x@t.no", "a", True)
     favs, groups, rest = _sections(hub, "x@t.no", _apps("a", "b"))
     assert groups == [] and _slugs(favs) == ["a"] and _slugs(rest) == ["b"]
@@ -126,8 +124,7 @@ def test_new_dot(hub):
     _visit(hub, "x@t.no", "b", at=300)
     with hub.db() as con:
         g = hub.home.create_group(con, "x@t.no", "G")["id"]
-        for slug in ["b"]:
-            hub.home.set_app_group(con, "x@t.no", slug, g)
+        hub.home.set_app_group(con, "x@t.no", "b", g)
     favs, groups, rest = _sections(hub, "x@t.no", apps, now=400)
     flags = {a["slug"]: a["new"] for a in favs + [a for _, grouped in groups for a in grouped] + rest}
     assert flags == {"a": True, "b": False, "c": False}

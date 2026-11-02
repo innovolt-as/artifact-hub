@@ -72,6 +72,8 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .sec span { text-transform: none; letter-spacing: 0; font-weight: 400; }
 #fav, .group { margin-bottom: 26px; }
 .gtoggle { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 32px; padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+/* .grid and .cards set display, which would beat the hidden attribute of a closed group's list */
+.apps ul[hidden] { display: none; }
 .gcount { color: var(--muted); }
 .chev { flex: none; width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); }
 .gtoggle[aria-expanded="true"] .chev { transform: translateY(1px) rotate(-135deg); }
