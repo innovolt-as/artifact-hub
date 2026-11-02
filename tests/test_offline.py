@@ -262,3 +262,11 @@ def test_offline_strings_reach_the_page(hub, admin_client):
     css = (Path(__file__).parent.parent / "app" / "static" / "hub.css").read_text()
     for sel in (".offline-badge", "#offline-no", ".hub-toast"):
         assert sel in css
+
+
+def test_hub_js_has_the_away_rule():
+    static = Path(__file__).parent.parent / "app" / "static"
+    js = (static / "hub.js").read_text()
+    for part in ("hubStay", "hub-start", "120000", "display-mode: standalone"):
+        assert part in js
+    assert "hub-start" in (static / "home.js").read_text()

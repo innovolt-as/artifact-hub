@@ -35,6 +35,7 @@
       now.toLocaleDateString(S.locale, { weekday: "long", day: "numeric", month: "long" });
   }
   stamp();
+  try { if (!sessionStorage.getItem("hub-start")) sessionStorage.setItem("hub-start", location.pathname); } catch (e) { /* none */ }
 
   // ------------------------------------------------------------ refresh in place
   const keyOf = (li) => (li.closest("section")?.id || "") + "/" + li.dataset.slug;

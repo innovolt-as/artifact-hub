@@ -107,6 +107,26 @@
     addEventListener("pageshow", check);
   }
 
+  // ------------------------------------------------------------------ back to the front page after 2 minutes away
+  // The hub as a home-screen app: coming back after a while should show the front page, not the app left behind.
+  // Only when the session started at the front page (hub-start) and the page is not asking to stay (hubStay).
+  let stay = false;
+  window.hubStay = (on) => { stay = !!on; };
+  try {
+    if (!sessionStorage.getItem("hub-start")) sessionStorage.setItem("hub-start", location.pathname);
+    const standalone = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+    if (standalone && sessionStorage.getItem("hub-start") === "/") {
+      const AWAY_MS = 120000;
+      let left = null;
+      const back = () => {
+        if (left !== null && !stay && Date.now() - left >= AWAY_MS) location.replace("/");
+        left = null;
+      };
+      document.addEventListener("visibilitychange", () => { if (document.hidden) left = Date.now(); else back(); });
+      addEventListener("pageshow", back);
+    }
+  } catch (e) { /* no sessionStorage: the rule does not apply */ }
+
   // ------------------------------------------------------------------ the copy on the phone (static/sw.js)
   // The hub's service worker keeps the page of an app marked «Virker uten nett» (data-offline="1"), and the files it
   // uses, and drops the copy of one that is not. Once the page has loaded, tell it, with those files (it did not see
