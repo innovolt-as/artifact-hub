@@ -103,7 +103,7 @@ ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin pag
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
 MAX_ICON_BYTES = 2 * 1024 * 1024
-META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data")  # what survives a re-upload
+META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline")  # what survives a re-upload
 
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -541,6 +541,7 @@ def list_artifacts(user: str) -> list[dict]:
                 "people": access.people(meta) if admin else [],
                 "banner": meta.get("banner") is not False,  # the strip at the top of the app (banner.py)
                 "data": "shared" if shared.is_shared(meta) else "personal",  # app/shared.py
+                "offline": kind != "link" and meta.get("offline") is True,  # the page is kept on the phone
                 "updated": mtime,
                 "emoji": meta.get("emoji", ""),
                 "icon_url": f"/icon/{slug}?v={int(icon.stat().st_mtime)}" if icon else None,
@@ -1962,6 +1963,36 @@ def api_toggle_banner(request: Request, slug: str = Form(...)):
         meta["banner"] = False
     _write_meta(meta_path, meta)
     return JSONResponse({"ok": True, "banner": meta.get("banner") is not False})
+
+
+def set_offline(slug: str, on: bool) -> None:
+    """Mark a page or folder app as working offline, or take the mark off (the key is removed)."""
+    meta_path = _meta_path(slug)
+    if not meta_path:
+        raise HubError(i18n.t("page.not_found", slug=slug))
+    if meta_path.name.endswith(".link.json"):
+        raise HubError(i18n.t("err.offline_link"))
+    meta = _read_meta(meta_path)
+    if on:
+        meta["offline"] = True
+    else:
+        meta.pop("offline", None)
+    _write_meta(meta_path, meta)
+
+
+@app.post("/api/toggle-offline")
+def api_toggle_offline(request: Request, slug: str = Form(...)):
+    """Flip «Virker uten nett» for one app."""
+    _upload_authorized(request)
+    meta_path = _meta_path(slug)
+    if not meta_path:
+        raise HTTPException(404)
+    on = not _read_meta(meta_path).get("offline")
+    try:
+        set_offline(slug, on)
+    except HubError as e:
+        raise HTTPException(404) from e
+    return JSONResponse({"ok": True, "offline": on})
 
 
 # ---------------------------------------------------------------- shared data on and off (app/shared.py)

@@ -76,6 +76,7 @@
     $('asSwitches').hidden = link;
     $('asData').checked = d.shared === '1';
     $('asBanner').checked = d.banner === '1';
+    $('asOffline').checked = d.offline === '1';
   }
   // visit counts every change of view, so a save or a preview that lands late can tell if the person is still there
   let visit = 0, shownAt = 0;
@@ -127,7 +128,7 @@
 
   // One save at a time: a tap on a switch while one runs does nothing
   let busy = false, saving = false;
-  for (const box of [$('asData'), $('asBanner')]) box.addEventListener('click', e => { if (busy || saving) e.preventDefault(); });
+  for (const box of [$('asData'), $('asBanner'), $('asOffline')]) box.addEventListener('click', e => { if (busy || saving) e.preventDefault(); });
   // work() saves and returns the response, or null when a view takes over from here
   async function flip(work) {
     const slug = current;
@@ -144,6 +145,7 @@
     } finally { busy = false; }
   }
   $('asBanner').addEventListener('change', () => flip(() => postSlug('/api/toggle-banner', current)));
+  $('asOffline').addEventListener('change', () => flip(() => postSlug('/api/toggle-offline', current)));
 
   // A save from a view goes back to the main view, which by then shows the new value. A failure stays in the view with
   // its error, for another try, unless the person has left the view: then fail() finds a place for it.

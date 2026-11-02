@@ -14,13 +14,14 @@
   <li data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}" data-kind="{{ a.kind }}"
       data-kindlabel="{{ t('admin.kind_' + a.kind) }}" data-url="{{ a.url }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}"
       data-level="{{ a.access }}" data-label="{{ a.access_label }}" data-people='{{ a.people|tojson }}'
-      data-shared="{{ '1' if a.data == 'shared' else '0' }}" data-banner="{{ '1' if a.banner else '0' }}"
+      data-shared="{{ '1' if a.data == 'shared' else '0' }}" data-banner="{{ '1' if a.banner else '0' }}" data-offline="{{ '1' if a.offline else '0' }}"
       data-claude="{{ '1' if a.slug in filled else '0' }}" data-warned="{{ '1' if a.slug in warned else '0' }}">
     <button type="button" class="arow">
       {{ icon(a, "icon icon-sm") }}
       <span class="txt"><b>{{ a.title }}</b><small>{{ a.access_label }}
         {%- if a.data == 'shared' %} · {{ t('admin.meta_shared') }}{% endif %}
         {%- if not a.banner %} · {{ t('admin.meta_no_banner') }}{% endif %}
+        {%- if a.offline %} · {{ t('admin.meta_offline') }}{% endif %}
         {%- if a.kind == 'link' %} · {{ t('admin.kind_link') }}{% endif %}</small>
         {%- if a.slug in warned %}<span class="claude-warn err small">⚠ {{ t('admin.claude_warning') }}</span>{% endif %}</span>
       <span class="chev" aria-hidden="true">›</span>
@@ -53,8 +54,10 @@
       <div class="as-group">
         <label class="set"><span>{{ t('admin.shared_data') }}</span><input type="checkbox" role="switch" id="asData"><span class="sw" aria-hidden="true"></span></label>
         <label class="set"><span>{{ t('admin.banner_top') }}</span><input type="checkbox" role="switch" id="asBanner"><span class="sw" aria-hidden="true"></span></label>
+        <label class="set"><span>{{ t('admin.offline') }}</span><input type="checkbox" role="switch" id="asOffline"><span class="sw" aria-hidden="true"></span></label>
       </div>
       <p class="as-hint">{{ t('admin.data_hint') }}</p>
+      <p class="as-hint">{{ t('admin.offline_hint') }}</p>
     </div>
     <p id="asError" class="err small" role="alert"></p>
     <button type="button" id="asDelete">{{ t('admin.delete_app') }}</button>
