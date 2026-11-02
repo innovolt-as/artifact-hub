@@ -82,7 +82,7 @@ def test_home_en(admin_client, english, frozen_monday, make_page):
     assert "Monday 26 October" in text
     assert "Your password has been changed." in text
     empty = visible_text(admin_client.get("/").text)
-    assert "Add or remove apps" in empty or "Add apps" in empty
+    assert "Arrange apps" in empty or "Add apps" in empty
 
 
 def test_home_empty_en(user_client, english, frozen_monday):

@@ -778,13 +778,13 @@ def index(request: Request, user: str = Depends(require_user)):
         with db() as con:  # a new connection: the recipes read through doc_get/doc_list, which open their own
             summaries = card_lines(con, user, mine, prefs["tz"])
     favs, groups, rest = home.build_sections(mine, stats, prefs["pins"], user_groups)
-    available = home.picker(apps, prefs["apps"], prefs["seen"])
+    available = home.picker(apps, prefs["apps"], prefs["seen"], user_groups)
     now = time.localtime()  # fallback only; the page rewrites the date and greeting with the viewer's clock
     return templates.TemplateResponse(
         request,
         "index.html",
         {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "view": prefs["view"], "favs": favs, "groups": groups, "has_groups": bool(user_groups), "rest": rest,
-         "available": available, "has_new": any(a["unseen"] for a in available), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
+         "available": available, "any_apps": bool(apps), "has_new": any(a["unseen"] for a in apps), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
          "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale"), "tz": prefs["tz"] or "",
                        "offline_apps": [a["slug"] for a in apps if a["offline"] and a["kind"] != "link" and a["slug"] not in locked]}},
     )
@@ -1552,7 +1552,7 @@ async def prefs_groups_open(request: Request, user: str = Depends(api_user)):
 
 @app.post("/api/prefs/seen")
 def prefs_seen(request: Request, user: str = Depends(api_user)):
-    """The user opened the "Choose apps" list: nothing in it is new any more."""
+    """The user opened the «Arrange apps» list: nothing in it is new any more."""
     _require_json(request)
     with db() as con:
         home.mark_seen(con, user, [a["slug"] for a in list_artifacts(user)])

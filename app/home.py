@@ -1,5 +1,5 @@
 """Front page data, per logged-in user: which apps they have chosen for it, which apps they have seen in the
-"Velg apper" list, which apps they open, what they pin, the groups they sort apps into, how they view the list, and the
+«Arrange apps» list, which apps they open, what they pin, the groups they sort apps into, how they view the list, and the
 one-line summary each app can leave for its card.
 
 Everything takes an open connection from main.db() (rows as sqlite3.Row) and an e-mail; nothing here
@@ -355,15 +355,28 @@ def set_group_open(con: sqlite3.Connection, email: str, gid: str, open: bool) ->
     _put(con, email, "groups", groups)
 
 
-def picker(apps: list[dict], chosen: list[str], seen: list[str] | None) -> list[dict]:
-    """The "Velg apper" list: marks each app added/unseen; unseen first, each group in the given order.
+def picker(
+    apps: list[dict], chosen: list[str], seen: list[str] | None, groups: list[dict]
+) -> list[tuple[dict | None, list[dict]]]:
+    """The «Arrange apps» list: (group, its apps) for each group in order, empty ones too, holding the apps in `apps`
+    in the group's order; then (None, the apps in no group) in the order given (list_artifacts sorts by title). Every
+    app is listed once, pinned or not. Marks each app added/unseen and its place in `apps` (sort, for the page).
 
     Unseen = came after the user last opened the list. Before the first opening nothing is unseen, and an
     app on the front page always counts as seen."""
-    for a in apps:
+    by_slug = {a["slug"]: a for a in apps}
+    for i, a in enumerate(apps):
         a["added"] = a["slug"] in chosen
         a["unseen"] = seen is not None and not a["added"] and a["slug"] not in seen
-    return [a for a in apps if a["unseen"]] + [a for a in apps if not a["unseen"]]
+        a["sort"] = i
+    out: list[tuple[dict | None, list[dict]]] = []
+    listed: set[str] = set()
+    for g in groups:
+        members = [by_slug[s] for s in g["slugs"] if s in by_slug and s not in listed]
+        listed.update(a["slug"] for a in members)
+        out.append((g, members))
+    out.append((None, [a for a in apps if a["slug"] not in listed]))
+    return out
 
 
 # ---------------------------------------------------------------- summaries

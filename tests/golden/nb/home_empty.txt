@@ -10,7 +10,7 @@ mandag 26. oktober
 +
 Legg til apper
 Velg hvilke apper du vil ha på forsiden din
-Velg apper
-Huk av det du vil ha på forsiden
+Ordne apper
+Huk av det du vil ha på forsiden, og velg gruppe.
 Det finnes ingen apper ennå.
 Ferdig

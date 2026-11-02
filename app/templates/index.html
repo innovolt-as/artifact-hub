@@ -21,6 +21,27 @@
 </li>
 {%- endmacro %}
 
+{# «Arrange apps»: one app (tick, icon, name, the button with its group) and a group's heading, whose empty copy in
+   <template id="pgroupNew"> home.js fills for a group it adds #}
+{% macro pick_row(a, g) -%}
+<li data-slug="{{ a.slug }}" data-sort="{{ a.sort }}"><label>
+  <input type="checkbox" data-slug="{{ a.slug }}"{% if a.added %} checked{% endif %}>
+  <span class="tick" aria-hidden="true"></span>
+  {{ icon(a) }}
+  <span class="txt">
+    <b>{{ a.title }}{% if a.unseen %} <span class="new">{{ t("home.new") }}</span>{% endif %}{% if a.admin_only %} <span class="lockmark" title="{{ t('home.admin_only') }}">🔒</span>{% endif %}</b>
+    {% if a.description %}<small>{{ a.description }}</small>{% endif %}
+  </span>
+</label><button type="button" class="gpick" aria-haspopup="menu" aria-expanded="false" aria-label="{{ a.title }}: {{ g.name if g else t('js.home.group_pick') }}"><span class="gchip">{{ g.name if g else t("js.home.group_pick") }}</span></button></li>
+{%- endmacro %}
+
+{% macro pick_head(g) -%}
+<div class="gh"><h2>{{ g.name if g }}</h2>
+  <button type="button" class="grename"{% if g %} aria-label="{{ t('js.home.group_rename') }}: {{ g.name }}" title="{{ t('js.home.group_rename') }}"{% endif %}><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg></button>
+  <button type="button" class="gdelete"{% if g %} aria-label="{{ t('js.home.group_delete') }}: {{ g.name }}" title="{{ t('js.home.group_delete') }}"{% endif %}><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg></button>
+</div>
+{%- endmacro %}
+
 {% block topbar %}
 <div class="topbar">
   <div class="hero-in hero-row">
@@ -100,25 +121,29 @@
       <h1 id="pickerTitle" tabindex="-1" autofocus>{{ t("home.picker_title") }}</h1>
       <p>{{ t("home.picker_hint") }}</p>
     </header>
-    {% if available %}
-    <ul>
-      {% for a in available %}
-      <li><label>
-        <input type="checkbox" data-slug="{{ a.slug }}"{% if a.added %} checked{% endif %}>
-        {{ icon(a) }}
-        <span class="txt">
-          <b>{{ a.title }}{% if a.unseen %} <span class="new">{{ t("home.new") }}</span>{% endif %}{% if a.admin_only %} <span class="lockmark" title="{{ t('home.admin_only') }}">🔒</span>{% endif %}</b>
-          {% if a.description %}<small>{{ a.description }}</small>{% endif %}
-        </span>
-        <span class="tick" aria-hidden="true"></span>
-      </label></li>
+    {% if any_apps %}
+    <div class="picklist">
+      {% for g, rows in available %}
+      {% if g %}
+      <section class="pgroup" data-gid="{{ g.id }}">
+        {{ pick_head(g) }}
+        <ul>{% for a in rows %}{{ pick_row(a, g) }}{% endfor %}</ul>
+      </section>
+      {% else %}
+      <section class="pgroup" data-gid=""{% if has_groups and not rows %} hidden{% endif %}>
+        <div class="gh"{% if not has_groups %} hidden{% endif %}><h2>{{ t("home.no_group") }}</h2></div>
+        <ul>{% for a in rows %}{{ pick_row(a, none) }}{% endfor %}</ul>
+      </section>
+      {% endif %}
       {% endfor %}
-    </ul>
+      <button type="button" class="gnew"><span aria-hidden="true">＋</span> {{ t("js.home.group_new") }}</button>
+    </div>
     {% else %}
     <p class="none">{{ t("home.none") }}</p>
     {% endif %}
     <footer><button type="button" class="primary" data-close>{{ t("home.done") }}</button></footer>
   </div>
+  <template id="pgroupNew"><section class="pgroup" data-gid="">{{ pick_head(none) }}<ul></ul></section></template>
 </dialog>
 <script type="application/json" id="__hub_strings">{{ js_strings|tojson }}</script>
 <script src="/static/home.js" defer></script>

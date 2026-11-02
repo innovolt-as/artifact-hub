@@ -26,19 +26,30 @@ H
 Hemmelig app
 @aria-label: Legg til i favoritter: Hemmelig app
 ☆
-＋ Legg til eller fjern apper
+＋ Ordne apper
 @title: Nye apper
-Velg apper
-Huk av det du vil ha på forsiden
-N
-Ny app
-Ny
+Ordne apper
+Huk av det du vil ha på forsiden, og velg gruppe.
+Uten gruppe
 E
 Ekstern lenke
+@aria-label: Ekstern lenke: Velg gruppe
+Velg gruppe
 F
 Fast app
+@aria-label: Fast app: Velg gruppe
+Velg gruppe
 H
 Hemmelig app
 @title: Kun admin
 🔒
+@aria-label: Hemmelig app: Velg gruppe
+Velg gruppe
+N
+Ny app
+Ny
+@aria-label: Ny app: Velg gruppe
+Velg gruppe
+＋
+Ny gruppe
 Ferdig

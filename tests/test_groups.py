@@ -587,9 +587,11 @@ def test_gone_apps_not_shown_or_counted(hub, user_client):
 
 def test_group_with_only_gone_apps_is_not_shown(hub, user_client):
     _front(hub, "a")
-    _grp(hub, "Jobb", ["slettet"])
+    gid = _grp(hub, "Jobb", ["slettet"])
     html = user_client.get("/").text
-    assert "Jobb" not in html and 'data-group=' not in html
+    front = html[:html.index("<dialog")]
+    assert "Jobb" not in front and 'data-group=' not in front
+    assert "<h2>Jobb</h2>" in _pgroup(_picker(html), gid)  # still there to arrange
 
 
 def test_group_name_escaped(hub, user_client):
@@ -633,3 +635,96 @@ def test_drag_wiring():
     assert "#fav .app" not in js and "#fav ul" not in js
     assert 'closest("#fav")' not in home
     assert ".group.lifted" in css and ".group.sliding" in css
+
+
+# ---------------------------------------------------------------- «Ordne apper» (the sheet)
+def _picker(html):
+    """The sheet as drawn, without the empty heading home.js copies for a new group."""
+    return html[html.find('id="picker"'):html.find('<template id="pgroupNew">')]
+
+
+def _pgroup(p, gid=""):
+    """The sheet's section for group `gid` ("" = no group)."""
+    start = p.find(f'<section class="pgroup" data-gid="{gid}"')
+    return "" if start < 0 else p[start:p.find("</section>", start)]
+
+
+def test_picker_grouped(hub):
+    apps = [{"slug": s, "title": s.upper(), "updated": 0} for s in ("a", "b", "c", "d", "e")]
+    groups = [{"id": "g1", "name": "Jobb", "slugs": ["d", "slettet", "b"], "open": True},
+              {"id": "g2", "name": "Tom", "slugs": [], "open": False},
+              {"id": "g3", "name": "Les", "slugs": ["a"], "open": True}]
+    out = hub.home.picker(apps, ["a", "b"], ["a", "b", "c"], groups)
+    assert [(g and g["id"], [a["slug"] for a in rows]) for g, rows in out] == [
+        ("g1", ["d", "b"]), ("g2", []), ("g3", ["a"]), (None, ["c", "e"])]  # unseen e is not lifted first any more
+    marks = {a["slug"]: (a["added"], a["unseen"]) for _, rows in out for a in rows}
+    assert marks == {"a": (True, False), "b": (True, False), "c": (False, False), "d": (False, True), "e": (False, True)}
+    assert [(g, [a["slug"] for a in rows]) for g, rows in hub.home.picker(apps[:2], [], None, [])] == [(None, ["a", "b"])]
+
+
+def test_picker_grouped_on_the_page(hub, user_client):
+    _front(hub, "a", "b", "c")
+    jobb = _grp(hub, "Jobb", ["c", "a"])
+    tom = _grp(hub, "Tom")
+    _page(hub, "d", title="D")  # not on the front page, never seen: «Ny», in its group
+    with hub.db() as con:
+        hub.home.set_app_group(con, U, "d", jobb)
+        hub.home.set_pin(con, U, "a", True)  # pinned: still listed under its group in the sheet
+    p = _picker(user_client.get("/").text)
+    g, empty, rest = _pgroup(p, jobb), _pgroup(p, tom), _pgroup(p)
+    assert p.index(g) < p.index(empty) < p.index(rest)
+    assert g.index('data-slug="c"') < g.index('data-slug="a"') < g.index('data-slug="d"')
+    assert "<h2>Uten gruppe</h2>" in rest and 'data-slug="b"' in rest and "data-slug" not in empty
+    assert g.count(">Ny<") == 1 and ">Ny<" in g[g.index('data-slug="d"'):]
+
+
+def test_picker_markup(hub, user_client):
+    _front(hub, "a", "b")
+    gid = _grp(hub, "Jobb", ["a"])
+    html = user_client.get("/").text
+    assert '<button type="button" class="more" data-open-picker>＋ Ordne apper' in html
+    p = _picker(html)
+    assert '<h1 id="pickerTitle" tabindex="-1" autofocus>Ordne apper</h1>' in p
+    assert "Huk av det du vil ha på forsiden, og velg gruppe." in p
+    assert p.count('class="gpick"') == 2 and p.count('class="grename"') == p.count('class="gdelete"') == 1
+    assert p.count('class="gnew"') == 1 and "Ny gruppe" in p[p.index('class="gnew"'):]
+    g, rest = _pgroup(p, gid), _pgroup(p)
+    assert "<h2>Jobb</h2>" in g and 'class="grename"' in g and 'class="gdelete"' in g
+    assert 'class="grename"' not in rest and 'class="gdelete"' not in rest
+    pick = lambda sec: sec[sec.index('class="gpick"'):sec.index("</button>", sec.index('class="gpick"'))]  # noqa: E731
+    assert ">Jobb<" in pick(g) and ">Velg gruppe<" in pick(rest)
+    assert 'aria-haspopup="menu"' in pick(g) and 'aria-expanded="false"' in pick(g)
+    assert "<select" not in html
+
+
+def test_picker_without_groups_hides_the_no_group_heading(hub, user_client):
+    _front(hub, "a")
+    p = _picker(user_client.get("/").text)
+    assert '<section class="pgroup" data-gid="" hidden>' not in p  # the list itself shows
+    assert 'class="gnew"' in p and 'class="grename"' not in p
+    assert '<div class="gh" hidden><h2>Uten gruppe</h2>' in _pgroup(p)
+
+
+def test_picker_name_escaped(hub, user_client):
+    _front(hub, "a")
+    gid = _grp(hub, '<b>x</b>"&', ["a"])
+    p = _picker(user_client.get("/").text)
+    esc = "&lt;b&gt;x&lt;/b&gt;&#34;&amp;"
+    g = _pgroup(p, gid)
+    assert f"<h2>{esc}</h2>" in g and f'<span class="gchip">{esc}</span>' in g  # the heading and the row's button
+    assert f'aria-label="A: {esc}"' in g
+    assert f'aria-label="Gi nytt navn: {esc}"' in g and f'aria-label="Slett: {esc}"' in g
+    assert "<b>x</b>" not in p
+    # The page draws names into the sheet and the menu itself: only ever as text
+    js = _static("home.js")
+    assert "innerHTML" not in js and "insertAdjacentHTML" not in js and "outerHTML =" not in js
+    assert "prompt(" not in js and "confirm(" not in js
+
+
+def test_picker_wiring():
+    js, css = _static("home.js"), _static("hub.css")
+    for needle in ("/api/prefs/groups/new", "/api/prefs/groups/rename", "/api/prefs/groups/delete",
+                   "/api/prefs/groups/app", ".gpick", ".grename", ".gdelete", ".gnew", "group_delete_ask"):
+        assert needle in js
+    for needle in ("#picker .gpick", "#picker .gmenu", "#picker .gform"):
+        assert needle in css

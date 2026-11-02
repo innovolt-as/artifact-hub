@@ -12,7 +12,7 @@ def rule(selector: str) -> str:
     return re.search(rf"^\s*{re.escape(selector)} \{{(.*?)\}}", CSS, re.M | re.S).group(1)
 
 
-@pytest.mark.parametrize("selector", [".sheet-in", "#picker ul", ".view", ".sheet .editor form"])
+@pytest.mark.parametrize("selector", [".sheet-in", "#picker .picklist", ".view", ".sheet .editor form"])
 def test_what_is_in_a_sheet_keeps_its_height(selector):
     # flex: 1 has a basis of 0, and on an iPhone the sheet then collapsed to its padding at the bottom of the screen
     assert "flex: 1 1 auto" in rule(selector)

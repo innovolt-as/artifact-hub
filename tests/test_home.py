@@ -389,13 +389,14 @@ def test_set_added_marks_seen(hub):
     assert sorted(_prefs(hub, "x@t.no")["seen"]) == ["a", "b"]
 
 
-def test_picker_puts_unseen_first(hub):
-    out = hub.home.picker(_apps("a", "b", "c", "d"), ["b"], ["a", "b"])
-    assert _slugs(out) == ["c", "d", "a", "b"]
-    assert [a["unseen"] for a in out] == [True, True, False, False]
-    assert [a["added"] for a in out] == [False, False, False, True]
-    assert not any(a["unseen"] for a in hub.home.picker(_apps("a", "b"), [], None))
-    assert not hub.home.picker(_apps("a"), ["a"], [])[0]["unseen"]
+def test_picker_marks_added_and_unseen(hub):
+    rows = lambda out: [a for _, apps in out for a in apps]  # noqa: E731
+    out = rows(hub.home.picker(_apps("a", "b", "c", "d"), ["b"], ["a", "b"], []))
+    assert _slugs(out) == ["a", "b", "c", "d"]  # the new ones keep their place (tests/test_groups.py: grouped)
+    assert [a["unseen"] for a in out] == [False, False, True, True]
+    assert [a["added"] for a in out] == [False, True, False, False]
+    assert not any(a["unseen"] for a in rows(hub.home.picker(_apps("a", "b"), [], None, [])))
+    assert not rows(hub.home.picker(_apps("a"), ["a"], [], []))[0]["unseen"]
 
 
 def test_add_for_only_users_with_choices(hub):
@@ -480,7 +481,7 @@ def test_new_address_keeps_app_on_front_page(hub, make_page, admin_client, user_
     assert 'data-slug="a2"' in _section(user_client.get("/").text, "rest")
 
 
-# ---------------------------------------------------------------- the "Velg apper" list on the front page
+# ---------------------------------------------------------------- the «Ordne apper» sheet on the front page
 def _picker(html):
     return html[html.find('id="picker"'):html.find("</dialog>")]
 
@@ -491,7 +492,7 @@ def test_empty_front_page_shows_add_card(hub, make_page, user_client):
     assert 'class="addcard"' in html and "Legg til apper" in html and "Velg hvilke apper du vil ha på forsiden din" in html
     assert "Ingen apper ennå" not in html and 'class="more"' not in html
     p = _picker(html)
-    assert "Velg apper" in p and 'data-slug="a"' in p and "Alfa" in p and "checked" not in p
+    assert "Ordne apper" in p and 'data-slug="a"' in p and "Alfa" in p and "checked" not in p
 
 
 def test_after_choosing_small_button_and_checked(hub, make_page, user_client):
@@ -499,17 +500,17 @@ def test_after_choosing_small_button_and_checked(hub, make_page, user_client):
     make_page("b", title="Beta")
     user_client.post("/api/prefs/apps", json={"slug": "a", "added": True})
     html = user_client.get("/").text
-    assert 'class="more"' in html and "Legg til eller fjern apper" in html and 'class="addcard"' not in html
+    assert 'class="more"' in html and "＋ Ordne apper" in html and 'class="addcard"' not in html
     assert re.search(r'data-slug="a"[^>]*checked', _picker(html)) and not re.search(r'data-slug="b"[^>]*checked', _picker(html))
 
 
-def test_new_apps_first_with_dot_until_seen(hub, make_page, user_client):
+def test_new_apps_marked_with_dot_until_seen(hub, make_page, user_client):
     make_page("a", title="Alfa")
     user_client.post("/api/prefs/apps", json={"slug": "a", "added": True})
     make_page("b", title="Beta")
     html = user_client.get("/").text
     p = _picker(html)
-    assert p.index('data-slug="b"') < p.index('data-slug="a"') and p.count(">Ny<") == 1
+    assert p.index('data-slug="a"') < p.index('data-slug="b"') and p.count(">Ny<") == 1  # alphabetical, not lifted
     more = html[html.find('class="more"'):]
     assert 'class="dot"' in more[:more.find("</button>")]
     user_client.post("/api/prefs/seen", json={})
