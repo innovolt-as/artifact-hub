@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local checks for scripts/backup.sh and scripts/rehearse.sh. Usage: tests/test_scripts.sh
+# Local checks for scripts/backup.sh, scripts/rehearse.sh and scripts/prune-images.sh. Usage: tests/test_scripts.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -76,3 +76,36 @@ grep -q -- '-e LOGIN_MODE=password' <<<"$pw"
 grep -q -- "$tmp/data/hub.db" <<<"$out" && { echo "must not mount the real data dir"; exit 1; } || true
 if ADMIN_EMAIL= DRY_RUN=1 scripts/rehearse.sh img x.tar.gz 2>/dev/null; then echo "should require ADMIN_EMAIL"; exit 1; fi
 echo "rehearse.sh ok"
+
+# prune-images.sh against a fake docker: a stopped container's image is kept like a running one's, KEEP newest of the
+# rest stay, every tag of a removed image goes, and nothing goes on a dry run.
+fd="$tmp/fakedocker"; mkdir "$fd"
+cat > "$fd/docker" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  ps) printf 'c1\nc2\n' ;;
+  inspect) printf 'sha256:v15\nsha256:v13\n' ;;
+  images) printf '%s\n' \
+    "2026-11-01 10:00:00 +0100 CET	sha256:v15	v1.5.0" "2026-11-01 10:00:00 +0100 CET	sha256:v15	latest" \
+    "2026-10-30 10:00:00 +0100 CET	sha256:v14	v1.4.1" \
+    "2026-10-29 10:00:00 +0100 CET	sha256:v13	v1.3.0" \
+    "2026-10-20 10:00:00 +0100 CET	sha256:v12	v1.2.0" "2026-10-20 10:00:00 +0100 CET	sha256:v12	v1.2" \
+    "2026-11-02 10:00:00 +0100 CET	sha256:v16	v1.6.0" \
+    "2026-10-10 10:00:00 +0100 CET	sha256:v11	<none>" ;;
+  rmi) echo "$2" >> "$RMI_LOG" ;;
+esac
+FAKE
+chmod +x "$fd/docker"
+export RMI_LOG="$tmp/rmi.log"; : > "$RMI_LOG"
+dry=$(PATH="$fd:$PATH" scripts/prune-images.sh --dry-run)
+[[ ! -s "$RMI_LOG" ]] || { echo "dry run removed: $(cat "$RMI_LOG")"; exit 1; }
+grep -q "would be removed" <<<"$dry"
+PATH="$fd:$PATH" scripts/prune-images.sh >/dev/null
+got=$(LC_ALL=C sort "$RMI_LOG" | tr '\n' ' ')
+want="ghcr.io/innovolt-as/artifact-hub:v1.2 ghcr.io/innovolt-as/artifact-hub:v1.2.0 ghcr.io/innovolt-as/artifact-hub:v1.4.1 sha256:v11 "
+[[ "$got" == "$want" ]] || { echo "prune removed: $got"; exit 1; }   # v1.6.0 newest unused (KEEP=1), v1.5.0 and v1.3.0 in use
+: > "$RMI_LOG"; KEEP=0 PATH="$fd:$PATH" scripts/prune-images.sh >/dev/null
+grep -qx "ghcr.io/innovolt-as/artifact-hub:v1.6.0" "$RMI_LOG" || { echo "KEEP=0 kept v1.6.0"; exit 1; }
+grep -q "v1.5.0\|v1.3.0" "$RMI_LOG" && { echo "removed an image in use"; exit 1; }
+if KEEP=x PATH="$fd:$PATH" scripts/prune-images.sh 2>/dev/null; then echo "should fail with KEEP=x"; exit 1; fi
+echo "prune-images.sh ok"

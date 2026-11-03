@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- `scripts/prune-images.sh` removes old hub images on the server to free disk space. It keeps the image in use and
+  the newest other one, to go back to; `--dry-run` shows what it would remove. See
+  [UPGRADING.md](docs/UPGRADING.md).
+
 ## v1.7.1 (2026-11-03)
 
 ### Changed

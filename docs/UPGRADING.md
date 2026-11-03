@@ -37,6 +37,13 @@ changes until you change the tag.
      `docker compose pull && docker compose up -d`;
    - built from the checkout: `docker compose up -d --build`.
 6. Open the front page, an app and `/admin`.
+7. Optional: free disk space with `scripts/prune-images.sh`. It removes old hub images, but never the one a container
+   uses and not the newest of the others, so going back one version needs no download. `--dry-run` only prints what
+   it would remove; `KEEP=0` keeps none besides the one in use, `KEEP=3` keeps three. Run it with `DOCKER=podman` on a
+   podman host. To run it after every upgrade by itself, put it in cron, for example weekly:
+   ```
+   30 3 * * 0 cd /path/to/artifact-hub && scripts/prune-images.sh >> backups/prune.log 2>&1
+   ```
 
 **Rolling back:** go back to the previous tag the same way and run the same commands. Usually only the image goes
 back and `data/` is left alone, since new versions only ever add to the database. Restore the backup only if the
