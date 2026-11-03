@@ -336,6 +336,7 @@
       if (!items.length) return null;
       const sec = document.createElement("section");
       sec.id = id;
+      sec.className = "box";
       const h = document.createElement("h3");
       h.className = "sec";
       h.textContent = title;
@@ -344,7 +345,7 @@
       ul.append(...items);
       sec.append(h);
       if (caption) {
-        sec.className = "offsec";
+        sec.classList.add("offsec");
         const p = document.createElement("p");
         p.className = "offcap";
         p.textContent = caption;

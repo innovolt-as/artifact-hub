@@ -3,13 +3,13 @@
   --bg: #f6f5f1; --fg: #1d1c1a; --muted: #6e6a62; --card: #ffffff; --line: #e4e1da;
   --accent: #2f5fd1; --accent-fg: #fff; --danger: #b4321f; --ok: #227a4c;
   --bar: #2f5fd1; --topbar: linear-gradient(160deg, #0b1a33, #0f2a4d);
-  --radius: 12px; --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+  --radius: 12px; --shadow: 0 18px 40px -26px rgb(60 45 10 / .38); --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --danger: #f0735f; --ok: #32b370; --bar: #5b86f0; }
+  :root:not([data-theme="light"]) { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --danger: #f0735f; --ok: #32b370; --bar: #5b86f0; --shadow: 0 18px 40px -24px rgb(0 0 0 / .8); }
 }
 :root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"] { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --danger: #f0735f; --ok: #32b370; --bar: #5b86f0; color-scheme: dark; }
+:root[data-theme="dark"] { --bg: #151515; --fg: #ece9e2; --muted: #9d998f; --card: #1f1f1f; --line: #2d2d2d; --accent: #7aa2ff; --accent-fg: #0c1430; --danger: #f0735f; --ok: #32b370; --bar: #5b86f0; --shadow: 0 18px 40px -24px rgb(0 0 0 / .8); color-scheme: dark; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--font); }
 a { color: inherit; text-decoration: none; }
@@ -67,33 +67,40 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 
 .sec { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin: 0 0 10px; }
 .sec span { text-transform: none; letter-spacing: 0; font-weight: 400; }
-/* Every section (Favourites, each group, Other): its heading is a button with the name, the count and a chevron at the
-   far end (› closed, ⌄ open); open, a list of cards under it, closed, a grid of icons (home.js, drag.js) */
+/* Every section (Favourites, each group, Other) is a card (.box): its heading is a button inside it with the name, the
+   count and a chevron at the far end (› closed, ⌄ open); open, the apps as rows with hairlines between them, closed, a
+   grid of icons (home.js, drag.js). The stored front page's two sections (home.js: layout C) are cards too. */
 .apps > section[data-open] > .sec { margin: 0; }
-#fav, .group, #rest { margin-bottom: 26px; }
-.gtoggle { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; padding: 0 2px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-.gtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
+.box { margin: 0 0 14px; background: var(--card); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); }
+.box:not([data-open]) > .sec { margin: 0; padding: 14px 14px 10px; }
+.box > .offcap { margin: -6px 14px 10px; }
+.gtoggle { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 46px; padding: 0 14px; border: 0; border-radius: 17px; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.gtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* .cards sets display, which would beat the hidden attribute of a closed section's list */
 .apps ul[hidden] { display: none; }
 .apps > section[data-open="0"] > ul { display: none; }
-.apps > section[data-open="1"] > ul { margin-top: 2px; }
 .gcount { color: var(--muted); }
-.chev { flex: none; margin-left: auto; margin-right: 8px; width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateX(-1px) rotate(-45deg); }
+.chev { flex: none; margin-left: auto; margin-right: 4px; width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateX(-1px) rotate(-45deg); }
 .gtoggle[aria-expanded="true"] .chev { transform: translateY(-2px) rotate(45deg); }
-:is(#fav, .group, #rest)[data-open="0"] { margin-bottom: 18px; } /* the ids above would win over a plainer selector */
-/* A closed section: a grid of icons, 46 px with the name under (two lines at most), five to a row on a phone and as
-   many as fit on a wider screen; each icon is a link, at least 44 px to tap. An open section shows its list instead. */
-.gicons { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px 6px; padding: 4px 0 2px; }
-@media (max-width: 480px) { .gicons { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px 4px; } }
-.gicon { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; min-height: 44px; padding: 4px 0; border-radius: 12px; color: var(--fg); text-align: center; font-size: 11px; font-weight: 550; line-height: 1.15; touch-action: manipulation; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
-.gicon .icon { --size: 46px; flex: none; border: 1px solid var(--line); background: var(--card); transition: transform .12s, box-shadow .12s; }
-.gicon > span:not(.icon) { max-width: 100%; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* A closed section: a grid of icons, 50 px with the name on one line («…» when it is longer), four to a row on a phone
+   and as many as fit on a wider screen; each icon is a link, at least 44 px to tap. An open section shows its list. */
+.gicons { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 10px 6px; padding: 4px 10px 14px; }
+@media (max-width: 480px) { .gicons { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.gicon { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; min-height: 44px; padding: 4px 0; border-radius: 12px; color: var(--fg); text-align: center; font-size: 11.5px; font-weight: 550; line-height: 1.2; touch-action: manipulation; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+.gicon .icon { --size: 50px; flex: none; border: 1px solid var(--line); background: var(--card); transition: transform .12s, box-shadow .12s; }
+.gicon > span:not(.icon) { display: block; max-width: 100%; padding: 0 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .gicon:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (hover: hover) { .gicon:hover .icon { border-color: var(--accent); } }
 .gicon.lifted { z-index: 5; transition: none; }
 .gicon.lifted .icon { transform: scale(1.1); box-shadow: 0 10px 24px -6px rgb(0 0 0 / .4); }
 .gicon.sliding { transition: transform .2s; }
 .apps > section[data-open="1"] > .gicons { display: none; }
+/* An open section's rows: no box of their own, a hairline above each (the first one parts it from the heading) */
+.box > .cards { gap: 0; }
+.box > .cards .app a { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; }
+@media (hover: hover) { .box > .cards .app a:hover h2 { color: var(--accent); } }
+.box > .cards .app.lifted a { position: relative; z-index: 1; background: var(--card); border-radius: var(--radius); }
+.box > .cards .app.blink a { border-radius: var(--radius); }
 .app { position: relative; min-width: 0; }
 .app a { -webkit-touch-callout: none; }
 .cards .app a { user-select: none; -webkit-user-select: none; }
@@ -104,7 +111,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 [data-order] .app a, [data-order] .app img, .gicon, .gicon img { -webkit-user-drag: none; } /* drag.js moves these, not the system's link drag */
 .app.sliding { transition: transform .2s; }
 /* A group held by its heading (drag.js): one block over the others, up and down only, so no scale to widen the page */
-.group.lifted { position: relative; z-index: 5; background: var(--bg); border-radius: 10px; box-shadow: 0 0 0 6px var(--bg), 0 0 0 7px var(--line), 0 14px 34px -8px rgb(0 0 0 / .4); transition: none; }
+.group.lifted { position: relative; z-index: 5; box-shadow: 0 18px 40px -10px rgb(0 0 0 / .45); transition: none; }
 .group.sliding { transition: transform .2s; }
 .dot { position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--card); }
 .lock, .ext { position: absolute; top: 8px; font-size: 12px; color: var(--muted); }
@@ -407,7 +414,6 @@ html[data-hub-offline="1"] .mores,
 html[data-hub-offline="1"] .more,
 html[data-hub-offline="1"] .addcard,
 html[data-hub-offline="1"] #offline-no .summary { display: none; }
-#offline-ok, #offline-no { margin-bottom: 20px; }
 .offcap { margin: -4px 0 10px; font-size: 12.5px; color: var(--muted); }
 #offline-no .app { opacity: .45; }
 #offline-no .icon { filter: grayscale(1); }

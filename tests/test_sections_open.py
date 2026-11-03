@@ -184,7 +184,7 @@ def test_open_section_is_a_list_with_a_heading_button(hub, user_client):
     _set(hub, pins=["a", "b"], fav_open=True, rest_open=True)
     html = _front_html(user_client)
     fav, rest = _sec(html, "fav"), _sec(html, "rest")
-    assert fav.startswith('<section id="fav" data-order="pins" data-open="1">')
+    assert fav.startswith('<section id="fav" class="box" data-order="pins" data-open="1">')
     assert ('<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true">'
             'Favoritter<span class="gcount">· 2</span>'
             '<span class="chev"></span></button></h3>') in fav
@@ -305,9 +305,22 @@ def test_empty_rest_has_no_heading_and_favourites_none_at_all(hub, user_client):
     _set(hub, pins=["a"])
     html = _front_html(user_client)
     assert _sec(html, "fav") and "<h3" not in _sec(html, "rest") and "gicons" not in _sec(html, "rest")
+    assert _sec(html, "rest").startswith('<section id="rest" data-open=')  # no card for an empty Other
     _front(hub, "b")
     _set(hub, pins=[])
     assert _sec(_front_html(user_client), "fav") == ""
+
+
+def test_every_section_with_apps_is_a_card(hub, user_client):
+    _front(hub, "a", "b")
+    _set(hub, pins=["a"])
+    html = _front_html(user_client)
+    assert _sec(html, "fav").startswith('<section id="fav" class="box"')
+    assert _sec(html, "rest").startswith('<section id="rest" class="box"')
+    css = _static("hub.css")
+    box = _css_rule(css, ".box")
+    assert "background: var(--card)" in box and "border-radius: 18px" in box and "box-shadow: var(--shadow)" in box
+    assert css.count("--shadow:") == 3  # light, and dark both ways
 
 
 def test_both_bottom_buttons(hub, user_client):
@@ -350,8 +363,10 @@ def test_section_js_wiring():
     assert ".grid" not in drag
     grid = _css_rule(css, ".gicons")
     assert "display: grid" in grid
-    assert re.search(r"@media \(max-width: 480px\) \{[^}]*\.gicons \{[^}]*repeat\(5, minmax\(0, 1fr\)\)", css)
-    assert "--size: 46px" in _css_rule(css, ".gicon .icon")
+    assert re.search(r"@media \(max-width: 480px\) \{[^}]*\.gicons \{[^}]*repeat\(4, minmax\(0, 1fr\)\)", css)
+    assert "--size: 50px" in _css_rule(css, ".gicon .icon")
+    name = _css_rule(css, ".gicon > span:not(.icon)")
+    assert "white-space: nowrap" in name and "text-overflow: ellipsis" in name
     assert "min-height: 44px" in _css_rule(css, ".gicon")
     for gone in (".gclosed", ".viewtog", ".grid "):
         assert gone not in css, gone
@@ -363,4 +378,5 @@ def test_offline_layout_shows_every_section_as_lists():
     start = js.index("async function enterOffline")
     body = js[start:js.index("if (offline()) enterOffline()", start)]
     assert "#fav, section.group, #rest" in body and 'ul.className = "cards"' in body
+    assert 'sec.className = "box"' in body
     assert "dataset.view" not in body and '"grid"' not in body

@@ -495,7 +495,7 @@ def _sec(html, sid):
 def test_rest_is_all_apps_without_groups(hub, user_client):
     _front(hub, "a", "b")
     html = user_client.get("/").text
-    assert 'class="group"' not in html and 'data-group=' not in html
+    assert 'class="group' not in html and 'data-group=' not in html
     with hub.db() as con:
         hub.home.set_pin(con, U, "a", True)
     rest = _sec(user_client.get("/").text, "rest")
@@ -508,7 +508,7 @@ def test_rest_is_other_when_groups_exist(hub, user_client):
     html = user_client.get("/").text
     rest = _sec(html, "rest")
     assert "Andre" in rest and "Alle apper" not in rest and 'data-slug="b"' in rest and 'data-slug="a"' not in rest
-    assert html.index('class="group"') < html.index('id="rest"')
+    assert html.index('class="group box"') < html.index('id="rest"')
 
 
 def test_rest_is_other_when_every_group_is_hidden(hub, user_client):
@@ -535,7 +535,7 @@ def test_group_markup_open(hub, user_client):
     gid = _grp(hub, "Jobb", ["b", "a"])
     html = user_client.get("/").text
     sec = _sec(html, f"g-{gid}")
-    assert f'<section id="g-{gid}" class="group" data-group="{gid}" data-order="group" data-open="1">' in sec
+    assert f'<section id="g-{gid}" class="group box" data-group="{gid}" data-order="group" data-open="1">' in sec
     assert '<h3 class="sec"><button type="button" class="gtoggle" aria-expanded="true">Jobb<span class="gcount">' in sec
     assert 'Jobb<span class="gcount">· 2</span><span class="chev"></span></button></h3>' in sec
     assert "data-label" not in sec
@@ -815,8 +815,8 @@ def test_hub_css_scopes_section_spacing_and_taps():
     css = _static("hub.css")
     # the heading reset is for the open/closed sections, not the offline lists, which keep their spacing
     assert ".apps > section[data-open] > .sec { margin: 0; }" in css and ".apps > section > .sec" not in css
-    # closed Favourites, groups and Other end 18 px below; the ids of the open rule would otherwise win
-    assert ':is(#fav, .group, #rest)[data-open="0"] { margin-bottom: 18px; }' in css
+    # every section is a card with the same space under it, open or closed; no id rule overrides it
+    assert ".box { margin: 0 0 14px;" in css and "#fav, .group, #rest {" not in css and ":is(#fav" not in css
     # the iPhone tap rule reaches the buttons of «Groups»; nothing is left of a picker «New group» button
     assert "#groups button { touch-action: manipulation;" in css and "#picker .gnew" not in css and "#picker .gh button" not in css
     js = _static("home.js")
