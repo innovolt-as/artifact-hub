@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.7.1 (2026-11-03)
+
+### Changed
+
+- Every section on the front page, *Favourites*, each group and *Other*, is a card of its own. Open, the apps are rows
+  inside the card with a thin line between them; closed, the icons sit inside it.
+- A closed section shows four icons to a row on a phone, a little larger than before, with the name on one line. A
+  name too long for its icon ends in «…» instead of breaking in the middle of a word.
+- The front page without a network shows its two sections as cards too.
+
 ## v1.7.0 (2026-11-02)
 
 ### Before you upgrade
@@ -12,9 +22,8 @@
 
 ### New
 
-- Every section on the front page, *Favourites*, each group and *Other*, is a card of its own: a list of apps when
-  it is open, and icons with the name under each, four to a row on a phone, when it is closed. A name too long for its
-  icon ends in «…». A tap on the heading switches, and the hub remembers it per
+- Every section on the front page, *Favourites*, each group and *Other*, is a list of cards when it is open and a
+  row of icons with the name under each when it is closed. A tap on the heading switches, and the hub remembers it per
   section on your account. Tap an icon to open the app; hold it for the favourite menu, or hold and drag to reorder (the icons in *Other* are
   sorted by name and can't be moved).
 - A *Groups* window, opened by *Groups* under the apps. It lists your groups with the number of apps in each. Make a
