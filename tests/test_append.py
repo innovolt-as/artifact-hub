@@ -40,7 +40,7 @@ def test_add_only_refuses_overwrite_merge_delete(hub, make_page, admin_client, u
     put(user_client, "fylgje", "queue/q1", {"question": "sushi"})
     assert put(user_client, "fylgje", "queue/q1", {"question": "pizza"}).status_code == 403
     assert put(user_client, "fylgje", "queue/q1", {"question": "pizza"}, merge="true").status_code == 403
-    assert put(user_client, "fylgje", "queue/q9", {"question": "pizza"}, merge="true").status_code in (403, 404)
+    assert put(user_client, "fylgje", "queue/q9", {"question": "pizza"}, merge="true").status_code == 404
     assert user_client.delete("/api/store/fylgje/d", params={"path": "queue/q1"}).status_code == 403
     assert get(admin_client, "fylgje", "queue/q1")["question"] == "sushi"
     assert put(admin_client, "fylgje", "queue/q1", {"status": "ferdig"}, merge="true").status_code == 200
@@ -101,3 +101,43 @@ def test_connector_rules_match(hub, make_page, admin_client):
         hub.doc_set("fylgje", "user@test.no", "entries/kaffe", {"n": 1})
     assert get(admin_client, "fylgje", "queue/q3")["question"] == "tog"
     assert hub.doc_delete("fylgje", "admin@test.no", "queue/q3") is True
+
+
+
+@pytest.mark.parametrize("later", [{"append": []}, {"data": None}], ids=["unlisted", "personal"])
+def test_decision_comes_from_one_meta_read(hub, make_page, admin_client, user_client, monkeypatch, later):
+    """The scope check and the write cannot disagree: "queue" leaving "append", or the app turning personal,
+    while a write is under way must not let a non-admin overwrite or delete."""
+    make_append(hub, make_page)
+    put(user_client, "fylgje", "queue/q1", {"question": "sushi"})
+    real = hub._data_meta
+
+    def flip():
+        """_data_meta whose first read is the real meta and every later read has `later` applied."""
+        calls = []
+
+        def meta(slug, user):
+            calls.append(1)
+            return {**real(slug, user), **later} if len(calls) > 1 else real(slug, user)
+        monkeypatch.setattr(hub, "_data_meta", meta)
+
+    flip()
+    with pytest.raises(hub.ReadOnly):
+        hub.doc_set("fylgje", "user@test.no", "queue/q1", {"question": "pizza"})
+    flip()
+    with pytest.raises(hub.ReadOnly):
+        hub.doc_delete("fylgje", "user@test.no", "queue/q1")
+    flip()
+    assert put(user_client, "fylgje", "queue/q1", {"question": "pizza"}).status_code == 403
+    flip()
+    assert user_client.delete("/api/store/fylgje/d", params={"path": "queue/q1"}).status_code == 403
+    monkeypatch.setattr(hub, "_data_meta", real)
+    assert get(admin_client, "fylgje", "queue/q1")["question"] == "sushi"
+
+
+def test_size_is_checked_once_stamped(hub, make_page, user_client):
+    make_append(hub, make_page)
+    body = {"q": "a" * (hub.MAX_DOC_BYTES - 20)}  # fits as sent, not with _added_by/_added_at
+    assert put(user_client, "fylgje", "queue/big", body).status_code == 413
+    with pytest.raises(hub.HubError):
+        hub.doc_set("fylgje", "user@test.no", "queue/big", body)
