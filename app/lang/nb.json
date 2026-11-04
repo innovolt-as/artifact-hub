@@ -115,6 +115,7 @@
   "consent.question": "Gi Claude tilgang til å publisere apper i {site}?",
   "consent.title": "Koble til Claude",
   "consent.warn": "Godkjenn bare hvis du nettopp startet tilkoblingen selv fra Claude.",
+  "data.add_only": "Her kan du bare legge til nye, ikke endre eller slette.",
   "data.bad_path_col": "Ugyldig sti «{path}»: må være en samling (oddetall ledd, f.eks. days).",
   "data.bad_path_doc": "Ugyldig sti «{path}»: må være et dokument (partall ledd, f.eks. days/2026-10-22).",
   "data.no_app": "Fant ingen app som heter «{slug}». Lenkekort har ikke data.",

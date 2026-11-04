@@ -115,6 +115,7 @@
   "consent.question": "Give Claude access to publish apps in {site}?",
   "consent.title": "Connect to Claude",
   "consent.warn": "Only approve if you just started the connection yourself from Claude.",
+  "data.add_only": "You can only add new documents here, not change or delete them.",
   "data.bad_path_col": "Invalid path \"{path}\": must be a collection (an odd number of segments, e.g. days).",
   "data.bad_path_doc": "Invalid path \"{path}\": must be a document (an even number of segments, e.g. days/2026-10-22).",
   "data.no_app": "Found no app called \"{slug}\". Link cards have no data.",

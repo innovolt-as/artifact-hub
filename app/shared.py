@@ -3,7 +3,8 @@
 Without it an app's documents (window.claude.use("db"), static/hub.js) are private per user, as they always were.
 With it they work like artifacts on claude.ai: every document is shared by everyone who can see the app, except
 each user's own branch data/users/<e-mail>/..., which only that user can read or write (admins included).
-Only admins write shared documents.
+Only admins write shared documents, except in the collections the meta lists under "append": there everyone who
+can see the app may add a new document (never change or delete one), and every document records who added it.
 
 Shared documents live in the same `docs` table with owner SHARED; a branch is stored with the user's e-mail
 as owner and the e-mail in lower case in the collection path.
@@ -17,6 +18,7 @@ import sqlite3
 import time
 
 SHARED = "*"  # docs.owner of shared documents; never an e-mail address
+APPEND_KEY = "append"  # meta key: the collections of a shared app that everyone with access may add to
 CLAUDE_DAYS = 30  # a connector write this recent counts for the admin warning
 
 
@@ -50,6 +52,24 @@ def branch_owner(collection: str, user: str) -> str | None:
 def own_prefix(user: str) -> str:
     """The collection of a user's own branch; everything under it starts with this plus '/'."""
     return f"data/users/{user.lower()}"
+
+
+def appendable(meta: dict, collection: str) -> bool:
+    """Whether a non-admin may add documents to this collection of a shared app: it must be named exactly
+    under "append". Nothing under data/ counts; branches have their own rules."""
+    names = meta.get(APPEND_KEY)
+    if not is_shared(meta) or not isinstance(names, list) or collection == "data" or collection.startswith("data/"):
+        return False
+    return collection in names
+
+
+def stamp(data: dict, old: dict | None, user: str, now: int) -> dict:
+    """A copy of data with _added_by and _added_at: kept from the stored document when it has them,
+    else this user and now. Whatever the writer put there is ignored."""
+    old = old or {}
+    return {**data,
+            "_added_by": old["_added_by"] if "_added_by" in old else user.lower(),
+            "_added_at": old["_added_at"] if "_added_at" in old else now}
 
 
 # ---------------------------------------------------------------- connector writes (the admin warning)

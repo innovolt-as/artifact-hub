@@ -105,7 +105,7 @@ ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin pag
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
 MAX_ICON_BYTES = 2 * 1024 * 1024
-META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline")  # what survives a re-upload
+META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline", "append")  # what survives a re-upload
 
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -1161,15 +1161,16 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
             "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
             (slug, owner, collection, doc_id),
         ).fetchone()
+        old = json.loads(row["data"]) if row else None
         if merge:  # update() requires the document to exist
-            if not row:
+            if old is None:
                 raise HTTPException(404, i18n.t("store.doc_missing"))
-            data = _deep_merge(json.loads(row["data"]), data)
-        con.execute(
-            """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
-               ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
-            (slug, owner, collection, doc_id, json.dumps(data, ensure_ascii=False), int(time.time())),
-        )
+            data = _deep_merge(old, data)
+        try:
+            data, create_only = _append_rules(slug, user, collection, data, old, merge=merge)
+            _put_doc(con, slug, owner, collection, doc_id, json.dumps(data, ensure_ascii=False), create_only=create_only)
+        except ReadOnly as e:
+            raise HTTPException(403, str(e)) from None
     return {"ok": True}
 
 
@@ -1177,6 +1178,8 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
 def store_delete(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
     owner, collection = _store_scope(slug, user, collection, write=True)
+    if _add_only(slug, user, collection):
+        raise HTTPException(403, i18n.t("data.add_only"))
     with db() as con:
         con.execute(
             "DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?", (slug, owner, collection, doc_id)
@@ -1214,16 +1217,55 @@ def _data_meta(slug: str, user: str) -> dict:
 def doc_scope(slug: str, user: str, collection: str, *, write: bool = False) -> tuple[str | None, str]:
     """(docs.owner, collection as stored) for one collection of an app (app/shared.py). Personal apps: the user.
     Shared apps: SHARED, the user's own branch, or None for someone else's branch, where reads find nothing.
-    A write to shared data by a non-admin, or to someone else's branch, raises ReadOnly."""
+    A write to shared data by a non-admin, or to someone else's branch, raises ReadOnly; in a collection everyone
+    may add to (shared.appendable) the write is let through, and _append_rules decides."""
     meta = _data_meta(slug, user)
     if not shared.is_shared(meta):
         return user.lower(), collection
     owner = shared.branch_owner(collection, user)
     if write and owner is None:
         raise ReadOnly(i18n.t("data.not_yours"))
-    if write and owner == shared.SHARED and not is_admin(user):
+    if write and owner == shared.SHARED and not is_admin(user) and not shared.appendable(meta, collection):
         raise ReadOnly(i18n.t("data.read_only"))
     return owner, shared.normalize(collection)
+
+
+def _add_only(slug: str, user: str, collection: str) -> bool:
+    """A collection of a shared app this user may only add new documents to: appendable, and not an admin."""
+    return not is_admin(user) and shared.appendable(_data_meta(slug, user), collection)
+
+
+def _append_rules(slug: str, user: str, collection: str, data: dict, old: dict | None, *,
+                  merge: bool) -> tuple[dict, bool]:
+    """(data to store, create_only) for a write after doc_scope; old is the stored document or None.
+    In an appendable collection every write, by anyone, keeps or gets the _added_by/_added_at stamp, and a
+    non-admin may only create: a merge or an existing document raises ReadOnly."""
+    if not shared.appendable(_data_meta(slug, user), collection):
+        return data, False
+    create_only = not is_admin(user)
+    if create_only and (merge or old is not None):
+        raise ReadOnly(i18n.t("data.add_only"))
+    return shared.stamp(data, old, user, int(time.time())), create_only
+
+
+def _put_doc(con: sqlite3.Connection, slug: str, owner: str, collection: str, doc_id: str, raw: str, *,
+             create_only: bool = False) -> None:
+    """Insert or replace one document. create_only never replaces: a row that appeared since it was read
+    (a concurrent create) raises ReadOnly instead of being overwritten."""
+    if create_only:
+        n = con.execute(
+            """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
+               ON CONFLICT(slug, owner, collection, doc_id) DO NOTHING""",
+            (slug, owner, collection, doc_id, raw, int(time.time())),
+        ).rowcount
+        if n != 1:
+            raise ReadOnly(i18n.t("data.add_only"))
+        return
+    con.execute(
+        """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
+           ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
+        (slug, owner, collection, doc_id, raw, int(time.time())),
+    )
 
 
 def visible_docs(con: sqlite3.Connection, slug: str, user: str) -> list[sqlite3.Row]:
@@ -1291,16 +1333,14 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
     with db() as con:
         row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                           (slug, owner, col, doc_id)).fetchone()
-        if merge and row:
-            data = _deep_merge(json.loads(row["data"]), data)
+        old = json.loads(row["data"]) if row else None
+        if merge and old is not None:
+            data = _deep_merge(old, data)
+        data, create_only = _append_rules(slug, user, col, data, old, merge=merge)
         raw = json.dumps(data, ensure_ascii=False)
         if len(raw.encode("utf-8")) > MAX_DOC_BYTES:
             raise HubError(i18n.t("data.too_big"))
-        con.execute(
-            """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
-               ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
-            (slug, owner, col, doc_id, raw, int(time.time())),
-        )
+        _put_doc(con, slug, owner, col, doc_id, raw, create_only=create_only)
         shared.record_write(con, slug, user)
     log.info("Data %s %s/%s for %s", "merged" if merge else "set", slug, path, owner)
     return data
@@ -1309,6 +1349,8 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
 def doc_delete(slug: str, user: str, path: str) -> bool:
     col, doc_id = _data_path(path, want_doc=True)
     owner, col = doc_scope(slug, user, col, write=True)
+    if _add_only(slug, user, col):
+        raise ReadOnly(i18n.t("data.add_only"))
     with db() as con:
         n = con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                         (slug, owner, col, doc_id)).rowcount
@@ -1851,7 +1893,8 @@ class HubError(Exception):
 
 
 class ReadOnly(HubError):
-    """A write the user may not make: shared data by a non-admin, or someone else's data/users/<e-mail>/ branch."""
+    """A write the user may not make: shared data by a non-admin (beyond adding to an appendable collection),
+    or someone else's data/users/<e-mail>/ branch."""
 
 
 def _write_meta(path: Path, meta: dict) -> None:
