@@ -80,7 +80,7 @@ button.primary { font: inherit; font-weight: 600; padding: 10px 16px; border: 0;
 .apps ul[hidden] { display: none; }
 .apps > section[data-open="0"] > ul { display: none; }
 .gcount { color: var(--muted); }
-.chev { flex: none; margin-left: auto; margin-right: 4px; width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateX(-1px) rotate(-45deg); }
+.gtoggle .chev { flex: none; margin-left: auto; margin-right: 4px; width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateX(-1px) rotate(-45deg); }
 .gtoggle[aria-expanded="true"] .chev { transform: translateY(-2px) rotate(45deg); }
 /* A closed section: a grid of icons, 50 px with the name on one line («…» when it is longer), four to a row on a phone
    and as many as fit on a wider screen; each icon is a link, at least 44 px to tap. An open section shows its list. */
@@ -359,7 +359,7 @@ dialog { overscroll-behavior: contain; }
 .arow .txt { flex: 1; min-width: 0; }
 .arow b { display: block; font-size: 15px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .arow small { display: block; color: var(--muted); font-size: 12.5px; line-height: 1.35; overflow-wrap: anywhere; }
-.arow .claude-warn { display: block; margin: 2px 0 0; min-height: 0; line-height: 1.35; }
+.arow .claude-warn { color: var(--danger); font-size: 13px; font-weight: 400; }
 .chev { flex: none; color: var(--muted); font-size: 20px; line-height: 1; }
 
 /* ---------------------------------------------------------------- admin: the settings sheet for one app */

@@ -36,3 +36,11 @@ def test_a_switch_shows_on_a_phone_without_color_mix():
 def test_a_hidden_list_stays_hidden():
     # .cards sets display: grid, which beats the hidden attribute of a closed section's list
     assert "display: none" in rule(".apps ul[hidden]")
+
+
+def test_chevron_rule_is_scoped():
+    # the front page's border-drawn chevron must not reach the admin rows' text chevron
+    bare = [m.group(1) for m in re.finditer(r"^\s*\.chev \{(.*?)\}", CSS, re.M | re.S)]
+    assert not any("border:" in b or "transform" in b for b in bare)
+    assert "border:" in rule(".gtoggle .chev") and "rotate" in rule(".gtoggle .chev")
+    assert "rotate" in rule('.gtoggle[aria-expanded="true"] .chev')
