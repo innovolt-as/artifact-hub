@@ -24,7 +24,7 @@ everyone".
 | `create_app` | Publishes a new single-file app (`slug`, `html`, `title`, optional `description`, `emoji`, `private`, `shared_data`, `offline`). |
 | `update_app` | Replaces the whole HTML of an app. |
 | `edit_app` | Small changes: a list of `{old, new}` replacements, applied all or nothing. |
-| `update_app_info` | Changes title, description, emoji, `private`, `shared_data` or `offline` (the [*Works offline* switch](APPS.md#offline)) without touching the HTML. |
+| `update_app_info` | Changes title, description, emoji, `private`, `shared_data`, `offline` (the [*Works offline* switch](APPS.md#offline)) or `append_collections` without touching the HTML. |
 | `list_app_data`, `get_app_data`, `set_app_data`, `delete_app_data` | Read and write the documents an app keeps with `window.claude.use("db")`: the data of the user behind the connection, or in an app with shared data the shared documents and that user's own `data/users/<e-mail>/` branch. |
 
 The data tools let you, say, tell Claude what you had for lunch and have it log that in your food diary app.
@@ -47,6 +47,11 @@ An app that Claude or a scheduled agent fills with the same content for everyone
 else sees it. Before Claude creates an app whose content it will write, it asks whether that content is the same
 for everyone or personal, and sets `shared_data` to match. `update_app_info` with `shared_data` switches an
 existing app; `copy_my_data=true` also copies your current documents into the shared data.
+
+`append_collections` takes a list of names, for example `["queue"]`, and lets everyone who can see a shared-data app
+add new documents to those [collections](APPS.md#collections-everyone-can-add-to) but not change or delete them; an
+empty list turns it off. `list_apps` shows the names as `"append"`. Only list collections for apps shared with people
+you trust: there is no limit per user on how many documents they can add.
 
 The admin page warns about an app that is shared with others but has personal data that Claude has written in the
 last 30 days: in practice it only works for you. Claude passes on the same warning when it shares such an app.

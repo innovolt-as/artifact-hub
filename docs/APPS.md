@@ -40,7 +40,7 @@ Artifacts made on claude.ai save data through `window.claude.use(...)`, which on
 |---|---|
 | `db` | Stored in SQLite on the server, per app and per logged-in user, or [shared](#shared-data). `collection`/`doc`, `get`/`set`/`update`/`delete`, `add`, `where`/`orderBy`/`limit`, and `onSnapshot`, which picks up changes from other tabs and devices every 5 seconds. |
 | `downloads` | `save({filename, data})` becomes a normal browser download. |
-| `user` | The logged-in e-mail address, also as `id()`. `isOwner()` and `canEdit()` are true for admins; `can("data.write")` says whether the user may change shared data. |
+| `user` | The logged-in e-mail address, also as `id()`. `isOwner()` and `canEdit()` are true for admins; `can("data.write")` says whether the user may change shared data, and `can("data.add:<collection>")` whether they may [add to a collection](#collections-everyone-can-add-to). |
 | Anything else (`sample`, `room`, `mcp`, …) | `null`. These need claude.ai. |
 
 The data follows an app when it is renamed, and stays when the app is deleted, so it comes back if the app is
@@ -66,6 +66,33 @@ Such an app can have shared data instead: the *Shared data* switch in an app's s
 Turning shared data on asks whether to copy your current documents in the app into the shared data, where
 everyone with access sees them, or to start empty. Other users' personal documents are hidden while shared data
 is on. Nothing is deleted: turn it off and the personal data is back. The key/value API below is always per user.
+
+### Collections everyone can add to
+
+Sometimes people who can only read should still be able to put something in, such as a question for a scheduled
+agent to answer. A shared app can name top-level collections that everyone with access may add to: the
+*Everyone can add to* row in the app's settings on the admin page (shown while shared data is on), `"append":
+["queue"]` in its meta, or `append_collections` from [Claude](CONNECTOR.md). You can name up to 10 collections; use
+letters, digits, `_` and `-`, and not `data`.
+
+- A non-admin can create a new document in such a collection. They cannot overwrite, merge into or delete one: those
+  writes reject with `invalid_argument`, as for any other shared document. Admins can still change everything.
+- Only the collection itself counts, not collections below a document in it. Nothing under `data/` is ever add-only.
+- The hub stamps every write there with `_added_by` (the e-mail in lower case) and `_added_at` (epoch seconds).
+  Whatever the app sends in those two fields is replaced, and later writes keep the original values. The stamp counts
+  towards the document size limit. *Delete my data* keeps the documents but removes `_added_by` where it is that
+  user's address.
+- `await user.can("data.add:queue")` says whether the user may add to `queue`. It is true for admins and for apps
+  without shared data.
+- There is no limit per user on how many documents someone with access can add, so only list collections for apps
+  shared with people you trust.
+
+Use a random id, so two people do not pick the same one (the second would be rejected):
+
+```js
+const id = crypto.randomUUID();
+await db.collection("queue").doc(id).set({ question: "What is new in Oslo?" });
+```
 
 ## Storage: the key/value API
 

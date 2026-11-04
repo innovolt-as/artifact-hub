@@ -7,6 +7,18 @@
 - `scripts/prune-images.sh` removes old hub images on the server to free disk space. It keeps the image in use and
   the newest other one, to go back to; `--dry-run` shows what it would remove. See
   [UPGRADING.md](docs/UPGRADING.md).
+- A shared app can name collections that everyone with access may add to, but not change or delete: the *Everyone can
+  add to* row in the app's settings on the admin page, or `append_collections` from Claude. The hub stamps each
+  document with `_added_by` and `_added_at`, and an app checks `user.can("data.add:<name>")`. *Delete my data* also
+  clears the `_added_by` mark on documents a user added. See
+  [APPS.md](docs/APPS.md#collections-everyone-can-add-to).
+
+### Fixed
+
+- A row on the admin page shows the warning about personal data that Claude has written as a small icon, with the
+  full text as a tooltip; it was a long line. The full text is still in the app's settings.
+- The arrow on an app's row on the admin page looked like ↗ because it got the front page's chevron styling. It is
+  one plain chevron again.
 
 ## v1.7.1 (2026-11-03)
 
