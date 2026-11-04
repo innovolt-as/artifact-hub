@@ -75,6 +75,8 @@
     $('asAccessLabel').textContent = d.label;
     $('asSwitches').hidden = link;
     $('asData').checked = d.shared === '1';
+    $('asAppend').hidden = d.shared !== '1';  // add-only collections only exist in shared data
+    $('asAppendLabel').textContent = d.append ? d.append.split(',').join(', ') : T.appendNone;
     $('asBanner').checked = d.banner === '1';
     $('asOffline').checked = d.offline === '1';
   }
@@ -283,6 +285,20 @@
     if (!addPerson()) return;  // an address typed but not added yet still counts
     const people = [...$('acList').querySelectorAll('input:checked')].map(cb => cb.value);
     save('acError', () => reach(postJson('/api/access', { slug: current, level: acForm.level.value, people })));
+  });
+
+  // --- add-only collections: everyone with access may add documents there, not change or delete (app/shared.py)
+  const apForm = $('appendForm');
+  $('asAppend').onclick = () => {
+    $('apNames').value = rowOf(current).dataset.append.split(',').filter(Boolean).join(', ');
+    $('apError').textContent = '';
+    show('append');
+  };
+  apForm.addEventListener('submit', e => {
+    e.preventDefault();
+    const fd = new FormData(apForm);
+    fd.append('slug', current);
+    save('apError', () => reach(fetch('/api/append', { method: 'POST', body: fd })));
   });
 
   // --- shared data: everyone who can see the app reads it, only admins change it (app/shared.py)

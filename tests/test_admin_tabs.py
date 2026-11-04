@@ -96,6 +96,24 @@ def test_warning_stays_on_the_row(hub, make_page, admin_client):
     assert 'data-claude="1"' in mine and 'data-warned="0"' in mine
 
 
+def test_warned_row_shows_icon_only(hub, make_page, admin_client):
+    from app import shared
+    from tests.textutil import visible_text
+    make_page("finn", "all")
+    with hub.db() as con:
+        shared.record_write(con, "finn", "admin@test.no")
+    html = admin_client.get("/admin").text
+    sentence = "Claude fyller denne appen med dine personlige data. De andre som har tilgang, ser ikke dette innholdet."
+    row = _row(html, 'data-slug="finn"')
+    assert f'aria-label="{sentence}"' in row
+    # the attributes are the icon's name; as text on the row the sentence is gone
+    shown = [line for line in visible_text(row).splitlines() if not line.startswith("@")]
+    assert not any("personlige data" in line for line in shown)
+    assert "⚠" in shown
+    # the sheet still carries it, with the fix
+    assert "⚠ " + sentence in html.split('id="asWarn"')[1]
+
+
 def test_empty_list_points_to_upload(admin_client):
     assert 'href="/admin/upload"' in admin_client.get("/admin").text.split('id="appList"')[1]
 

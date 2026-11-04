@@ -30,6 +30,7 @@ import zipfile
 from html import escape
 from math import ceil
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import quote, unquote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -105,7 +106,7 @@ ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin pag
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
 MAX_ICON_BYTES = 2 * 1024 * 1024
-META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline")  # what survives a re-upload
+META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline", "append")  # what survives a re-upload
 
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -565,6 +566,7 @@ def list_artifacts(user: str) -> list[dict]:
                 "banner": meta.get("banner") is not False,  # the strip at the top of the app (banner.py)
                 "data": "shared" if shared.is_shared(meta) else "personal",  # app/shared.py
                 "offline": kind != "link" and meta.get("offline") is True,  # the page is kept on the phone
+                "append": _append_names(meta),  # collections everyone with access may add to
                 "updated": mtime,
                 "emoji": meta.get("emoji", ""),
                 "icon_url": f"/icon/{slug}?v={int(icon.stat().st_mtime)}" if icon else None,
@@ -573,6 +575,14 @@ def list_artifacts(user: str) -> list[dict]:
         )
     items.sort(key=lambda a: _sort_key(a["title"]))
     return items
+
+
+def _append_names(meta: dict) -> list[str]:
+    """The add-only collections of a shared app (shared.appendable's list); empty for any other app."""
+    names = meta.get(shared.APPEND_KEY)
+    if not shared.is_shared(meta) or not isinstance(names, list):
+        return []
+    return [n for n in names if isinstance(n, str) and shared.appendable(meta, n)]
 
 
 def artifact_root(slug: str) -> tuple[Path, dict] | None:
@@ -1002,9 +1012,11 @@ def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool, lock
     strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
     found = artifact_root(slug)
     data_shared = bool(found) and shared.is_shared(found[1])
+    append = _append_names(found[1]) if found else []
     tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"{}></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings,
         (' data-lock="1"' if locked else "") + (' data-offline="1"' if offline else "") + (' data-copy="1"' if copy else "")
+        + (' data-append="{}"'.format(escape(",".join(append))) if append else "")
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
     html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
@@ -1084,7 +1096,7 @@ SEG_RE = re.compile(r"^[^/]{1,200}$")
 MAX_DOC_BYTES = 256 * 1024
 
 
-def _store_scope(slug: str, user: str, collection: str, *, write: bool = False) -> tuple[str | None, str]:
+def _store_scope(slug: str, user: str, collection: str, *, write: bool = False) -> Scope:
     """doc_scope for the routes below: an app you cannot see is a 404, a write you may not make a 403."""
     try:
         return doc_scope(slug, user, collection, write=write)
@@ -1118,7 +1130,7 @@ def store_user(slug: str, request: Request, user: str = Depends(require_user)) -
 @app.get("/api/store/{slug}/c")
 def store_list(slug: str, path: str, user: str = Depends(store_user)):
     collection, _ = _split_path(path, want_doc=False)
-    owner, collection = _store_scope(slug, user, collection)
+    owner, collection, _ = _store_scope(slug, user, collection)
     if owner is None:
         return {"docs": []}
     with db() as con:
@@ -1132,7 +1144,7 @@ def store_list(slug: str, path: str, user: str = Depends(store_user)):
 @app.get("/api/store/{slug}/d")
 def store_get(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
-    owner, collection = _store_scope(slug, user, collection)
+    owner, collection, _ = _store_scope(slug, user, collection)
     if owner is None:
         return {"data": None}
     with db() as con:
@@ -1146,9 +1158,9 @@ def store_get(slug: str, path: str, user: str = Depends(store_user)):
 @app.put("/api/store/{slug}/d")
 async def store_set(slug: str, path: str, request: Request, merge: bool = False, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
-    owner, collection = _store_scope(slug, user, collection, write=True)
+    owner, collection, append = _store_scope(slug, user, collection, write=True)
     body = await request.body()
-    if len(body) > MAX_DOC_BYTES:
+    if len(body) > MAX_DOC_BYTES:  # before parsing it; _put_doc checks the document as stored
         raise HTTPException(413, i18n.t("store.too_big"))
     try:
         data = json.loads(body)
@@ -1161,22 +1173,27 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
             "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
             (slug, owner, collection, doc_id),
         ).fetchone()
+        old = json.loads(row["data"]) if row else None
         if merge:  # update() requires the document to exist
-            if not row:
+            if old is None:
                 raise HTTPException(404, i18n.t("store.doc_missing"))
-            data = _deep_merge(json.loads(row["data"]), data)
-        con.execute(
-            """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
-               ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
-            (slug, owner, collection, doc_id, json.dumps(data, ensure_ascii=False), int(time.time())),
-        )
+            data = _deep_merge(old, data)
+        try:
+            _put_doc(con, slug, owner, collection, doc_id, _append_rules(append, user, data, old, merge=merge),
+                     create_only=append == ADD_ONLY)
+        except ReadOnly as e:
+            raise HTTPException(403, str(e)) from None
+        except HubError as e:  # the only other refusal: too big once stamped
+            raise HTTPException(413, str(e)) from None
     return {"ok": True}
 
 
 @app.delete("/api/store/{slug}/d")
 def store_delete(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
-    owner, collection = _store_scope(slug, user, collection, write=True)
+    owner, collection, append = _store_scope(slug, user, collection, write=True)
+    if append == ADD_ONLY:
+        raise HTTPException(403, i18n.t("data.add_only"))
     with db() as con:
         con.execute(
             "DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?", (slug, owner, collection, doc_id)
@@ -1211,19 +1228,66 @@ def _data_meta(slug: str, user: str) -> dict:
     return found[1]
 
 
-def doc_scope(slug: str, user: str, collection: str, *, write: bool = False) -> tuple[str | None, str]:
-    """(docs.owner, collection as stored) for one collection of an app (app/shared.py). Personal apps: the user.
+STAMP, ADD_ONLY = "stamp", "add_only"  # Scope.append in a collection everyone may add to (shared.appendable)
+
+
+class Scope(NamedTuple):
+    """Where one collection of an app lives for a user, and how a write there must go (doc_scope)."""
+    owner: str | None
+    collection: str
+    append: str | None  # None, STAMP (an admin writes, stamped) or ADD_ONLY (anyone else: create only, stamped)
+
+
+def doc_scope(slug: str, user: str, collection: str, *, write: bool = False) -> Scope:
+    """Scope of one collection of an app (app/shared.py). Personal apps: the user.
     Shared apps: SHARED, the user's own branch, or None for someone else's branch, where reads find nothing.
-    A write to shared data by a non-admin, or to someone else's branch, raises ReadOnly."""
+    A write to shared data by a non-admin, or to someone else's branch, raises ReadOnly, except in a collection
+    everyone may add to (shared.appendable): there the write is let through as ADD_ONLY. The whole decision
+    comes from this one read of the meta; the write paths act on Scope.append and never read it again."""
     meta = _data_meta(slug, user)
     if not shared.is_shared(meta):
-        return user.lower(), collection
+        return Scope(user.lower(), collection, None)
     owner = shared.branch_owner(collection, user)
+    append = (STAMP if is_admin(user) else ADD_ONLY) if shared.appendable(meta, collection) else None
     if write and owner is None:
         raise ReadOnly(i18n.t("data.not_yours"))
-    if write and owner == shared.SHARED and not is_admin(user):
+    if write and owner == shared.SHARED and not is_admin(user) and append is None:
         raise ReadOnly(i18n.t("data.read_only"))
-    return owner, shared.normalize(collection)
+    return Scope(owner, shared.normalize(collection), append)
+
+
+def _append_rules(append: str | None, user: str, data: dict, old: dict | None, *, merge: bool) -> dict:
+    """The document to store for a write with this Scope.append; old is the stored document or None.
+    In an appendable collection every write, by anyone, keeps or gets the _added_by/_added_at stamp, and an
+    ADD_ONLY writer may only create: a merge or an existing document raises ReadOnly."""
+    if append is None:
+        return data
+    if append == ADD_ONLY and (merge or old is not None):
+        raise ReadOnly(i18n.t("data.add_only"))
+    return shared.stamp(data, old, user, int(time.time()))
+
+
+def _put_doc(con: sqlite3.Connection, slug: str, owner: str, collection: str, doc_id: str, data: dict, *,
+             create_only: bool = False) -> None:
+    """Insert or replace one document; HubError when it is larger than MAX_DOC_BYTES as stored. create_only
+    never replaces: a row that appeared since it was read (a concurrent create) raises ReadOnly instead."""
+    raw = json.dumps(data, ensure_ascii=False)
+    if len(raw.encode("utf-8")) > MAX_DOC_BYTES:
+        raise HubError(i18n.t("data.too_big"))
+    if create_only:
+        n = con.execute(
+            """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
+               ON CONFLICT(slug, owner, collection, doc_id) DO NOTHING""",
+            (slug, owner, collection, doc_id, raw, int(time.time())),
+        ).rowcount
+        if n != 1:
+            raise ReadOnly(i18n.t("data.add_only"))
+        return
+    con.execute(
+        """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
+           ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
+        (slug, owner, collection, doc_id, raw, int(time.time())),
+    )
 
 
 def visible_docs(con: sqlite3.Connection, slug: str, user: str) -> list[sqlite3.Row]:
@@ -1262,7 +1326,7 @@ def doc_overview(slug: str, user: str) -> dict[str, list[str]]:
 def doc_list(slug: str, user: str, collection: str) -> dict[str, dict]:
     """{doc_id: data} for one collection (at most MAX_DATA_DOCS_LISTED, newest ids last)."""
     col, _ = _data_path(collection, want_doc=False)
-    owner, col = doc_scope(slug, user, col)
+    owner, col, _ = doc_scope(slug, user, col)
     if owner is None:
         return {}
     with db() as con:
@@ -1273,7 +1337,7 @@ def doc_list(slug: str, user: str, collection: str) -> dict[str, dict]:
 
 def doc_get(slug: str, user: str, path: str) -> dict | None:
     col, doc_id = _data_path(path, want_doc=True)
-    owner, col = doc_scope(slug, user, col)
+    owner, col, _ = doc_scope(slug, user, col)
     if owner is None:
         return None
     with db() as con:
@@ -1285,22 +1349,17 @@ def doc_get(slug: str, user: str, path: str) -> dict | None:
 def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False) -> dict:
     """Write one document (merge=True deep-merges into an existing one); returns what is stored now."""
     col, doc_id = _data_path(path, want_doc=True)
-    owner, col = doc_scope(slug, user, col, write=True)
+    owner, col, append = doc_scope(slug, user, col, write=True)
     if not isinstance(data, dict):
         raise HubError(i18n.t("data.not_object"))
     with db() as con:
         row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                           (slug, owner, col, doc_id)).fetchone()
-        if merge and row:
-            data = _deep_merge(json.loads(row["data"]), data)
-        raw = json.dumps(data, ensure_ascii=False)
-        if len(raw.encode("utf-8")) > MAX_DOC_BYTES:
-            raise HubError(i18n.t("data.too_big"))
-        con.execute(
-            """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
-               ON CONFLICT(slug, owner, collection, doc_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at""",
-            (slug, owner, col, doc_id, raw, int(time.time())),
-        )
+        old = json.loads(row["data"]) if row else None
+        if merge and old is not None:
+            data = _deep_merge(old, data)
+        data = _append_rules(append, user, data, old, merge=merge)
+        _put_doc(con, slug, owner, col, doc_id, data, create_only=append == ADD_ONLY)
         shared.record_write(con, slug, user)
     log.info("Data %s %s/%s for %s", "merged" if merge else "set", slug, path, owner)
     return data
@@ -1308,7 +1367,9 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
 
 def doc_delete(slug: str, user: str, path: str) -> bool:
     col, doc_id = _data_path(path, want_doc=True)
-    owner, col = doc_scope(slug, user, col, write=True)
+    owner, col, append = doc_scope(slug, user, col, write=True)
+    if append == ADD_ONLY:
+        raise ReadOnly(i18n.t("data.add_only"))
     with db() as con:
         n = con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                         (slug, owner, col, doc_id)).rowcount
@@ -1678,6 +1739,9 @@ async def delete_my_data(request: Request, user: str = Depends(api_user)):
         docs = con.execute("DELETE FROM docs WHERE owner=?", (email,)).rowcount
         keys = con.execute("DELETE FROM app_data WHERE lower(email)=?", (email,)).rowcount
         con.execute("DELETE FROM claude_writes WHERE email=?", (email,))
+        # who added a shared document is personal data too; the document itself is shared content and stays
+        con.execute("UPDATE docs SET data=json_remove(data, '$._added_by') WHERE owner=? AND json_extract(data, '$._added_by')=?",
+                    (shared.SHARED, email))
     log.info("Deleted the data of %s: %d documents, %d keys", email, docs, keys)
     return {"ok": True, "docs": docs, "keys": keys}
 
@@ -1851,7 +1915,8 @@ class HubError(Exception):
 
 
 class ReadOnly(HubError):
-    """A write the user may not make: shared data by a non-admin, or someone else's data/users/<e-mail>/ branch."""
+    """A write the user may not make: shared data by a non-admin (beyond adding to an appendable collection),
+    or someone else's data/users/<e-mail>/ branch."""
 
 
 def _write_meta(path: Path, meta: dict) -> None:
@@ -2149,6 +2214,42 @@ def api_toggle_offline(request: Request, slug: str = Form(...)):
     except HubError as e:
         raise HTTPException(404) from e
     return JSONResponse({"ok": True, "offline": on})
+
+
+APPEND_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+MAX_APPEND = 10
+
+
+def set_append(slug: str, names: list[str]) -> list[str]:
+    """Name the collections of a shared app that everyone with access may add documents to (see shared.appendable).
+    Returns the stored list, de-duplicated in order; an empty list removes the key."""
+    meta_path = _data_meta_path(slug)
+    names = list(dict.fromkeys(names))
+    for name in names:
+        if not APPEND_NAME_RE.match(name) or name == "data":
+            raise HubError(i18n.t("err.append_bad", name=name))
+    if len(names) > MAX_APPEND:
+        raise HubError(i18n.t("err.append_many", max=MAX_APPEND))
+    meta = _read_meta(meta_path)
+    if names:
+        meta[shared.APPEND_KEY] = names
+    else:
+        meta.pop(shared.APPEND_KEY, None)
+    _write_meta(meta_path, meta)
+    return names
+
+
+@app.post("/api/append")
+def api_set_append(request: Request, slug: str = Form(...), names: str = Form("")):
+    """Set the add-only collections of one app; names are comma-separated, empty turns it off."""
+    _upload_authorized(request)
+    if not _meta_path(slug):
+        raise HTTPException(404)
+    try:
+        stored = set_append(slug, [n.strip() for n in names.split(",") if n.strip()])
+    except HubError as e:
+        raise HTTPException(400, str(e)) from e
+    return JSONResponse({"ok": True, "append": stored})
 
 
 # ---------------------------------------------------------------- shared data on and off (app/shared.py)

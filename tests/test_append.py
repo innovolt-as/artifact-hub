@@ -1,0 +1,278 @@
+"""Add-only collections: "append": [names] in a shared app's meta lets everyone who sees the app add documents there."""
+import json
+import time
+from pathlib import Path
+
+import pytest
+
+from app import shared
+from tests.test_connector import call, mcp, text, token  # noqa: F401  (fixtures)
+from tests.test_shared_data import get, make_shared, put
+
+
+def make_append(hub, make_page, slug="fylgje", names=("queue",)):
+    make_shared(hub, make_page, slug)
+    path = hub._meta_path(slug)
+    meta = hub._read_meta(path)
+    meta["append"] = list(names)
+    hub._write_meta(path, meta)
+
+
+def test_appendable_rules():
+    meta = {"data": "shared", "append": ["queue"]}
+    assert shared.appendable(meta, "queue") is True
+    assert shared.appendable(meta, "queue/x/items") is False
+    assert shared.appendable(meta, "briefs") is False
+    assert shared.appendable({"data": "shared", "append": ["data/users/a@t.no"]}, "data/users/a@t.no") is False
+    assert shared.appendable({"append": ["queue"]}, "queue") is False
+    assert shared.appendable({"data": "shared", "append": ["data"]}, "data") is False
+    assert shared.appendable({"data": "shared", "append": "queue"}, "queue") is False
+
+
+def test_user_can_add_to_queue(hub, make_page, admin_client, user_client):
+    make_append(hub, make_page)
+    assert put(user_client, "fylgje", "queue/q1", {"question": "sushi", "_added_by": "evil@x.no"}).status_code == 200
+    doc = get(admin_client, "fylgje", "queue/q1")
+    assert doc["question"] == "sushi"
+    assert doc["_added_by"] == "user@test.no"
+    assert isinstance(doc["_added_at"], int) and abs(doc["_added_at"] - time.time()) < 5
+
+
+def test_add_only_refuses_overwrite_merge_delete(hub, make_page, admin_client, user_client):
+    make_append(hub, make_page)
+    put(user_client, "fylgje", "queue/q1", {"question": "sushi"})
+    assert put(user_client, "fylgje", "queue/q1", {"question": "pizza"}).status_code == 403
+    assert put(user_client, "fylgje", "queue/q1", {"question": "pizza"}, merge="true").status_code == 403
+    assert put(user_client, "fylgje", "queue/q9", {"question": "pizza"}, merge="true").status_code == 404
+    assert user_client.delete("/api/store/fylgje/d", params={"path": "queue/q1"}).status_code == 403
+    assert get(admin_client, "fylgje", "queue/q1")["question"] == "sushi"
+    assert put(admin_client, "fylgje", "queue/q1", {"status": "ferdig"}, merge="true").status_code == 200
+    doc = get(admin_client, "fylgje", "queue/q1")
+    assert doc["status"] == "ferdig" and doc["question"] == "sushi" and doc["_added_by"] == "user@test.no"
+
+
+def test_stamp_cannot_be_forged_or_lost(hub, make_page, admin_client, user_client):
+    make_append(hub, make_page)
+    put(user_client, "fylgje", "queue/q1", {"question": "sushi"})
+    added_at = get(admin_client, "fylgje", "queue/q1")["_added_at"]
+    assert put(admin_client, "fylgje", "queue/q1", {"question": "x"}).status_code == 200
+    doc = get(admin_client, "fylgje", "queue/q1")
+    assert doc["question"] == "x" and doc["_added_by"] == "user@test.no" and doc["_added_at"] == added_at
+    assert put(admin_client, "fylgje", "queue/q2", {"_added_by": "z@x.no"}).status_code == 200
+    assert get(admin_client, "fylgje", "queue/q2")["_added_by"] == "admin@test.no"
+
+
+def test_stamp_keeps_old_fields():
+    assert shared.stamp({"a": 1, "_added_at": 1}, None, "A@T.no", 7) == {"a": 1, "_added_by": "a@t.no", "_added_at": 7}
+    old = {"_added_by": "u@t.no", "_added_at": 3}
+    assert shared.stamp({"a": 2, "_added_by": "z@x.no"}, old, "admin@t.no", 9) == {
+        "a": 2, "_added_by": "u@t.no", "_added_at": 3}
+    # an existing document never gets the editor as its adder, and what the writer sends is dropped
+    assert shared.stamp({"a": 2, "_added_by": "z@x.no"}, {"a": 1}, "admin@t.no", 9) == {"a": 2}
+    assert shared.stamp({"a": 2}, {"_added_at": 3}, "admin@t.no", 9) == {"a": 2, "_added_at": 3}
+
+
+def test_other_shared_collections_stay_admin_only(hub, make_page, user_client):
+    make_append(hub, make_page)
+    assert put(user_client, "fylgje", "entries/kaffe", {"n": 1}).status_code == 403
+    assert put(user_client, "fylgje", "queue/q1/items/i1", {"n": 1}).status_code == 403
+
+
+def test_branch_is_never_add_only(hub, make_page, user_client):
+    make_append(hub, make_page, names=("queue", "data/users/user@test.no"))
+    assert put(user_client, "fylgje", "data/users/user@test.no/p", {"x": 1}).status_code == 200
+    assert put(user_client, "fylgje", "data/users/user@test.no/p", {"x": 2}).status_code == 200
+    assert get(user_client, "fylgje", "data/users/user@test.no/p") == {"x": 2}
+
+
+def test_append_survives_reupload(hub, admin_client, upload):
+    upload(admin_client, "fylgje.html", "<!doctype html><html><body>1</body></html>")
+    path = hub._meta_path("fylgje")
+    hub._write_meta(path, {**hub._read_meta(path), "data": "shared", "append": ["queue"]})
+    upload(admin_client, "fylgje.html", "<!doctype html><html><body>2</body></html>")
+    assert hub._read_meta(path)["append"] == ["queue"]
+
+
+def test_connector_rules_match(hub, make_page, admin_client):
+    make_append(hub, make_page)
+    stored = hub.doc_set("fylgje", "user@test.no", "queue/q3", {"question": "tog", "_added_by": "evil@x.no"})
+    assert stored["_added_by"] == "user@test.no"
+    with pytest.raises(hub.ReadOnly):
+        hub.doc_set("fylgje", "user@test.no", "queue/q3", {"question": "fly"})
+    with pytest.raises(hub.ReadOnly):
+        hub.doc_set("fylgje", "user@test.no", "queue/q3", {"question": "fly"}, merge=True)
+    with pytest.raises(hub.ReadOnly):
+        hub.doc_delete("fylgje", "user@test.no", "queue/q3")
+    with pytest.raises(hub.ReadOnly):
+        hub.doc_set("fylgje", "user@test.no", "entries/kaffe", {"n": 1})
+    assert get(admin_client, "fylgje", "queue/q3")["question"] == "tog"
+    assert hub.doc_delete("fylgje", "admin@test.no", "queue/q3") is True
+
+
+@pytest.mark.parametrize("later", [{"append": []}, {"data": None}], ids=["unlisted", "personal"])
+def test_decision_comes_from_one_meta_read(hub, make_page, admin_client, user_client, monkeypatch, later):
+    """The scope check and the write cannot disagree: "queue" leaving "append", or the app turning personal,
+    while a write is under way must not let a non-admin overwrite or delete."""
+    make_append(hub, make_page)
+    put(user_client, "fylgje", "queue/q1", {"question": "sushi"})
+    real = hub._data_meta
+
+    def flip():
+        """_data_meta whose first read is the real meta and every later read has `later` applied."""
+        calls = []
+
+        def meta(slug, user):
+            calls.append(1)
+            return {**real(slug, user), **later} if len(calls) > 1 else real(slug, user)
+        monkeypatch.setattr(hub, "_data_meta", meta)
+
+    flip()
+    with pytest.raises(hub.ReadOnly):
+        hub.doc_set("fylgje", "user@test.no", "queue/q1", {"question": "pizza"})
+    flip()
+    with pytest.raises(hub.ReadOnly):
+        hub.doc_delete("fylgje", "user@test.no", "queue/q1")
+    flip()
+    assert put(user_client, "fylgje", "queue/q1", {"question": "pizza"}).status_code == 403
+    flip()
+    assert user_client.delete("/api/store/fylgje/d", params={"path": "queue/q1"}).status_code == 403
+    monkeypatch.setattr(hub, "_data_meta", real)
+    assert get(admin_client, "fylgje", "queue/q1")["question"] == "sushi"
+
+
+def test_size_is_checked_once_stamped(hub, make_page, user_client):
+    make_append(hub, make_page)
+    body = {"q": "a" * (hub.MAX_DOC_BYTES - 20)}  # fits as sent, not with _added_by/_added_at
+    assert put(user_client, "fylgje", "queue/big", body).status_code == 413
+    with pytest.raises(hub.HubError):
+        hub.doc_set("fylgje", "user@test.no", "queue/big", body)
+
+
+def test_set_append_validates(hub, make_page):
+    make_append(hub, make_page, names=())
+    assert hub.set_append("fylgje", ["queue", "queue", "tips"]) == ["queue", "tips"]
+    assert hub._read_meta(hub._meta_path("fylgje"))["append"] == ["queue", "tips"]
+    for bad in (["data"], ["a/b"], [""], ["x" * 65], [f"n{i}" for i in range(11)]):
+        with pytest.raises(hub.HubError):
+            hub.set_append("fylgje", bad)
+    with pytest.raises(hub.HubError):
+        hub.set_append("nope", ["queue"])
+    assert hub._read_meta(hub._meta_path("fylgje"))["append"] == ["queue", "tips"]
+    assert hub.set_append("fylgje", []) == []
+    assert "append" not in hub._read_meta(hub._meta_path("fylgje"))
+
+
+def test_set_append_refuses_link_card(hub):
+    (hub.ARTIFACTS_DIR / "l.link.json").write_text('{"url": "https://example.com"}')
+    with pytest.raises(hub.HubError):
+        hub.set_append("l", ["queue"])
+
+
+def test_page_tells_hub_js(hub, make_page, user_client):
+    make_append(hub, make_page)
+    assert 'data-append="queue"' in user_client.get("/a/fylgje/").text
+    hub.set_append("fylgje", ["queue", "tips"])
+    assert 'data-append="queue,tips"' in user_client.get("/a/fylgje/").text
+    hub.set_append("fylgje", [])
+    assert "data-append" not in user_client.get("/a/fylgje/").text
+    make_page("privat")
+    assert "data-append" not in user_client.get("/a/privat/").text
+
+
+def test_listing_carries_append(hub, make_page):
+    make_append(hub, make_page)
+    make_page("privat")
+    items = {a["slug"]: a for a in hub.list_artifacts("admin@test.no")}
+    assert items["fylgje"]["append"] == ["queue"] and items["privat"]["append"] == []
+
+
+def test_admin_endpoint(hub, make_page, admin_client, user_client):
+    make_shared(hub, make_page, "fylgje")
+    r = admin_client.post("/api/append", data={"slug": "fylgje", "names": "queue"})
+    assert r.status_code == 200 and r.json() == {"ok": True, "append": ["queue"]}
+    assert hub._read_meta(hub._meta_path("fylgje"))["append"] == ["queue"]
+    assert admin_client.post("/api/append", data={"slug": "fylgje", "names": " queue , tips,, queue "}).json()["append"] == ["queue", "tips"]
+    assert admin_client.post("/api/append", data={"slug": "fylgje", "names": "a/b"}).status_code == 400
+    assert admin_client.post("/api/append", data={"slug": "nope", "names": "queue"}).status_code == 404
+    assert admin_client.post("/api/append", data={"slug": "fylgje", "names": ""}).json() == {"ok": True, "append": []}
+    assert "append" not in hub._read_meta(hub._meta_path("fylgje"))
+    plain = user_client.post("/api/toggle-offline", data={"slug": "fylgje"}).status_code
+    assert plain in (401, 403)
+    assert user_client.post("/api/append", data={"slug": "fylgje", "names": "queue"}).status_code == plain
+
+
+def test_admin_page_shows_append(hub, make_page, admin_client):
+    make_append(hub, make_page)
+    page = admin_client.get("/admin").text
+    assert 'data-append="queue"' in page and 'id="asAppend"' in page
+    hub.set_append("fylgje", [])
+    assert 'data-append=""' in admin_client.get("/admin").text
+
+
+def test_hub_js_knows_add_only():
+    js = (Path(__file__).parent.parent / "app" / "static" / "hub.js").read_text()
+    assert "data.add:" in js and "dataset.append" in js
+
+
+def test_connector_sets_append(mcp, token, hub, make_page):
+    make_shared(hub, make_page, "fylgje")
+    res = call(mcp, token, "update_app_info", slug="fylgje", append_collections=["queue"])
+    assert not res.get("isError"), res
+    assert "queue" in text(res)
+    apps = json.loads(text(call(mcp, token, "list_apps")))
+    assert next(a for a in apps if a["slug"] == "fylgje")["append"] == ["queue"]
+    res = call(mcp, token, "update_app_info", slug="fylgje", append_collections=[])
+    assert "queue" not in text(res) and not res.get("isError")
+    apps = json.loads(text(call(mcp, token, "list_apps")))
+    assert next(a for a in apps if a["slug"] == "fylgje")["append"] == []
+    bad = call(mcp, token, "update_app_info", slug="fylgje", append_collections=["a/b"])
+    assert bad.get("isError") is True and "a/b" in text(bad)
+    assert hub._read_meta(hub._meta_path("fylgje")).get("append") is None
+
+
+def test_connector_instructions_mention_append():
+    from app import connector
+    assert "append_collections" in connector.INSTRUCTIONS
+
+
+def test_delete_my_data_forgets_added_by(hub, make_page, user_client):
+    make_append(hub, make_page)
+    hub.doc_set("fylgje", "user@test.no", "queue/q1", {"question": "sushi"})
+    hub.doc_set("fylgje", "admin@test.no", "queue/q2", {"question": "pizza"})
+    before = hub.doc_get("fylgje", "admin@test.no", "queue/q1")
+    assert before["_added_by"] == "user@test.no"
+    assert user_client.post("/api/me/delete-data", json={"confirm": "SLETT"}).status_code == 200
+    mine = hub.doc_get("fylgje", "admin@test.no", "queue/q1")
+    assert mine["question"] == "sushi" and "_added_by" not in mine and mine["_added_at"] == before["_added_at"]
+    assert hub.doc_get("fylgje", "admin@test.no", "queue/q2")["_added_by"] == "admin@test.no"
+    # a later admin edit does not name the admin as the one who added it
+    hub.doc_set("fylgje", "admin@test.no", "queue/q1", {"status": "ferdig"}, merge=True)
+    after = hub.doc_get("fylgje", "admin@test.no", "queue/q1")
+    assert after["status"] == "ferdig" and "_added_by" not in after and after["_added_at"] == before["_added_at"]
+
+
+def test_doc_from_before_append_gets_no_stamp(hub, make_page, admin_client):
+    make_append(hub, make_page, names=())
+    assert put(admin_client, "fylgje", "queue/old", {"question": "gammel"}).status_code == 200
+    hub.set_append("fylgje", ["queue"])
+    assert put(admin_client, "fylgje", "queue/old", {"status": "ferdig"}, merge="true").status_code == 200
+    assert put(admin_client, "fylgje", "queue/old", {"question": "ny", "_added_by": "z@x.no"}).status_code == 200
+    assert get(admin_client, "fylgje", "queue/old") == {"question": "ny"}
+
+
+def test_connector_append_notes_shared_data_off(mcp, token, hub, make_page):
+    make_page("privat")
+    res = call(mcp, token, "update_app_info", slug="privat", append_collections=["queue"])
+    assert not res.get("isError") and hub.i18n.t("mcp.append_needs_shared") in text(res)
+    make_shared(hub, make_page, "fylgje")
+    res = call(mcp, token, "update_app_info", slug="fylgje", append_collections=["queue"])
+    assert hub.i18n.t("mcp.append_needs_shared") not in text(res)
+
+
+def test_get_app_shows_data_and_append(mcp, token, hub, make_page):
+    make_append(hub, make_page)
+    make_page("privat")
+    got = json.loads(text(call(mcp, token, "get_app", slug="fylgje")))
+    assert got["data"] == "shared" and got["append"] == ["queue"]
+    got = json.loads(text(call(mcp, token, "get_app", slug="privat")))
+    assert got["data"] == "personal" and got["append"] == []
