@@ -11,7 +11,7 @@ upgrades.
 ```yaml
 services:
   hub:
-    image: ghcr.io/innovolt-as/artifact-hub:v1.7.1
+    image: ghcr.io/innovolt-as/artifact-hub:v1.8.0
     pull_policy: always
 ```
 
