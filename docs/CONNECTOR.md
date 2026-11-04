@@ -50,7 +50,7 @@ existing app; `copy_my_data=true` also copies your current documents into the sh
 
 `append_collections` takes a list of names, for example `["queue"]`, and lets everyone who can see a shared-data app
 add new documents to those [collections](APPS.md#collections-everyone-can-add-to) but not change or delete them; an
-empty list turns it off. `list_apps` shows the names as `"append"`. Only list collections for apps shared with people
+empty list turns it off. `list_apps` and `get_app` show the names as `"append"`. Only list collections for apps shared with people
 you trust: there is no limit per user on how many documents they can add.
 
 The admin page warns about an app that is shared with others but has personal data that Claude has written in the

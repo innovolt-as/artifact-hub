@@ -72,27 +72,30 @@ is on. Nothing is deleted: turn it off and the personal data is back. The key/va
 Sometimes people who can only read should still be able to put something in, such as a question for a scheduled
 agent to answer. A shared app can name top-level collections that everyone with access may add to: the
 *Everyone can add to* row in the app's settings on the admin page (shown while shared data is on), `"append":
-["queue"]` in its meta, or `append_collections` from [Claude](CONNECTOR.md). You can name up to 10 collections; use
-letters, digits, `_` and `-`, and not `data`.
+["queue"]` in its meta, or `append_collections` from [Claude](CONNECTOR.md). You can name up to 10 collections; a name has
+at most 64 characters, uses letters, digits, `_` and `-`, and is not `data`.
 
 - A non-admin can create a new document in such a collection. They cannot overwrite, merge into or delete one: those
   writes reject with `invalid_argument`, as for any other shared document. Admins can still change everything.
 - Only the collection itself counts, not collections below a document in it. Nothing under `data/` is ever add-only.
-- The hub stamps every write there with `_added_by` (the e-mail in lower case) and `_added_at` (epoch seconds).
-  Whatever the app sends in those two fields is replaced, and later writes keep the original values. The stamp counts
-  towards the document size limit. *Delete my data* keeps the documents but removes `_added_by` where it is that
-  user's address.
+- The hub sets `_added_by` (the e-mail in lower case) and `_added_at` (epoch seconds) when a document is created
+  there. Whatever the app sends in those two fields is ignored: later writes keep the stored values, and a document
+  without them (written before the collection was listed, or after *Delete my data*) stays without them. Everyone who
+  can see the app can read `_added_by`, so they see who added each document. The stamp counts towards the document
+  size limit. *Delete my data* keeps the documents but removes `_added_by` where it is that user's address.
 - `await user.can("data.add:queue")` says whether the user may add to `queue`. It is true for admins and for apps
   without shared data.
 - There is no limit per user on how many documents someone with access can add, so only list collections for apps
   shared with people you trust.
 
-Use a random id, so two people do not pick the same one (the second would be rejected):
+Add with `add()`, which picks a random id, so two people do not pick the same one (the second would be rejected):
 
 ```js
-const id = crypto.randomUUID();
-await db.collection("queue").doc(id).set({ question: "What is new in Oslo?" });
+await db.collection("queue").add({ question: "What is new in Oslo?" });
 ```
+
+If a create with a fixed id is retried, say after a dropped connection, and the retry is rejected, the first attempt
+may already be saved: read the document back before telling the user it failed.
 
 ## Storage: the key/value API
 

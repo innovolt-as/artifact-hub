@@ -63,10 +63,13 @@ def test_stamp_cannot_be_forged_or_lost(hub, make_page, admin_client, user_clien
 
 
 def test_stamp_keeps_old_fields():
-    assert shared.stamp({"a": 1}, None, "A@T.no", 7) == {"a": 1, "_added_by": "a@t.no", "_added_at": 7}
+    assert shared.stamp({"a": 1, "_added_at": 1}, None, "A@T.no", 7) == {"a": 1, "_added_by": "a@t.no", "_added_at": 7}
     old = {"_added_by": "u@t.no", "_added_at": 3}
     assert shared.stamp({"a": 2, "_added_by": "z@x.no"}, old, "admin@t.no", 9) == {
         "a": 2, "_added_by": "u@t.no", "_added_at": 3}
+    # an existing document never gets the editor as its adder, and what the writer sends is dropped
+    assert shared.stamp({"a": 2, "_added_by": "z@x.no"}, {"a": 1}, "admin@t.no", 9) == {"a": 2}
+    assert shared.stamp({"a": 2}, {"_added_at": 3}, "admin@t.no", 9) == {"a": 2, "_added_at": 3}
 
 
 def test_other_shared_collections_stay_admin_only(hub, make_page, user_client):
@@ -104,7 +107,6 @@ def test_connector_rules_match(hub, make_page, admin_client):
         hub.doc_set("fylgje", "user@test.no", "entries/kaffe", {"n": 1})
     assert get(admin_client, "fylgje", "queue/q3")["question"] == "tog"
     assert hub.doc_delete("fylgje", "admin@test.no", "queue/q3") is True
-
 
 
 @pytest.mark.parametrize("later", [{"append": []}, {"data": None}], ids=["unlisted", "personal"])
@@ -224,7 +226,8 @@ def test_connector_sets_append(mcp, token, hub, make_page):
     apps = json.loads(text(call(mcp, token, "list_apps")))
     assert next(a for a in apps if a["slug"] == "fylgje")["append"] == []
     bad = call(mcp, token, "update_app_info", slug="fylgje", append_collections=["a/b"])
-    assert bad.get("isError") or "a/b" in text(bad)
+    assert bad.get("isError") is True and "a/b" in text(bad)
+    assert hub._read_meta(hub._meta_path("fylgje")).get("append") is None
 
 
 def test_connector_instructions_mention_append():
@@ -242,3 +245,34 @@ def test_delete_my_data_forgets_added_by(hub, make_page, user_client):
     mine = hub.doc_get("fylgje", "admin@test.no", "queue/q1")
     assert mine["question"] == "sushi" and "_added_by" not in mine and mine["_added_at"] == before["_added_at"]
     assert hub.doc_get("fylgje", "admin@test.no", "queue/q2")["_added_by"] == "admin@test.no"
+    # a later admin edit does not name the admin as the one who added it
+    hub.doc_set("fylgje", "admin@test.no", "queue/q1", {"status": "ferdig"}, merge=True)
+    after = hub.doc_get("fylgje", "admin@test.no", "queue/q1")
+    assert after["status"] == "ferdig" and "_added_by" not in after and after["_added_at"] == before["_added_at"]
+
+
+def test_doc_from_before_append_gets_no_stamp(hub, make_page, admin_client):
+    make_append(hub, make_page, names=())
+    assert put(admin_client, "fylgje", "queue/old", {"question": "gammel"}).status_code == 200
+    hub.set_append("fylgje", ["queue"])
+    assert put(admin_client, "fylgje", "queue/old", {"status": "ferdig"}, merge="true").status_code == 200
+    assert put(admin_client, "fylgje", "queue/old", {"question": "ny", "_added_by": "z@x.no"}).status_code == 200
+    assert get(admin_client, "fylgje", "queue/old") == {"question": "ny"}
+
+
+def test_connector_append_notes_shared_data_off(mcp, token, hub, make_page):
+    make_page("privat")
+    res = call(mcp, token, "update_app_info", slug="privat", append_collections=["queue"])
+    assert not res.get("isError") and hub.i18n.t("mcp.append_needs_shared") in text(res)
+    make_shared(hub, make_page, "fylgje")
+    res = call(mcp, token, "update_app_info", slug="fylgje", append_collections=["queue"])
+    assert hub.i18n.t("mcp.append_needs_shared") not in text(res)
+
+
+def test_get_app_shows_data_and_append(mcp, token, hub, make_page):
+    make_append(hub, make_page)
+    make_page("privat")
+    got = json.loads(text(call(mcp, token, "get_app", slug="fylgje")))
+    assert got["data"] == "shared" and got["append"] == ["queue"]
+    got = json.loads(text(call(mcp, token, "get_app", slug="privat")))
+    assert got["data"] == "personal" and got["append"] == []

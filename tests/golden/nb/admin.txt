@@ -62,7 +62,7 @@ Lagre
 Alle kan legge til i
 Samlinger, skilt med komma
 @placeholder: queue, tips
-Brukere med tilgang kan legge til nye dokumenter i disse samlingene, men ikke endre eller slette. Hvem som la til, lagres av huben.
+Brukere med tilgang kan legge til nye dokumenter i disse samlingene, men ikke endre eller slette. Huben lagrer hvem som la til hvert dokument, og alle med tilgang ser det.
 Avbryt
 Lagre
 @aria-label: Tilbake

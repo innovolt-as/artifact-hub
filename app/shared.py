@@ -63,13 +63,17 @@ def appendable(meta: dict, collection: str) -> bool:
     return collection in names
 
 
+STAMP_KEYS = ("_added_by", "_added_at")
+
+
 def stamp(data: dict, old: dict | None, user: str, now: int) -> dict:
-    """A copy of data with _added_by and _added_at: kept from the stored document when it has them,
-    else this user and now. Whatever the writer put there is ignored."""
-    old = old or {}
-    return {**data,
-            "_added_by": old["_added_by"] if "_added_by" in old else user.lower(),
-            "_added_at": old["_added_at"] if "_added_at" in old else now}
+    """A copy of data whose _added_by and _added_at come from the hub, never from the writer. A create (old is
+    None) gets this user and now; any later write keeps what the stored document has, and a field it lacks stays
+    absent, so editing a document never names the editor as the one who added it."""
+    out = {k: v for k, v in data.items() if k not in STAMP_KEYS}
+    src = {"_added_by": user.lower(), "_added_at": now} if old is None else old
+    out.update({k: src[k] for k in STAMP_KEYS if k in src})
+    return out
 
 
 # ---------------------------------------------------------------- connector writes (the admin warning)

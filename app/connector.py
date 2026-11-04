@@ -46,7 +46,7 @@ and say in the app's guide (meta/guide) what is shared and what is personal. upd
 switches an existing app; copy_my_data=true also copies the user's current documents into the shared data, where
 everyone with access sees them, so check them for personal content first.
 In a shared app, update_app_info(append_collections=[...]) names collections everyone with access may add new
-documents to (not change or delete); the hub stamps each with _added_by and _added_at. list_apps shows them as "append".
+documents to (not change or delete); the hub stamps each with _added_by and _added_at. list_apps and get_app show them as "append".
 An app can be marked to work offline (update_app_info offline=true); only do that for apps that keep their own data on the device and send it later.
 A user can lock an app behind a code on the hub; the lock covers the hub's own storage, not the browser's, so keep
 anything sensitive in window.claude.use("db"), never in localStorage.
@@ -167,7 +167,9 @@ def build_mcp() -> MCPServer:
         card = (None if result is None else {"error": result.error} if result.error
                 else {"text": hub.home.card_line(result.text)})
         return json.dumps({"slug": slug, "title": info.get("title", ""), "description": info.get("description", ""),
-                           "emoji": info.get("emoji", ""), "kind": info.get("kind", ""), "html": html, "card": card},
+                           "emoji": info.get("emoji", ""), "kind": info.get("kind", ""),
+                           "data": info.get("data", "personal"), "append": info.get("append", []),
+                           "html": html, "card": card},
                           ensure_ascii=False)
 
     @mcp.tool(
@@ -285,6 +287,9 @@ def build_mcp() -> MCPServer:
             if append_collections is not None:
                 names = hub.set_append(slug, append_collections)
                 said.append(i18n.t("mcp.append_set", names=", ".join(names)) if names else i18n.t("mcp.append_off"))
+                info = next((a for a in hub.list_artifacts(user) if a["slug"] == slug), {})
+                if names and info.get("data") != "shared":
+                    said.append(i18n.t("mcp.append_needs_shared"))
             if private is False and slug in hub.claude_warned(hub.list_artifacts(user)):
                 said.append(i18n.t("mcp.claude_warning"))
         except hub.HubError as e:
