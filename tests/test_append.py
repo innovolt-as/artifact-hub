@@ -1,9 +1,12 @@
 """Add-only collections: "append": [names] in a shared app's meta lets everyone who sees the app add documents there."""
+import json
 import time
+from pathlib import Path
 
 import pytest
 
 from app import shared
+from tests.test_connector import call, mcp, text, token  # noqa: F401  (fixtures)
 from tests.test_shared_data import get, make_shared, put
 
 
@@ -141,3 +144,101 @@ def test_size_is_checked_once_stamped(hub, make_page, user_client):
     assert put(user_client, "fylgje", "queue/big", body).status_code == 413
     with pytest.raises(hub.HubError):
         hub.doc_set("fylgje", "user@test.no", "queue/big", body)
+
+
+def test_set_append_validates(hub, make_page):
+    make_append(hub, make_page, names=())
+    assert hub.set_append("fylgje", ["queue", "queue", "tips"]) == ["queue", "tips"]
+    assert hub._read_meta(hub._meta_path("fylgje"))["append"] == ["queue", "tips"]
+    for bad in (["data"], ["a/b"], [""], ["x" * 65], [f"n{i}" for i in range(11)]):
+        with pytest.raises(hub.HubError):
+            hub.set_append("fylgje", bad)
+    with pytest.raises(hub.HubError):
+        hub.set_append("nope", ["queue"])
+    assert hub._read_meta(hub._meta_path("fylgje"))["append"] == ["queue", "tips"]
+    assert hub.set_append("fylgje", []) == []
+    assert "append" not in hub._read_meta(hub._meta_path("fylgje"))
+
+
+def test_set_append_refuses_link_card(hub):
+    (hub.ARTIFACTS_DIR / "l.link.json").write_text('{"url": "https://example.com"}')
+    with pytest.raises(hub.HubError):
+        hub.set_append("l", ["queue"])
+
+
+def test_page_tells_hub_js(hub, make_page, user_client):
+    make_append(hub, make_page)
+    assert 'data-append="queue"' in user_client.get("/a/fylgje/").text
+    hub.set_append("fylgje", ["queue", "tips"])
+    assert 'data-append="queue,tips"' in user_client.get("/a/fylgje/").text
+    hub.set_append("fylgje", [])
+    assert "data-append" not in user_client.get("/a/fylgje/").text
+    make_page("privat")
+    assert "data-append" not in user_client.get("/a/privat/").text
+
+
+def test_listing_carries_append(hub, make_page):
+    make_append(hub, make_page)
+    make_page("privat")
+    items = {a["slug"]: a for a in hub.list_artifacts("admin@test.no")}
+    assert items["fylgje"]["append"] == ["queue"] and items["privat"]["append"] == []
+
+
+def test_admin_endpoint(hub, make_page, admin_client, user_client):
+    make_shared(hub, make_page, "fylgje")
+    r = admin_client.post("/api/append", data={"slug": "fylgje", "names": "queue"})
+    assert r.status_code == 200 and r.json() == {"ok": True, "append": ["queue"]}
+    assert hub._read_meta(hub._meta_path("fylgje"))["append"] == ["queue"]
+    assert admin_client.post("/api/append", data={"slug": "fylgje", "names": " queue , tips,, queue "}).json()["append"] == ["queue", "tips"]
+    assert admin_client.post("/api/append", data={"slug": "fylgje", "names": "a/b"}).status_code == 400
+    assert admin_client.post("/api/append", data={"slug": "nope", "names": "queue"}).status_code == 404
+    assert admin_client.post("/api/append", data={"slug": "fylgje", "names": ""}).json() == {"ok": True, "append": []}
+    assert "append" not in hub._read_meta(hub._meta_path("fylgje"))
+    plain = user_client.post("/api/toggle-offline", data={"slug": "fylgje"}).status_code
+    assert plain in (401, 403)
+    assert user_client.post("/api/append", data={"slug": "fylgje", "names": "queue"}).status_code == plain
+
+
+def test_admin_page_shows_append(hub, make_page, admin_client):
+    make_append(hub, make_page)
+    page = admin_client.get("/admin").text
+    assert 'data-append="queue"' in page and 'id="asAppend"' in page
+    hub.set_append("fylgje", [])
+    assert 'data-append=""' in admin_client.get("/admin").text
+
+
+def test_hub_js_knows_add_only():
+    js = (Path(__file__).parent.parent / "app" / "static" / "hub.js").read_text()
+    assert "data.add:" in js and "dataset.append" in js
+
+
+def test_connector_sets_append(mcp, token, hub, make_page):
+    make_shared(hub, make_page, "fylgje")
+    res = call(mcp, token, "update_app_info", slug="fylgje", append_collections=["queue"])
+    assert not res.get("isError"), res
+    assert "queue" in text(res)
+    apps = json.loads(text(call(mcp, token, "list_apps")))
+    assert next(a for a in apps if a["slug"] == "fylgje")["append"] == ["queue"]
+    res = call(mcp, token, "update_app_info", slug="fylgje", append_collections=[])
+    assert "queue" not in text(res) and not res.get("isError")
+    apps = json.loads(text(call(mcp, token, "list_apps")))
+    assert next(a for a in apps if a["slug"] == "fylgje")["append"] == []
+    bad = call(mcp, token, "update_app_info", slug="fylgje", append_collections=["a/b"])
+    assert bad.get("isError") or "a/b" in text(bad)
+
+
+def test_connector_instructions_mention_append():
+    from app import connector
+    assert "append_collections" in connector.INSTRUCTIONS
+
+
+def test_delete_my_data_forgets_added_by(hub, make_page, user_client):
+    make_append(hub, make_page)
+    hub.doc_set("fylgje", "user@test.no", "queue/q1", {"question": "sushi"})
+    hub.doc_set("fylgje", "admin@test.no", "queue/q2", {"question": "pizza"})
+    before = hub.doc_get("fylgje", "admin@test.no", "queue/q1")
+    assert before["_added_by"] == "user@test.no"
+    assert user_client.post("/api/me/delete-data", json={"confirm": "SLETT"}).status_code == 200
+    mine = hub.doc_get("fylgje", "admin@test.no", "queue/q1")
+    assert mine["question"] == "sushi" and "_added_by" not in mine and mine["_added_at"] == before["_added_at"]
+    assert hub.doc_get("fylgje", "admin@test.no", "queue/q2")["_added_by"] == "admin@test.no"

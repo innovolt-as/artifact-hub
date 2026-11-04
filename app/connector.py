@@ -45,6 +45,8 @@ and pass shared_data accordingly. In a shared app, put anything personal under d
 and say in the app's guide (meta/guide) what is shared and what is personal. update_app_info(shared_data=...)
 switches an existing app; copy_my_data=true also copies the user's current documents into the shared data, where
 everyone with access sees them, so check them for personal content first.
+In a shared app, update_app_info(append_collections=[...]) names collections everyone with access may add new
+documents to (not change or delete); the hub stamps each with _added_by and _added_at. list_apps shows them as "append".
 An app can be marked to work offline (update_app_info offline=true); only do that for apps that keep their own data on the device and send it later.
 A user can lock an app behind a code on the hub; the lock covers the hub's own storage, not the browser's, so keep
 anything sensitive in window.claude.use("db"), never in localStorage.
@@ -132,6 +134,7 @@ def build_mcp() -> MCPServer:
                 "url": a["url"] if a["kind"] == "link" else _url(a["slug"]),
                 "access": a["access_text"],
                 "data": a["data"],
+                "append": a["append"],
                 "editable": a["kind"] in ("page", "app"),
                 "updated": datetime.fromtimestamp(a["updated"], timezone.utc).isoformat(timespec="seconds"),
             }
@@ -254,13 +257,17 @@ def build_mcp() -> MCPServer:
         "way. copy_my_data=true also copies the user's documents into the shared data when it has none yet: check "
         "them for personal content first. "
         "offline=true marks an app that keeps its own data on the device, so the hub stores its page on the phone; "
-        "false takes the mark off. Use list_apps to find the slug.",
+        "false takes the mark off. "
+        "append_collections=[names] lets everyone who can see a shared-data app add new documents to those top-level "
+        "collections, but not change or delete them (the hub stamps _added_by and _added_at); [] turns it off. "
+        "Use list_apps to find the slug.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
         structured_output=False,
     )
     def update_app_info(slug: str, title: str | None = None, description: str | None = None,
                         emoji: str | None = None, private: bool | None = None, shared_data: bool | None = None,
-                        copy_my_data: bool = False, offline: bool | None = None) -> str:
+                        copy_my_data: bool = False, offline: bool | None = None,
+                        append_collections: list[str] | None = None) -> str:
         try:
             user = _user()
             hub.set_info(slug, title=title, description=description, emoji=emoji, private=private)
@@ -275,6 +282,9 @@ def build_mcp() -> MCPServer:
             if offline is not None:
                 hub.set_offline(slug, offline)
                 said.append(i18n.t("mcp.offline_on" if offline else "mcp.offline_off", slug=slug))
+            if append_collections is not None:
+                names = hub.set_append(slug, append_collections)
+                said.append(i18n.t("mcp.append_set", names=", ".join(names)) if names else i18n.t("mcp.append_off"))
             if private is False and slug in hub.claude_warned(hub.list_artifacts(user)):
                 said.append(i18n.t("mcp.claude_warning"))
         except hub.HubError as e:

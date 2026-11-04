@@ -5,7 +5,8 @@
  * only exists inside claude.ai, so this file provides a compatible subset here:
  *   db        -> documents stored on the hub, per artifact and per logged-in user; in an app with shared
  *                data (data-shared="1") shared by everyone who can see it, written by admins only, except each
- *                user's own data/users/<e-mail>/ branch, which stays private (as on claude.ai)
+ *                user's own data/users/<e-mail>/ branch, which stays private (as on claude.ai); collections named in
+ *                data-append are open for everyone to add documents to, not to change or delete
  *   downloads -> save({filename, data}) as a plain browser download
  *   user      -> who is viewing (the logged-in e-mail)
  * Other capabilities (sample, room, mcp, ...) resolve null, which artifacts must handle anyway.
@@ -17,6 +18,7 @@
   const EMAIL = me.dataset.user;
   const ADMIN = me.dataset.admin === "1";
   const SHARED = me.dataset.shared === "1";
+  const APPEND = (me.dataset.append || "").split(",").filter(Boolean);  // add-only collections of a shared app
   const API = `/api/store/${encodeURIComponent(SLUG)}`;
   const POLL_MS = 5000;
   // Texts come from the hub's language files as data-strings on this script tag; without them the key shows.
@@ -288,7 +290,11 @@
   const user = Object.freeze({
     isOwner: async () => ADMIN,
     canEdit: async () => ADMIN,
-    can: async (name) => (name === "data.write" ? !SHARED || ADMIN : true),
+    can: async (name) => {
+      if (name === "data.write") return !SHARED || ADMIN;
+      if (typeof name === "string" && name.startsWith("data.add:")) return !SHARED || ADMIN || APPEND.includes(name.slice(9));
+      return true;
+    },
     id: async () => EMAIL,
     me: async () => ({ id: EMAIL, name: profile.name, avatarUrl: "", color: profile.color, email: EMAIL, isOwner: ADMIN, canEdit: ADMIN }),
     profiles: async (ids) => Object.fromEntries([].concat(ids).map((i) => [i, i === EMAIL ? profile : { id: i, name: "", avatarUrl: "", color: "", email: null, isMe: false, guest: false }])),

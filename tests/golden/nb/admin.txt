@@ -34,6 +34,8 @@ Navn og ikon
 Tilgang
 ›
 Felles data
+Alle kan legge til i
+›
 Banner øverst
 Virker uten nett
 Felles data: alle med tilgang ser det samme. Du får se hva som kopieres før det skjer.
@@ -53,6 +55,14 @@ Emoji
 @placeholder: f.eks. 📈
 Bilde
 Fjern bildet
+Avbryt
+Lagre
+@aria-label: Tilbake
+‹
+Alle kan legge til i
+Samlinger, skilt med komma
+@placeholder: queue, tips
+Brukere med tilgang kan legge til nye dokumenter i disse samlingene, men ikke endre eller slette. Hvem som la til, lagres av huben.
 Avbryt
 Lagre
 @aria-label: Tilbake

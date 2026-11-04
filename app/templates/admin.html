@@ -14,7 +14,7 @@
   <li data-slug="{{ a.slug }}" data-title="{{ a.title }}" data-emoji="{{ a.emoji }}" data-kind="{{ a.kind }}"
       data-kindlabel="{{ t('admin.kind_' + a.kind) }}" data-url="{{ a.url }}" data-hue="{{ a.hue }}" data-icon="{{ a.icon_url or '' }}"
       data-level="{{ a.access }}" data-label="{{ a.access_label }}" data-people='{{ a.people|tojson }}'
-      data-shared="{{ '1' if a.data == 'shared' else '0' }}" data-banner="{{ '1' if a.banner else '0' }}" data-offline="{{ '1' if a.offline else '0' }}"
+      data-shared="{{ '1' if a.data == 'shared' else '0' }}" data-banner="{{ '1' if a.banner else '0' }}" data-offline="{{ '1' if a.offline else '0' }}" data-append="{{ a.append|join(',') }}"
       data-claude="{{ '1' if a.slug in filled else '0' }}" data-warned="{{ '1' if a.slug in warned else '0' }}">
     <button type="button" class="arow">
       {{ icon(a, "icon icon-sm") }}
@@ -22,6 +22,7 @@
         {%- if a.data == 'shared' %} · {{ t('admin.meta_shared') }}{% endif %}
         {%- if not a.banner %} · {{ t('admin.meta_no_banner') }}{% endif %}
         {%- if a.offline %} · {{ t('admin.meta_offline') }}{% endif %}
+        {%- if a.append %} · {{ t('admin.meta_append') }}{% endif %}
         {%- if a.kind == 'link' %} · {{ t('admin.kind_link') }}{% endif %}</small></span>
       <span class="chev" aria-hidden="true">›</span>
     </button>
@@ -52,6 +53,7 @@
     <div id="asSwitches">
       <div class="as-group">
         <label class="set"><span>{{ t('admin.shared_data') }}</span><input type="checkbox" role="switch" id="asData"><span class="sw" aria-hidden="true"></span></label>
+        <button type="button" class="set" id="asAppend" hidden><span>{{ t('admin.append') }}</span><em><span id="asAppendLabel"></span> <span aria-hidden="true">›</span></em></button>
         <label class="set"><span>{{ t('admin.banner_top') }}</span><input type="checkbox" role="switch" id="asBanner"><span class="sw" aria-hidden="true"></span></label>
         <label class="set"><span>{{ t('admin.offline') }}</span><input type="checkbox" role="switch" id="asOffline"><span class="sw" aria-hidden="true"></span></label>
       </div>
@@ -82,6 +84,22 @@
       <label>{{ t("admin.image") }}<input type="file" name="icon" id="edIcon" accept=".png,.jpg,.jpeg,.webp,.gif,.svg"></label>
       <label class="check" id="edRemoveRow"><input type="checkbox" name="remove_icon" id="edRemove" value="true"> {{ t("admin.remove_image") }}</label>
       <p id="edError" class="err small" role="alert"></p>
+      <div class="editor-actions">
+        <button type="button" class="small view-cancel">{{ t("admin.cancel") }}</button>
+        <button type="submit" class="primary">{{ t("admin.save") }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="editor view" data-view="append" hidden>
+    <header class="view-top">
+      <button type="button" class="view-back" aria-label="{{ t('admin.back') }}">‹</button>
+      <h1 tabindex="-1">{{ t("admin.append") }}</h1>
+    </header>
+    <form id="appendForm" method="dialog">
+      <label>{{ t("admin.append_label") }}<input name="names" id="apNames" maxlength="800" placeholder="queue, tips" autocapitalize="none" autocomplete="off" spellcheck="false"></label>
+      <p class="small muted">{{ t("admin.append_hint") }}</p>
+      <p id="apError" class="err small" role="alert"></p>
       <div class="editor-actions">
         <button type="button" class="small view-cancel">{{ t("admin.cancel") }}</button>
         <button type="submit" class="primary">{{ t("admin.save") }}</button>

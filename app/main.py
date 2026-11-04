@@ -566,6 +566,7 @@ def list_artifacts(user: str) -> list[dict]:
                 "banner": meta.get("banner") is not False,  # the strip at the top of the app (banner.py)
                 "data": "shared" if shared.is_shared(meta) else "personal",  # app/shared.py
                 "offline": kind != "link" and meta.get("offline") is True,  # the page is kept on the phone
+                "append": _append_names(meta),  # collections everyone with access may add to
                 "updated": mtime,
                 "emoji": meta.get("emoji", ""),
                 "icon_url": f"/icon/{slug}?v={int(icon.stat().st_mtime)}" if icon else None,
@@ -574,6 +575,14 @@ def list_artifacts(user: str) -> list[dict]:
         )
     items.sort(key=lambda a: _sort_key(a["title"]))
     return items
+
+
+def _append_names(meta: dict) -> list[str]:
+    """The add-only collections of a shared app (shared.appendable's list); empty for any other app."""
+    names = meta.get(shared.APPEND_KEY)
+    if not shared.is_shared(meta) or not isinstance(names, list):
+        return []
+    return [n for n in names if isinstance(n, str) and shared.appendable(meta, n)]
 
 
 def artifact_root(slug: str) -> tuple[Path, dict] | None:
@@ -1003,9 +1012,11 @@ def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool, lock
     strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
     found = artifact_root(slug)
     data_shared = bool(found) and shared.is_shared(found[1])
+    append = _append_names(found[1]) if found else []
     tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"{}></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings,
         (' data-lock="1"' if locked else "") + (' data-offline="1"' if offline else "") + (' data-copy="1"' if copy else "")
+        + (' data-append="{}"'.format(escape(",".join(append))) if append else "")
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
     html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
@@ -1728,6 +1739,9 @@ async def delete_my_data(request: Request, user: str = Depends(api_user)):
         docs = con.execute("DELETE FROM docs WHERE owner=?", (email,)).rowcount
         keys = con.execute("DELETE FROM app_data WHERE lower(email)=?", (email,)).rowcount
         con.execute("DELETE FROM claude_writes WHERE email=?", (email,))
+        # who added a shared document is personal data too; the document itself is shared content and stays
+        con.execute("UPDATE docs SET data=json_remove(data, '$._added_by') WHERE owner=? AND json_extract(data, '$._added_by')=?",
+                    (shared.SHARED, email))
     log.info("Deleted the data of %s: %d documents, %d keys", email, docs, keys)
     return {"ok": True, "docs": docs, "keys": keys}
 
@@ -2200,6 +2214,42 @@ def api_toggle_offline(request: Request, slug: str = Form(...)):
     except HubError as e:
         raise HTTPException(404) from e
     return JSONResponse({"ok": True, "offline": on})
+
+
+APPEND_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+MAX_APPEND = 10
+
+
+def set_append(slug: str, names: list[str]) -> list[str]:
+    """Name the collections of a shared app that everyone with access may add documents to (see shared.appendable).
+    Returns the stored list, de-duplicated in order; an empty list removes the key."""
+    meta_path = _data_meta_path(slug)
+    names = list(dict.fromkeys(names))
+    for name in names:
+        if not APPEND_NAME_RE.match(name) or name == "data":
+            raise HubError(i18n.t("err.append_bad", name=name))
+    if len(names) > MAX_APPEND:
+        raise HubError(i18n.t("err.append_many", max=MAX_APPEND))
+    meta = _read_meta(meta_path)
+    if names:
+        meta[shared.APPEND_KEY] = names
+    else:
+        meta.pop(shared.APPEND_KEY, None)
+    _write_meta(meta_path, meta)
+    return names
+
+
+@app.post("/api/append")
+def api_set_append(request: Request, slug: str = Form(...), names: str = Form("")):
+    """Set the add-only collections of one app; names are comma-separated, empty turns it off."""
+    _upload_authorized(request)
+    if not _meta_path(slug):
+        raise HTTPException(404)
+    try:
+        stored = set_append(slug, [n.strip() for n in names.split(",") if n.strip()])
+    except HubError as e:
+        raise HTTPException(400, str(e)) from e
+    return JSONResponse({"ok": True, "append": stored})
 
 
 # ---------------------------------------------------------------- shared data on and off (app/shared.py)
