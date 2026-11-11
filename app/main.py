@@ -40,7 +40,8 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from jinja2 import pass_context
 
-from app import access, applock, banner, cards, home, i18n, loginmail, mail, passwd, shared, versions
+from app import access, applock, banner, cards, home, i18n, loginmail, mail, passwd, public, shared, versions
+from app.public import NAME_RE as PUBLIC_NAME_RE
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -106,7 +107,8 @@ ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin pag
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
 MAX_ICON_BYTES = 2 * 1024 * 1024
-META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline", "append")  # what survives a re-upload
+META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline", "append",
+             "public", "public_read", "guests_hidden", "agent")  # what survives a re-upload
 
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -567,6 +569,10 @@ def list_artifacts(user: str) -> list[dict]:
                 "data": "shared" if shared.is_shared(meta) else "personal",  # app/shared.py
                 "offline": kind != "link" and meta.get("offline") is True,  # the page is kept on the phone
                 "append": _append_names(meta),  # collections everyone with access may add to
+                "public": public.is_public(meta),  # app/public.py
+                "public_read": public.public_read(meta),
+                "guests_hidden": public.guests_hidden(meta),
+                "agent": public.has_agent(meta),
                 "updated": mtime,
                 "emoji": meta.get("emoji", ""),
                 "icon_url": f"/icon/{slug}?v={int(icon.stat().st_mtime)}" if icon else None,
@@ -1914,6 +1920,10 @@ class HubError(Exception):
     """A problem with a write; the message is text in the hub's language (HUB_LANG) shown to the user."""
 
 
+class SettingsConflict(HubError):
+    """A setting that a rule between the app's settings forbids; the message says which."""
+
+
 class ReadOnly(HubError):
     """A write the user may not make: shared data by a non-admin (beyond adding to an appendable collection),
     or someone else's data/users/<e-mail>/ branch."""
@@ -2231,6 +2241,9 @@ def set_append(slug: str, names: list[str]) -> list[str]:
     if len(names) > MAX_APPEND:
         raise HubError(i18n.t("err.append_many", max=MAX_APPEND))
     meta = _read_meta(meta_path)
+    both = [n for n in names if n in public.public_read(meta)]
+    if both:
+        raise HubError(i18n.t("err.public_overlap", name=both[0]))
     if names:
         meta[shared.APPEND_KEY] = names
     else:
@@ -2250,6 +2263,128 @@ def api_set_append(request: Request, slug: str = Form(...), names: str = Form(""
     except HubError as e:
         raise HTTPException(400, str(e)) from e
     return JSONResponse({"ok": True, "append": stored})
+
+# ---------------------------------------------------------------- public sharing settings (app/public.py)
+def _branch_collections(con: sqlite3.Connection, slug: str) -> list[tuple[str, str, int]]:
+    """(owner, collection, documents) for every collection of the app inside a data/users/ branch."""
+    rows = con.execute(
+        """SELECT owner, collection, COUNT(*) AS n FROM docs WHERE slug=? AND substr(collection, 1, 11) = 'data/users/'
+           GROUP BY owner, collection""", (slug,)).fetchall()
+    return [(r["owner"], r["collection"], r["n"]) for r in rows]
+
+
+def _guest_collections(con: sqlite3.Connection, slug: str) -> list[tuple[str, str, int]]:
+    return [r for r in _branch_collections(con, slug)
+            if (z := public.zone_of(r[1])) and z.zone == "guests"]
+
+
+def guest_doc_count(slug: str) -> int:
+    """Documents in any guests zone of the app."""
+    with db() as con:
+        return sum(n for _, _, n in _guest_collections(con, slug))
+
+
+def zone_name_clash(slug: str) -> int:
+    """Documents already under a collection named public, guests or agent in any branch of the app: turning a
+    setting on would make them visible to guests or the admin."""
+    with db() as con:
+        return sum(n for _, col, n in _branch_collections(con, slug)
+                   if len(segs := col.split("/")) > 3 and segs[3] in public.ZONES)
+
+
+def set_public(slug: str, *, public: bool | None = None, public_read: list[str] | None = None,
+               guests_hidden: bool | None = None, agent: bool | None = None, via_connector: bool = False,
+               wipe_guests: bool = False) -> dict:
+    """Change the public sharing settings of a shared app; None leaves a setting as it is. Returns the settings
+    as stored. Turning guests_hidden off while guests zones hold documents is refused through the connector,
+    and on the admin page unless wipe_guests is set, which then deletes all of them first."""
+    meta_path = _data_meta_path(slug)
+    meta = _read_meta(meta_path)
+    names = None
+    if public_read is not None:
+        names = list(dict.fromkeys(public_read))
+        for name in names:
+            if not PUBLIC_NAME_RE.match(name) or name == "data":
+                raise HubError(i18n.t("err.public_read_bad", name=name))
+        if len(names) > MAX_APPEND:
+            raise HubError(i18n.t("err.append_many", max=MAX_APPEND))
+        both = [n for n in names if n in _append_names(meta)]
+        if both:
+            raise SettingsConflict(i18n.t("err.public_overlap", name=both[0]))
+    wants_on = bool(public or agent or guests_hidden or names)
+    if wants_on and not shared.is_shared(meta):
+        raise SettingsConflict(i18n.t("err.public_needs_shared"))
+    wipe = False
+    if guests_hidden is False and meta.get("guests_hidden") is True and guest_doc_count(slug):
+        if via_connector:
+            raise SettingsConflict(i18n.t("err.public_guests_replies"))
+        if not wipe_guests:
+            raise SettingsConflict(i18n.t("err.public_guests_wipe"))
+        wipe = True
+    if wipe:
+        with db() as con:
+            for owner, col, _ in _guest_collections(con, slug):
+                con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=?", (slug, owner, col))
+    for key, value in (("public", public), ("guests_hidden", guests_hidden), ("agent", agent)):
+        if value is True:
+            meta[key] = True
+        elif value is False:
+            meta.pop(key, None)
+    if names:
+        meta["public_read"] = names
+    elif names is not None:
+        meta.pop("public_read", None)
+    _write_meta(meta_path, meta)
+    return {"public": meta.get("public") is True, "public_read": meta.get("public_read", []),
+            "guests_hidden": meta.get("guests_hidden") is True, "agent": meta.get("agent") is True}
+
+
+def _settings_body(body: dict) -> dict:
+    """The keyword arguments of set_public from a request body; HTTP 400 for a field of the wrong type."""
+    kw: dict = {}
+    for key in ("public", "guests_hidden", "agent", "wipe_guests"):
+        if key in body:
+            if not isinstance(body[key], bool):
+                raise HTTPException(400, f"{key} must be true or false")
+            kw[key] = body[key]
+    if "public_read" in body:
+        names = body["public_read"]
+        if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+            raise HTTPException(400, "public_read must be a list of names")
+        kw["public_read"] = names
+    return kw
+
+
+@app.get("/api/public-settings")
+def public_settings_get(slug: str, request: Request, user: str = Depends(require_admin)):
+    """The public sharing settings of one app, with what the admin page warns about."""
+    require_unlocked(request, user, slug)
+    try:
+        meta = _read_meta(_data_meta_path(slug))
+    except HubError:
+        raise HTTPException(404) from None
+    return {"public": public.is_public(meta), "public_read": public.public_read(meta),
+            "guests_hidden": public.guests_hidden(meta), "agent": public.has_agent(meta),
+            "guest_docs": guest_doc_count(slug), "clash": zone_name_clash(slug), "links": 0}
+
+
+@app.post("/api/public-settings")
+async def public_settings_set(request: Request, user: str = Depends(require_admin)):
+    """Change the public sharing settings of one app: {"slug", "public"?, "public_read"?, "guests_hidden"?,
+    "agent"?, "wipe_guests"?}."""
+    _require_json(request)
+    body = await request.json()
+    if not isinstance(body, dict) or not isinstance(body.get("slug"), str):
+        raise HTTPException(400, 'Send {"slug", ...}')
+    require_unlocked(request, user, body["slug"])
+    kw = _settings_body(body)
+    if not _meta_path(body["slug"]):
+        raise HTTPException(404)
+    try:
+        stored = set_public(body["slug"], **kw)
+    except HubError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, **stored}
 
 
 # ---------------------------------------------------------------- shared data on and off (app/shared.py)
@@ -2286,6 +2421,8 @@ def set_data_mode(slug: str, on: bool, *, copy_from: str | None = None) -> int:
     unless the app has shared documents already. Nothing is ever deleted: off brings the personal data back."""
     meta_path = _data_meta_path(slug)
     meta = _read_meta(meta_path)
+    if not on and (public.is_public(meta) or public.has_agent(meta)):
+        raise SettingsConflict(i18n.t("err.public_shared_in_use"))
     copied = 0
     if on and copy_from:
         with db() as con:
@@ -2337,6 +2474,8 @@ async def data_mode_set(request: Request, user: str = Depends(require_admin)):
     require_unlocked(request, user, body["slug"])
     try:
         copied = set_data_mode(body["slug"], body["shared"], copy_from=user if body.get("copy") is True else None)
+    except SettingsConflict as e:
+        raise HTTPException(400, str(e)) from e
     except HubError:
         raise HTTPException(404) from None
     return {"ok": True, "shared": body["shared"], "copied": copied}
