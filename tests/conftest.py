@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import applock, main, passwd  # noqa: E402
+from app import applock, main, passwd, public  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +46,7 @@ def _clean():
                       "claude_writes", "app_codes", "app_locks", "public_links"):
             con.execute(f"DELETE FROM {table}")
     main._ip_sends.clear()
+    public._guest_writes.clear()
     yield
 
 

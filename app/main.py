@@ -28,12 +28,12 @@ import threading
 import time
 import zipfile
 from html import escape
-from math import ceil
+from math import ceil, isfinite
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote, unquote
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -2576,6 +2576,205 @@ async def share_set(slug: str, request: Request, user: str = Depends(api_user)):
             where, params = _guest_docs_where(slug, user, name)
             con.execute(f"DELETE FROM docs WHERE {where}", params)
     return _share_state(slug, user, name)
+
+
+# ---------------------------------------------------------------- routes: guest API (app/public.py)
+# The only routes that answer people who are not logged in. Paths are relative to the link's owner and share name:
+# public[/...] and guests[/...] map to data/users/<owner>/public/<name>[/...] and .../guests/<name>[/...]. The
+# session cookie is never read here: a logged-in visitor is a guest like any other, the owner included.
+#   GET    /api/public/{token}/c?path=public          -> {"docs": [{"id", "data"}]}
+#   GET    /api/public/{token}/d?path=guests/abc      -> {"data": ...}   (guest documents get _mine, never _guest)
+#   PUT    /api/public/{token}/d?path=guests/abc      create only, header X-Hub-Guest: <secret>
+#   DELETE /api/public/{token}/d?path=guests/abc      only with the secret that made it
+#   GET    /api/public/{token}/s?path=products/k1     one document of a shared collection in public_read
+MAX_GUEST_DOC_BYTES = 4096        # a guest document as sent
+MAX_GUEST_DOCS = 500              # per link, sub-collections included
+MAX_GUEST_DEPTH = 32              # lists and objects inside each other
+GUEST_HEADER = "x-hub-guest"
+
+
+def _guest_refusal(status: int, detail: str | None = None) -> HTTPException:
+    return HTTPException(status, detail, headers=PUBLIC_HEADERS)
+
+
+def guest_link(token: str, response: Response) -> tuple[public.Link, dict]:
+    """The live link of the token and its app's meta, with the public headers on the answer; 404 for a dead link."""
+    response.headers.update(PUBLIC_HEADERS)
+    found = resolve_link(token)
+    if not found:
+        raise _guest_refusal(404)
+    return found
+
+
+def _guest_path(link: public.Link, path: str, want_doc: bool) -> tuple[str, str, str]:
+    """(zone, collection as stored, doc id or "") of a guest path. 400 for a malformed one (an empty, "." or ".."
+    segment, the wrong number of segments), 404 for one outside the two zones."""
+    segs = path.split("/")
+    if (not all(SEG_RE.match(s) and s not in (".", "..") for s in segs)
+            or (len(segs) % 2 == 0) != want_doc):
+        raise _guest_refusal(400, i18n.t("store.bad_path", path=path[:200]))
+    if segs[0] not in ("public", "guests"):
+        raise _guest_refusal(404)
+    rest = segs[1:-1] if want_doc else segs[1:]
+    collection = public.zone_collection(link.owner, segs[0], link.name, "/".join(rest))
+    return segs[0], collection, segs[-1] if want_doc else ""
+
+
+def _guest_secret(request: Request, *, required: bool = True) -> str | None:
+    """The hash of the guest's secret; 400 when a write lacks a valid one, None when a read does."""
+    secret = request.headers.get(GUEST_HEADER)
+    if secret is None or not public.GUEST_SECRET_RE.fullmatch(secret):
+        if required:
+            raise _guest_refusal(400, i18n.t("guest.no_secret"))
+        return None
+    return public.guest_hash(secret)
+
+
+def _guest_view(data: dict, zone: str, mine: str | None) -> dict:
+    """A document as a guest sees it: never _guest or _added_by; in the guests zone with _mine."""
+    out = {k: v for k, v in data.items() if k not in ("_guest", "_mine", "_added_by")}
+    if zone == "guests":
+        out["_mine"] = public.guest_owns(data, mine)
+    return out
+
+
+def _guest_write(request: Request, link: public.Link) -> None:
+    """429 over a guest write rate, else count this write."""
+    ip = request.client.host if request.client else "?"
+    now = time.time()
+    if public.guest_limited(ip, link.token, now):
+        raise _guest_refusal(429, i18n.t("guest.too_fast"))
+    public.guest_count(ip, link.token, now)
+
+
+async def _guest_body(request: Request) -> dict:
+    """The JSON object a guest sends, read no further than MAX_GUEST_DOC_BYTES."""
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_GUEST_DOC_BYTES:
+            raise _guest_refusal(413, i18n.t("guest.too_big", kb=MAX_GUEST_DOC_BYTES // 1024))
+    try:  # NaN, infinity or deep nesting, once stored, would break every later read of the zone
+        data = json.loads(body, parse_constant=_no_constant, parse_float=_finite)
+    except (ValueError, RecursionError):
+        raise _guest_refusal(400, i18n.t("store.bad_json")) from None
+    if not isinstance(data, dict):
+        raise _guest_refusal(400, i18n.t("store.not_object"))
+    if _depth(data) > MAX_GUEST_DEPTH:
+        raise _guest_refusal(400, i18n.t("store.bad_json"))
+    return data
+
+
+def _depth(value) -> int:
+    """How deep lists and objects nest in a parsed JSON value (without recursion)."""
+    deepest, todo = 0, [(value, 1)]
+    while todo:
+        v, d = todo.pop()
+        if isinstance(v, (dict, list)):
+            deepest = max(deepest, d)
+            todo.extend((c, d + 1) for c in (v.values() if isinstance(v, dict) else v))
+    return deepest
+
+
+def _no_constant(name: str):
+    raise ValueError(name)
+
+
+def _finite(text: str) -> float:
+    value = float(text)
+    if not isfinite(value):
+        raise ValueError(text)
+    return value
+
+
+@app.get("/api/public/{token}/c")
+def guest_list(path: str, request: Request, found: tuple = Depends(guest_link)):
+    link, _ = found
+    zone, collection, _ = _guest_path(link, path, want_doc=False)
+    mine = _guest_secret(request, required=False)
+    with db() as con:
+        rows = con.execute(
+            "SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
+            (link.slug, link.owner, collection),
+        ).fetchall()
+    return {"docs": [{"id": r["doc_id"], "data": _guest_view(json.loads(r["data"]), zone, mine)} for r in rows]}
+
+
+@app.get("/api/public/{token}/d")
+def guest_get(path: str, request: Request, found: tuple = Depends(guest_link)):
+    link, _ = found
+    zone, collection, doc_id = _guest_path(link, path, want_doc=True)
+    mine = _guest_secret(request, required=False)
+    with db() as con:
+        row = con.execute(
+            "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
+            (link.slug, link.owner, collection, doc_id),
+        ).fetchone()
+    return {"data": _guest_view(json.loads(row["data"]), zone, mine) if row else None}
+
+
+@app.put("/api/public/{token}/d")
+async def guest_create(path: str, request: Request, found: tuple = Depends(guest_link)):
+    """Create one guest document; never replace or merge. The hub sets _guest and _added_at."""
+    link, _ = found
+    zone, collection, doc_id = _guest_path(link, path, want_doc=True)
+    if zone != "guests":
+        raise _guest_refusal(403, i18n.t("guest.read_only"))
+    secret = _guest_secret(request)
+    _guest_write(request, link)
+    data = await _guest_body(request)
+    data = {k: v for k, v in data.items() if k not in public.GUEST_FIELDS}
+    data.update(_guest=secret, _added_at=int(time.time()))
+    where, params = _guest_docs_where(link.slug, link.owner, link.name)
+    with db() as con:
+        if con.execute(f"SELECT COUNT(*) FROM docs WHERE {where}", params).fetchone()[0] >= MAX_GUEST_DOCS:
+            raise _guest_refusal(429, i18n.t("guest.full"))
+        try:
+            _put_doc(con, link.slug, link.owner, collection, doc_id, data, create_only=True)
+        except ReadOnly:
+            raise _guest_refusal(403, i18n.t("guest.taken")) from None
+        except HubError:  # too big as stored; cannot happen below MAX_GUEST_DOC_BYTES, but answer like it
+            raise _guest_refusal(413, i18n.t("guest.too_big", kb=MAX_GUEST_DOC_BYTES // 1024)) from None
+    return {"ok": True}
+
+
+@app.delete("/api/public/{token}/d")
+def guest_delete(path: str, request: Request, found: tuple = Depends(guest_link)):
+    """Delete a guest document made with the same secret."""
+    link, _ = found
+    zone, collection, doc_id = _guest_path(link, path, want_doc=True)
+    if zone != "guests":
+        raise _guest_refusal(403, i18n.t("guest.read_only"))
+    secret = _guest_secret(request)
+    _guest_write(request, link)
+    key = (link.slug, link.owner, collection, doc_id)
+    with db() as con:
+        row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?", key).fetchone()
+        if not row:
+            raise _guest_refusal(404, i18n.t("store.doc_missing"))
+        if not public.guest_owns(json.loads(row["data"]), secret):
+            raise _guest_refusal(403, i18n.t("guest.not_yours"))
+        con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?", key)
+    return {"ok": True}
+
+
+@app.get("/api/public/{token}/s")
+def guest_shared(path: str, found: tuple = Depends(guest_link)):
+    """One document of a shared top-level collection in public_read, by id (no listing), without the stamp."""
+    _, meta = found
+    segs = path.split("/")
+    if (len(segs) != 2 or segs[0] not in public.public_read(meta)
+            or not SEG_RE.match(segs[1]) or segs[1] in (".", "..")):
+        raise _guest_refusal(404)
+    with db() as con:
+        row = con.execute(
+            "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
+            (found[0].slug, shared.SHARED, segs[0], segs[1]),
+        ).fetchone()
+    if not row:
+        return {"data": None}
+    hidden = ("_guest", "_mine", *shared.STAMP_KEYS)
+    return {"data": {k: v for k, v in json.loads(row["data"]).items() if k not in hidden}}
 
 
 # ---------------------------------------------------------------- shared data on and off (app/shared.py)

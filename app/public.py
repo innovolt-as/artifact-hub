@@ -12,12 +12,18 @@ Everything else in the branch stays private, and the document `public` itself (i
 is not in a zone. In an app that has not turned the matching setting on, these are ordinary collection names.
 
 The settings are meta keys: "public": true, "public_read": [names], "guests_hidden": true, "agent": true.
+
+A guest proves which guest documents are theirs with a secret of their own (hub.js keeps it in localStorage); the
+hub stores only its hash, in the field _guest, which no reader is ever shown.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 import secrets
 import sqlite3
+import threading
 import time
 from typing import NamedTuple
 
@@ -143,3 +149,54 @@ def delete_owner(con: sqlite3.Connection, owner: str) -> None:
 
 def count_links(con: sqlite3.Connection, slug: str) -> int:
     return con.execute("SELECT COUNT(*) FROM public_links WHERE slug=?", (slug,)).fetchone()[0]
+
+
+# ---------------------------------------------------------------- guests
+GUEST_SECRET_RE = re.compile(r"[\x21-\x7e]{16,128}")  # the X-Hub-Guest header: printable ASCII, no spaces
+GUEST_FIELDS = ("_guest", "_mine", "_added_by", "_added_at")  # set by the hub (or never shown), not by a guest
+GUEST_WRITES_PER_IP = 30          # per hour
+GUEST_WRITES_PER_LINK = 200       # per hour
+GUEST_WINDOW = 3600
+_guest_writes: dict[str, list[float]] = {}  # "ip:<ip>" and "link:<token>" -> times of recent writes
+_guest_lock = threading.Lock()
+
+
+def guest_hash(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
+def guest_owns(data: dict, secret_hash: str | None) -> bool:
+    """Whether a stored guest document was made with the secret of this hash; never for a missing or foreign _guest."""
+    stored = data.get("_guest")
+    if not secret_hash or not isinstance(stored, str):
+        return False
+    return hmac.compare_digest(stored.encode("utf-8"), secret_hash.encode("utf-8"))
+
+
+def _recent(key: str, now: float) -> list[float]:
+    recent = [t for t in _guest_writes.get(key, []) if now - t < GUEST_WINDOW]
+    if recent:
+        _guest_writes[key] = recent
+    else:
+        _guest_writes.pop(key, None)
+    return recent
+
+
+def guest_limited(ip: str, token: str, now: float) -> bool:
+    """Whether a guest write from this IP on this link would go over a rate limit; counts nothing (guest_count does)."""
+    with _guest_lock:
+        return (len(_recent(f"ip:{ip}", now)) >= GUEST_WRITES_PER_IP
+                or len(_recent(f"link:{token}", now)) >= GUEST_WRITES_PER_LINK)
+
+
+def guest_count(ip: str, token: str, now: float) -> None:
+    """Count one guest write from this IP on this link."""
+    with _guest_lock:
+        if len(_guest_writes) > 10000:  # drop expired keys, then the oldest if still too many
+            for key in list(_guest_writes):
+                _recent(key, now)
+            if len(_guest_writes) > 10000:
+                for key in sorted(_guest_writes, key=lambda k: _guest_writes[k][-1])[:5000]:
+                    del _guest_writes[key]
+        for key in (f"ip:{ip}", f"link:{token}"):
+            _guest_writes[key] = _recent(key, now) + [now]
