@@ -46,7 +46,8 @@ Artifacts made on claude.ai save data through `window.claude.use(...)`, which on
 | Anything else (`sample`, `room`, `mcp`, …) | `null`. These need claude.ai. |
 
 The data follows an app when it is renamed, and stays when the app is deleted, so it comes back if the app is
-uploaded again. The exceptions are the app's [secret links](#the-link) and guest replies, which are deleted with it. `GET /api/store/<name>` returns everything you can read in one app as JSON.
+uploaded again. The exceptions are the app's [secret links](#the-link) and guest replies, which are deleted with it.
+`GET /api/store/<name>` returns everything you can read in one app as JSON.
 
 ## Shared data
 
