@@ -338,3 +338,92 @@ def test_owner_still_blind_after_guest_writes(hub, client, tok, user_client):
     assert not any("/guests/" in col for col in dump)
     # the guest still sees it
     assert gget(client, tok, "guests/abc", secret=SECRET).json()["data"]["_mine"] is True
+
+
+# ---------------------------------------------------------------- fix round 1
+def test_lone_surrogate_is_refused(hub, client, tok):
+    for raw in ('{"t": "\\ud800"}', '{"\\udfff": 1}', '{"t": ["ok", {"u": "a\\ud83d"}]}'):
+        r = gput(client, tok, "guests/s", raw)
+        assert r.status_code == 400, raw
+        assert r.headers["cache-control"] == "no-store" and r.headers["x-robots-tag"] == "noindex, nofollow"
+    assert stored(hub, guests_col(), "s") is None
+    assert gput(client, tok, "guests/s", '{"t": "\\ud83d\\ude00"}').status_code == 200  # a proper pair is fine
+    assert gget(client, tok, "guests/s").json()["data"]["t"] == "\U0001F600"
+
+
+def test_guest_try_checks_and_counts_at_once():
+    now = 1_000_000.0
+    for _ in range(public.GUEST_WRITES_PER_IP):
+        assert public.guest_try("10.1.1.1", "t", now)
+    assert not public.guest_try("10.1.1.1", "t", now)
+    assert len(public._guest_writes["ip:10.1.1.1"]) == public.GUEST_WRITES_PER_IP  # a refusal counts nothing
+    assert public.guest_limited("10.1.1.1", "t", now)
+    assert public.guest_try("10.1.1.1", "t", now + 3601)
+
+
+def test_hub_fields_come_from_one_list():
+    data = {"v": 1, "_guest": "h", "_mine": True, "_added_by": "a@t.no", "_added_at": 5}
+    assert set(public.HUB_FIELDS) == {"_guest", "_mine", "_added_by", "_added_at"}
+    assert public.shared_view(data) == {"v": 1}
+    assert public.guest_view(data, "public", None) == {"v": 1, "_added_at": 5}
+    assert public.guest_view(data, "guests", public.guest_hash(SECRET)) == {"v": 1, "_added_at": 5, "_mine": False}
+    assert public.guest_input(data, "hash", 9) == {"v": 1, "_guest": "hash", "_added_at": 9}
+    assert public.owner_view(data) == {"v": 1, "_mine": True, "_added_by": "a@t.no", "_added_at": 5}
+
+
+CARD = ("async function hubCard({db, user}) { const z = `data/users/${user}/guests/jul`;"
+        " const [c, d] = await Promise.all([db.collection(z).get(), db.doc(`${z}/abc`).get()]);"
+        " return JSON.stringify([c.docs.map(x => x.data()), d.data()]); }")
+
+
+def test_owner_never_sees_guest_hash(hub, client, user_client):
+    from tests.test_cards import _recipe_app
+    _recipe_app(hub, "radar", CARD, shared=True)
+    hub.set_public("radar", public=True)
+    t = token_of(share(user_client))
+    assert gput(client, t, "guests/abc", {"t": 1}).status_code == 200
+    assert gput(client, t, "guests/abc/replies/r1", {"t": 2}).status_code == 200
+    assert "_guest" in stored(hub, guests_col(), "abc")[1]  # it is kept, only never shown
+    col, doc = f"{BRANCH}/guests/jul", f"{BRANCH}/guests/jul/abc"
+    seen = [
+        user_client.get("/api/store/radar/d", params={"path": doc}).json()["data"],
+        user_client.get("/api/store/radar/d", params={"path": f"{doc}/replies/r1"}).json()["data"],
+        *[d["data"] for d in user_client.get("/api/store/radar/c", params={"path": col}).json()["docs"]],
+        *user_client.get("/api/store/radar").json()[col].values(),
+        *user_client.get("/api/store/radar").json()[f"{col}/abc/replies"].values(),
+        hub.doc_get("radar", U, doc),
+        *hub.doc_list("radar", U, col).values(),
+        *hub.doc_list("radar", U, f"{col}/abc/replies").values(),
+        *json.loads(hub.card_result(U, "radar", "Europe/Oslo").text)[0],
+        json.loads(hub.card_result(U, "radar", "Europe/Oslo").text)[1],
+    ]
+    assert len(seen) == 10
+    for data in seen:
+        assert "_guest" not in data and isinstance(data["_added_at"], int) and data["t"] in (1, 2), data
+    assert hub.doc_overview("radar", U)[col] == ["abc"]
+
+
+def test_field_named_guest_elsewhere_is_data(hub, make_page, user_client, admin_client):
+    make_shared(hub, make_page, "radar")
+    hub.set_public("radar", public=True)
+    with hub.db() as con:  # a guests collection of an app without public sharing is an ordinary collection
+        make_shared(hub, make_page, "plain")
+        for slug, owner, col in (("radar", U, f"{BRANCH}/private/wishes"), ("radar", U, f"{BRANCH}/public/jul"),
+                                 ("radar", "*", "products"), ("plain", U, f"{BRANCH}/guests/jul"),
+                                 ("radar", U, BRANCH)):
+            con.execute("INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES (?,?,?,'x',?,0)",
+                        (slug, owner, col, json.dumps({"_guest": "kept"})))
+    for slug, col in (("radar", f"{BRANCH}/private/wishes"), ("radar", f"{BRANCH}/public/jul"), ("radar", "products"),
+                      ("plain", f"{BRANCH}/guests/jul"), ("radar", BRANCH)):
+        want = {"_guest": "kept"}
+        assert user_client.get(f"/api/store/{slug}/d", params={"path": f"{col}/x"}).json()["data"] == want, col
+        assert user_client.get(f"/api/store/{slug}/c", params={"path": col}).json()["docs"] == [{"id": "x", "data": want}]
+        assert user_client.get(f"/api/store/{slug}").json()[col] == {"x": want}
+        assert hub.doc_get(slug, U, f"{col}/x") == want
+        assert hub.doc_list(slug, U, col) == {"x": want}
+    # a personal app has no zones at all
+    make_page("solo")
+    with hub.db() as con:
+        con.execute("INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES ('solo',?,?,'x',?,0)",
+                    (U, "guests/jul", json.dumps({"_guest": "kept"})))
+    assert user_client.get("/api/store/solo").json() == {"guests/jul": {"x": {"_guest": "kept"}}}

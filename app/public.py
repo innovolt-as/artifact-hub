@@ -153,7 +153,9 @@ def count_links(con: sqlite3.Connection, slug: str) -> int:
 
 # ---------------------------------------------------------------- guests
 GUEST_SECRET_RE = re.compile(r"[\x21-\x7e]{16,128}")  # the X-Hub-Guest header: printable ASCII, no spaces
-GUEST_FIELDS = ("_guest", "_mine", "_added_by", "_added_at")  # set by the hub (or never shown), not by a guest
+# Fields only the hub sets: _guest (the secret's hash, shown to no one), _mine (added to what a guest reads) and the
+# stamp of shared.py. A guest's own values for them are dropped; what each reader gets of them is decided below.
+HUB_FIELDS = ("_guest", "_mine", *shared.STAMP_KEYS)
 GUEST_WRITES_PER_IP = 30          # per hour
 GUEST_WRITES_PER_LINK = 200       # per hour
 GUEST_WINDOW = 3600
@@ -163,6 +165,38 @@ _guest_lock = threading.Lock()
 
 def guest_hash(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
+def in_guest_zone(meta: dict, collection: str) -> bool:
+    """Whether a stored collection is in a guests zone of an app with public sharing on."""
+    zone = zone_of(collection)
+    return zone is not None and zone.zone == "guests" and is_public(meta)
+
+
+def guest_input(data: dict, secret_hash: str, now: int) -> dict:
+    """The guest document to store: the guest's fields, and the hub's _guest and _added_at."""
+    out = {k: v for k, v in data.items() if k not in HUB_FIELDS}
+    out.update(_guest=secret_hash, _added_at=now)
+    return out
+
+
+def guest_view(data: dict, zone: str, secret_hash: str | None) -> dict:
+    """A document of the public or guests zone as a guest reads it: no _guest, no _added_by, and in the guests zone
+    _mine for the guest who made it. _added_at stays: in the guests zone it is the hub's."""
+    out = {k: v for k, v in data.items() if k not in HUB_FIELDS or k == "_added_at"}
+    if zone == "guests":
+        out["_mine"] = guest_owns(data, secret_hash)
+    return out
+
+
+def shared_view(data: dict) -> dict:
+    """A document of a public_read collection as a guest reads it: none of the hub's fields."""
+    return {k: v for k, v in data.items() if k not in HUB_FIELDS}
+
+
+def owner_view(data: dict) -> dict:
+    """A guest document as a logged-in reader (its owner) gets it: everything but _guest."""
+    return {k: v for k, v in data.items() if k != "_guest"}
 
 
 def guest_owns(data: dict, secret_hash: str | None) -> bool:
@@ -182,21 +216,38 @@ def _recent(key: str, now: float) -> list[float]:
     return recent
 
 
+def _limited(ip: str, token: str, now: float) -> bool:
+    return (len(_recent(f"ip:{ip}", now)) >= GUEST_WRITES_PER_IP
+            or len(_recent(f"link:{token}", now)) >= GUEST_WRITES_PER_LINK)
+
+
+def _count(ip: str, token: str, now: float) -> None:
+    if len(_guest_writes) > 10000:  # drop expired keys, then the oldest if still too many
+        for key in list(_guest_writes):
+            _recent(key, now)
+        if len(_guest_writes) > 10000:
+            for key in sorted(_guest_writes, key=lambda k: _guest_writes[k][-1])[:5000]:
+                del _guest_writes[key]
+    for key in (f"ip:{ip}", f"link:{token}"):
+        _guest_writes[key] = _recent(key, now) + [now]
+
+
 def guest_limited(ip: str, token: str, now: float) -> bool:
     """Whether a guest write from this IP on this link would go over a rate limit; counts nothing (guest_count does)."""
     with _guest_lock:
-        return (len(_recent(f"ip:{ip}", now)) >= GUEST_WRITES_PER_IP
-                or len(_recent(f"link:{token}", now)) >= GUEST_WRITES_PER_LINK)
+        return _limited(ip, token, now)
 
 
 def guest_count(ip: str, token: str, now: float) -> None:
     """Count one guest write from this IP on this link."""
     with _guest_lock:
-        if len(_guest_writes) > 10000:  # drop expired keys, then the oldest if still too many
-            for key in list(_guest_writes):
-                _recent(key, now)
-            if len(_guest_writes) > 10000:
-                for key in sorted(_guest_writes, key=lambda k: _guest_writes[k][-1])[:5000]:
-                    del _guest_writes[key]
-        for key in (f"ip:{ip}", f"link:{token}"):
-            _guest_writes[key] = _recent(key, now) + [now]
+        _count(ip, token, now)
+
+
+def guest_try(ip: str, token: str, now: float) -> bool:
+    """guest_limited and guest_count under one lock: False over a rate limit, else True with the write counted."""
+    with _guest_lock:
+        if _limited(ip, token, now):
+            return False
+        _count(ip, token, now)
+        return True

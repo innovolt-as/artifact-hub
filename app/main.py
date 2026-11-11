@@ -1196,7 +1196,7 @@ def store_user(slug: str, request: Request, user: str = Depends(require_user)) -
 @app.get("/api/store/{slug}/c")
 def store_list(slug: str, path: str, user: str = Depends(store_user)):
     collection, _ = _split_path(path, want_doc=False)
-    owner, collection, _, _ = _store_scope(slug, user, collection)
+    owner, collection, _, guest_zone = _store_scope(slug, user, collection)
     if owner is None:
         return {"docs": []}
     with db() as con:
@@ -1204,13 +1204,13 @@ def store_list(slug: str, path: str, user: str = Depends(store_user)):
             "SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
             (slug, owner, collection),
         ).fetchall()
-    return {"docs": [{"id": r["doc_id"], "data": json.loads(r["data"])} for r in rows]}
+    return {"docs": [{"id": r["doc_id"], "data": read_doc(r["data"], guest_zone)} for r in rows]}
 
 
 @app.get("/api/store/{slug}/d")
 def store_get(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
-    owner, collection, _, _ = _store_scope(slug, user, collection)
+    owner, collection, _, guest_zone = _store_scope(slug, user, collection)
     if owner is None:
         return {"data": None}
     with db() as con:
@@ -1218,7 +1218,7 @@ def store_get(slug: str, path: str, user: str = Depends(store_user)):
             "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
             (slug, owner, collection, doc_id),
         ).fetchone()
-    return {"data": json.loads(row["data"]) if row else None}
+    return {"data": read_doc(row["data"], guest_zone) if row else None}
 
 
 @app.put("/api/store/{slug}/d")
@@ -1279,7 +1279,7 @@ def store_dump(slug: str, user: str = Depends(store_user)):
         raise HTTPException(404) from None
     out: dict[str, dict] = {}
     for r in rows:
-        out.setdefault(r["collection"], {})[r["doc_id"]] = json.loads(r["data"])
+        out.setdefault(r["collection"], {})[r["doc_id"]] = r["data"]
     return out
 
 
@@ -1323,7 +1323,7 @@ def doc_scope(slug: str, user: str, collection: str, *, write: bool = False) -> 
     zone = public.zone_of(collection)
     if owner is None and zone and zone.zone == "agent" and public.has_agent(meta) and is_admin(user):
         owner = zone.email
-    guest_zone = owner is not None and zone is not None and zone.zone == "guests" and public.is_public(meta)
+    guest_zone = owner is not None and public.in_guest_zone(meta, collection)
     if guest_zone and not write and public.guests_hidden(meta):
         owner = None
     append = (STAMP if is_admin(user) else ADD_ONLY) if shared.appendable(meta, collection) else None
@@ -1368,14 +1368,23 @@ def _put_doc(con: sqlite3.Connection, slug: str, owner: str, collection: str, do
     )
 
 
-def visible_docs(con: sqlite3.Connection, slug: str, user: str) -> list[sqlite3.Row]:
-    """collection, doc_id and data of every document the user can read in an app, by collection and id: what
-    doc_scope lets them read, so with "agent" an admin also gets every agent zone, and a hidden guest zone never."""
+def read_doc(raw: str, guest_zone: bool) -> dict:
+    """A stored document as a logged-in reader gets it: in a guest zone (Scope.guest_zone) without the _guest hash.
+    Every read of documents for a logged-in user goes through here."""
+    data = json.loads(raw)
+    return public.owner_view(data) if guest_zone else data
+
+
+def visible_docs(con: sqlite3.Connection, slug: str, user: str) -> list[dict]:
+    """{"collection", "doc_id", "data"} of every document the user can read in an app, by collection and id, data
+    as read_doc gives it: what doc_scope lets them read, so with "agent" an admin also gets every agent zone, and
+    a hidden guest zone never."""
     meta = _data_meta(slug, user)
     user = user.lower()
     if not shared.is_shared(meta):
-        return con.execute("SELECT collection, doc_id, data FROM docs WHERE slug=? AND owner=? ORDER BY collection, doc_id",
+        rows = con.execute("SELECT collection, doc_id, data FROM docs WHERE slug=? AND owner=? ORDER BY collection, doc_id",
                            (slug, user)).fetchall()
+        return [{"collection": r["collection"], "doc_id": r["doc_id"], "data": json.loads(r["data"])} for r in rows]
     own = shared.own_prefix(user)  # compared with substr, not LIKE: an e-mail may hold _ or %
     agents = public.has_agent(meta) and is_admin(user)  # and every branch's agent zone, data/users/<owner>/agent/...
     rows = con.execute(
@@ -1385,9 +1394,12 @@ def visible_docs(con: sqlite3.Connection, slug: str, user: str) -> list[sqlite3.
              ORDER BY collection, doc_id""",
         (slug, shared.SHARED, user, own, len(own) + 1, own + "/", agents, shared.SHARED),
     ).fetchall()
-    if not (public.is_public(meta) and public.guests_hidden(meta)):
-        return rows
-    return [r for r in rows if not ((z := public.zone_of(r["collection"])) and z.zone == "guests")]
+    hidden, out = public.guests_hidden(meta), []
+    for r in rows:
+        guest = public.in_guest_zone(meta, r["collection"])
+        if not (guest and hidden):
+            out.append({"collection": r["collection"], "doc_id": r["doc_id"], "data": read_doc(r["data"], guest)})
+    return out
 
 
 def _data_path(path: str, want_doc: bool) -> tuple[str, str]:
@@ -1410,24 +1422,24 @@ def doc_overview(slug: str, user: str) -> dict[str, list[str]]:
 def doc_list(slug: str, user: str, collection: str) -> dict[str, dict]:
     """{doc_id: data} for one collection (at most MAX_DATA_DOCS_LISTED, newest ids last)."""
     col, _ = _data_path(collection, want_doc=False)
-    owner, col, _, _ = doc_scope(slug, user, col)
+    owner, col, _, guest_zone = doc_scope(slug, user, col)
     if owner is None:
         return {}
     with db() as con:
         rows = con.execute("SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
                            (slug, owner, col)).fetchall()
-    return {r["doc_id"]: json.loads(r["data"]) for r in rows[-MAX_DATA_DOCS_LISTED:]}
+    return {r["doc_id"]: read_doc(r["data"], guest_zone) for r in rows[-MAX_DATA_DOCS_LISTED:]}
 
 
 def doc_get(slug: str, user: str, path: str) -> dict | None:
     col, doc_id = _data_path(path, want_doc=True)
-    owner, col, _, _ = doc_scope(slug, user, col)
+    owner, col, _, guest_zone = doc_scope(slug, user, col)
     if owner is None:
         return None
     with db() as con:
         row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                           (slug, owner, col, doc_id)).fetchone()
-    return json.loads(row["data"]) if row else None
+    return read_doc(row["data"], guest_zone) if row else None
 
 
 def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False) -> dict:
@@ -2630,21 +2642,11 @@ def _guest_secret(request: Request, *, required: bool = True) -> str | None:
     return public.guest_hash(secret)
 
 
-def _guest_view(data: dict, zone: str, mine: str | None) -> dict:
-    """A document as a guest sees it: never _guest or _added_by; in the guests zone with _mine."""
-    out = {k: v for k, v in data.items() if k not in ("_guest", "_mine", "_added_by")}
-    if zone == "guests":
-        out["_mine"] = public.guest_owns(data, mine)
-    return out
-
-
 def _guest_write(request: Request, link: public.Link) -> None:
     """429 over a guest write rate, else count this write."""
     ip = request.client.host if request.client else "?"
-    now = time.time()
-    if public.guest_limited(ip, link.token, now):
+    if not public.guest_try(ip, link.token, time.time()):
         raise _guest_refusal(429, i18n.t("guest.too_fast"))
-    public.guest_count(ip, link.token, now)
 
 
 async def _guest_body(request: Request) -> dict:
@@ -2654,8 +2656,9 @@ async def _guest_body(request: Request) -> dict:
         body += chunk
         if len(body) > MAX_GUEST_DOC_BYTES:
             raise _guest_refusal(413, i18n.t("guest.too_big", kb=MAX_GUEST_DOC_BYTES // 1024))
-    try:  # NaN, infinity or deep nesting, once stored, would break every later read of the zone
+    try:  # NaN, infinity, deep nesting or a lone surrogate, once stored, would break every later read of the zone
         data = json.loads(body, parse_constant=_no_constant, parse_float=_finite)
+        json.dumps(data, ensure_ascii=False).encode("utf-8")  # UnicodeEncodeError for a lone surrogate
     except (ValueError, RecursionError):
         raise _guest_refusal(400, i18n.t("store.bad_json")) from None
     if not isinstance(data, dict):
@@ -2697,7 +2700,7 @@ def guest_list(path: str, request: Request, found: tuple = Depends(guest_link)):
             "SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
             (link.slug, link.owner, collection),
         ).fetchall()
-    return {"docs": [{"id": r["doc_id"], "data": _guest_view(json.loads(r["data"]), zone, mine)} for r in rows]}
+    return {"docs": [{"id": r["doc_id"], "data": public.guest_view(json.loads(r["data"]), zone, mine)} for r in rows]}
 
 
 @app.get("/api/public/{token}/d")
@@ -2710,7 +2713,7 @@ def guest_get(path: str, request: Request, found: tuple = Depends(guest_link)):
             "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
             (link.slug, link.owner, collection, doc_id),
         ).fetchone()
-    return {"data": _guest_view(json.loads(row["data"]), zone, mine) if row else None}
+    return {"data": public.guest_view(json.loads(row["data"]), zone, mine) if row else None}
 
 
 @app.put("/api/public/{token}/d")
@@ -2723,8 +2726,7 @@ async def guest_create(path: str, request: Request, found: tuple = Depends(guest
     secret = _guest_secret(request)
     _guest_write(request, link)
     data = await _guest_body(request)
-    data = {k: v for k, v in data.items() if k not in public.GUEST_FIELDS}
-    data.update(_guest=secret, _added_at=int(time.time()))
+    data = public.guest_input(data, secret, int(time.time()))
     where, params = _guest_docs_where(link.slug, link.owner, link.name)
     with db() as con:
         if con.execute(f"SELECT COUNT(*) FROM docs WHERE {where}", params).fetchone()[0] >= MAX_GUEST_DOCS:
@@ -2771,10 +2773,7 @@ def guest_shared(path: str, found: tuple = Depends(guest_link)):
             "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
             (found[0].slug, shared.SHARED, segs[0], segs[1]),
         ).fetchone()
-    if not row:
-        return {"data": None}
-    hidden = ("_guest", "_mine", *shared.STAMP_KEYS)
-    return {"data": {k: v for k, v in json.loads(row["data"]).items() if k not in hidden}}
+    return {"data": public.shared_view(json.loads(row["data"])) if row else None}
 
 
 # ---------------------------------------------------------------- shared data on and off (app/shared.py)
