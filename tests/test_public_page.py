@@ -103,6 +103,20 @@ def test_folder_app_files(hub, client, user_client, link):
     assert client.get(f"/p/{link}/style.css").status_code == 404  # a single page has only its front
 
 
+def test_folder_app_files_by_link_while_the_owner_has_it_locked(hub, client, user_client, link):
+    from tests.conftest import lock
+    make_folder(hub)
+    t = token_of(share(user_client, slug="mappe"))
+    lock(U, "mappe")
+    r = client.get(f"/p/{t}/style.css")
+    assert r.status_code == 200 and r.text == "body{}"
+    assert "folder" in client.get(f"/p/{t}/").text
+    # the owner's own session still meets the lock
+    r = user_client.get("/a/mappe/style.css", headers={"sec-fetch-dest": "style"})
+    assert r.status_code == 423 and "body{}" not in r.text
+    assert user_client.get("/a/mappe/style.css").status_code == 423
+
+
 def test_no_visit_logged(hub, client, admin_client, link):
     client.get(f"/p/{link}/")
     admin_client.get(f"/p/{link}/")

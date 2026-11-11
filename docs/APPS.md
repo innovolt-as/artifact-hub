@@ -234,7 +234,7 @@ Limits:
 |---|---|
 | A guest document | 4096 bytes as sent (`413` above that). JSON that is not an object, with `NaN` or `Infinity`, nested deeper than 32 levels, or with a lone surrogate in a string is refused with `400`. |
 | Guest documents per link | 500, collections below them included (`429`). |
-| Writes per hour | 30 per IP address and 200 per link (`429`). A create or delete counts once its path and guest secret have been checked: a malformed path, a path outside the two zones, a write to `public/...` or a missing secret does not count. After that it counts even if it is refused: a body too large or not valid, a link that is full or a taken id, and deleting a reply that is missing or someone else's. A write refused by the limit itself does not count. Counted in memory, so a restart resets them. |
+| Writes per hour | 30 per IP address and 200 per link (`429`). A create or delete counts once its link, path and guest secret have been checked: a missing or dead link, a malformed path, a path outside the two zones, a write to `public/...` or a missing or malformed secret (not 16 to 128 printable ASCII characters without spaces) does not count. After that it counts even if it is refused: a body too large or not valid, a link that is full or a taken id, and deleting a reply that is missing or someone else's. A write refused by the limit itself does not count. Counted in memory, so a restart resets them. |
 
 The per-address limit counts the client address as the reverse proxy reports it in `X-Forwarded-For`: the image runs
 `uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*`, as the login limit relies on too. A proxy
@@ -243,7 +243,7 @@ proxy lets a guest set the header and dodge the per-address limit. The per-link 
 
 The guest API is `/api/public/<token>/...`, used by `hub.js`, and it answers `404` for a missing or dead link on every route. A write
 to `public/...` gives `403`, a path outside the two zones `404`, a second creator of the same id `403`, deleting someone
-else's reply `403`, and a malformed path or a missing guest secret `400`. In `hub.js` a `429` rejects with the code
+else's reply `403`, and a malformed path or a missing or malformed guest secret `400`. In `hub.js` a `429` rejects with the code
 `resource_exhausted` on a public page; other refusals (`400`, `403`, `404`, `413`) reject with `invalid_argument`.
 
 ### The agent zone
