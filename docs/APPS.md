@@ -117,7 +117,7 @@ The settings are on the admin page, under *Public sharing* in the app's settings
 | `"guests_hidden": true` | The user cannot read the replies their guests leave. Without it the user reads them, as for a sign-up list. |
 | `"agent": true` | The [agent zone](#the-agent-zone) is on. |
 
-Shared data cannot be turned off while `public` or `agent` is on. A collection cannot be in both `append` and
+Shared data cannot be turned off while `public`, `guests_hidden` or `agent` is on. A collection cannot be in both `append` and
 `public_read`. `guests_hidden` can be turned on at any time; turning it off while there are guest replies deletes them,
 see [below](#guest-replies).
 
@@ -125,7 +125,8 @@ see [below](#guest-replies).
 
 The zones are collections with fixed names directly under the user's own branch, `data/users/<e-mail>/`. They are
 special only in an app that has the matching setting on; in any other app `public`, `guests` and `agent` are
-ordinary collection names. Everything else in the branch stays private.
+ordinary collection names. The guests zone keeps its rules while `public` or `guests_hidden` is on, so turning public
+sharing off does not reveal hidden replies. Everything else in the branch stays private.
 
 | Zone | Path under the branch | The user | A guest with the user's link | An admin through Claude |
 |---|---|---|---|---|

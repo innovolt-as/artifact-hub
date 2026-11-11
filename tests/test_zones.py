@@ -161,7 +161,7 @@ def test_owner_deletes_guest_doc_blind(hub, make_page, user_client, hidden):
 
 
 def test_zone_names_are_ordinary_without_the_switch(hub, make_page, admin_client, user_client):
-    make_zoned(hub, make_page, guests_hidden=True)  # hidden, but public sharing is off
+    make_zoned(hub, make_page, agent=True)  # another zone on, but neither public sharing nor guests_hidden
     path = f"data/users/{U}/guests/x/y"
     assert put(user_client, "radar", path, {"n": 1}).status_code == 200
     assert put(user_client, "radar", path, {"m": 2}, merge="true").status_code == 200
@@ -200,3 +200,47 @@ def test_email_with_underscore_percent_and_capitals(hub, make_page, admin_client
         "data/users/axbc@test.no/agent/track": {"w1": {"near": "aXbc@test.no"}}}
     guests = [r["owner"] for r in rows(hub) if r["collection"].endswith("/guests/main")]
     assert guests == ["axb@test.no", "axbc@test.no"]  # the odd owner's reply is gone, the others' are not
+
+
+# ---------------------------------------------------------------- final review: public off keeps hidden replies hidden
+def test_hidden_replies_stay_hidden_after_public_goes_off(hub, user_client, client):
+    from tests.test_guest_api import SECRET, gget, gput
+    from tests.test_share_links import share, token_of
+
+    recipe = ("async function hubCard({db, user}) { const z = `data/users/${user}/guests/jul`;"
+              " const [c, d] = await Promise.all([db.collection(z).get(), db.doc(`${z}/abc`).get()]);"
+              " return c.size + '|' + d.exists; }")
+    hub.save_page("radar", f"<!doctype html><html><body><script data-hub-card>{recipe}</script></body></html>",
+                  create=True, private=False)
+    path = hub._meta_path("radar")
+    hub._write_meta(path, {**hub._read_meta(path), "data": "shared"})
+    hub.set_public("radar", public=True, guests_hidden=True)
+    tok = token_of(share(user_client, title="Jul"))
+    assert gput(client, tok, "guests/abc", {"t": "secret wish"}).status_code == 200
+    assert gput(client, tok, "guests/abc/notes/n1", {"t": "more"}).status_code == 200
+    col = f"data/users/{U}/guests/jul"
+    hub.set_public("radar", public=False, via_connector=True)  # as update_app_info(public_sharing=false) does
+    for doc in (f"{col}/abc", f"{col}/abc/notes/n1"):
+        assert get(user_client, "radar", doc) is None
+        assert hub.doc_get("radar", U, doc) is None
+    for c in (col, f"{col}/abc/notes"):
+        assert ids(user_client, "radar", c) == []
+        assert hub.doc_list("radar", U, c) == {}
+    assert user_client.get("/api/store/radar").json() == {}
+    assert hub.doc_overview("radar", U) == {}
+    assert hub.card_result(U, "radar", "Europe/Oslo").text == "0|false"
+    # the owner still cannot write there, nor turn off what keeps the zone a zone
+    for merge in ("false", "true"):
+        assert put(user_client, "radar", f"{col}/abc", {"t": "mine now"}, merge=merge).status_code == 403
+        with pytest.raises(hub.ReadOnly):
+            hub.doc_set("radar", U, f"{col}/abc", {"t": "mine now"}, merge=merge == "true")
+    with pytest.raises(hub.HubError):
+        hub.set_data_mode("radar", False)
+    with pytest.raises(hub.HubError):
+        hub.set_public("radar", guests_hidden=False, via_connector=True)
+    assert hub._read_meta(path)["data"] == "shared" and hub._read_meta(path)["guests_hidden"] is True
+    # public on again: the guest finds the reply as they left it
+    hub.set_public("radar", public=True)
+    got = gget(client, tok, "guests/abc", secret=SECRET).json()["data"]
+    assert got["t"] == "secret wish" and got["_mine"] is True
+    assert gget(client, tok, "guests/abc/notes/n1", secret=SECRET).json()["data"]["t"] == "more"

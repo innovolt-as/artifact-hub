@@ -196,7 +196,7 @@
   "err.public_needs_shared": "Public sharing, guest replies and the agent zone need shared data to be on first.",
   "err.public_overlap": "\"{name}\" cannot be both a collection everyone can add to and one guests can read.",
   "err.public_read_bad": "Invalid collection name: \"{name}\". Use letters, digits, _ and -, at most 64 characters, and not \"data\".",
-  "err.public_shared_in_use": "Shared data cannot be turned off while public sharing or the agent zone is on. Turn them off first.",
+  "err.public_shared_in_use": "Shared data cannot be turned off while public sharing, the agent zone or \"Hide guests' replies from the owner\" is on. Turn them off first.",
   "err.temp_pw": "Temporary password must be 10–200 characters",
   "err.unknown_section": "Unknown section: {section}",
   "err.unknown_theme": "Unknown theme: {theme}",

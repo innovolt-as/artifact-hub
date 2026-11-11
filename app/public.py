@@ -9,7 +9,8 @@ zones with fixed names directly under that root:
 
 <name> is the share name the app picks (an id of a list, say), or "main" when the app shares one thing.
 Everything else in the branch stays private, and the document `public` itself (id in the root collection)
-is not in a zone. In an app that has not turned the matching setting on, these are ordinary collection names.
+is not in a zone. In an app that has not turned the matching setting on, these are ordinary collection names; the
+guests zone counts as a zone while "public" or "guests_hidden" is on.
 
 The settings are meta keys: "public": true, "public_read": [names], "guests_hidden": true, "agent": true.
 
@@ -168,9 +169,10 @@ def guest_hash(secret: str) -> str:
 
 
 def in_guest_zone(meta: dict, collection: str) -> bool:
-    """Whether a stored collection is in a guests zone of an app with public sharing on."""
+    """Whether a stored collection is in a guests zone of an app with public sharing or guests_hidden on. The rules
+    hold while either is: with only "public" turned off, hidden replies stay hidden and guest-only."""
     zone = zone_of(collection)
-    return zone is not None and zone.zone == "guests" and is_public(meta)
+    return zone is not None and zone.zone == "guests" and (is_public(meta) or guests_hidden(meta))
 
 
 def guest_input(data: dict, secret_hash: str, now: int) -> dict:

@@ -196,7 +196,7 @@
   "err.public_needs_shared": "Offentlig deling, gjestesvar og agentsonen krever at felles data er på først.",
   "err.public_overlap": "«{name}» kan ikke både være en samling alle kan legge til i og en gjester kan lese.",
   "err.public_read_bad": "Ugyldig samlingsnavn: «{name}». Bruk bokstaver, tall, _ og -, høyst 64 tegn, og ikke «data».",
-  "err.public_shared_in_use": "Felles data kan ikke slås av mens offentlig deling eller agentsonen er på. Slå dem av først.",
+  "err.public_shared_in_use": "Felles data kan ikke slås av mens offentlig deling, agentsonen eller «Skjul gjestenes svar for eieren» er på. Slå dem av først.",
   "err.temp_pw": "Midlertidig passord må ha 10–200 tegn",
   "err.unknown_section": "Ukjent seksjon: {section}",
   "err.unknown_theme": "Ukjent utseende: {theme}",

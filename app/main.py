@@ -1316,8 +1316,9 @@ def doc_scope(slug: str, user: str, collection: str, *, write: bool = False) -> 
     Shared apps: SHARED, the user's own branch, or None for someone else's branch, where reads find nothing.
     A write to shared data by a non-admin, or to someone else's branch, raises ReadOnly, except in a collection
     everyone may add to (shared.appendable): there the write is let through as ADD_ONLY. The zones of
-    app/public.py: with "agent" an admin reads and writes everyone's agent zone; with "public" the user's own
-    guest zone has guest_zone set, and with "guests_hidden" too its reads find nothing. The whole decision
+    app/public.py: with "agent" an admin reads and writes everyone's agent zone; with "public" or "guests_hidden"
+    the user's own guest zone has guest_zone set (public.in_guest_zone), and with "guests_hidden" its reads find
+    nothing. The whole decision
     comes from this one read of the meta; the write paths act on Scope.append and Scope.guest_zone and never
     read it again."""
     meta = _data_meta(slug, user)
@@ -2814,7 +2815,7 @@ def set_data_mode(slug: str, on: bool, *, copy_from: str | None = None) -> int:
     unless the app has shared documents already. Nothing is ever deleted: off brings the personal data back."""
     meta_path = _data_meta_path(slug)
     meta = _read_meta(meta_path)
-    if not on and (public.is_public(meta) or public.has_agent(meta)):
+    if not on and (public.is_public(meta) or public.has_agent(meta) or public.guests_hidden(meta)):
         raise SettingsConflict(i18n.t("err.public_shared_in_use"))
     copied = 0
     if on and copy_from:

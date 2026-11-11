@@ -91,9 +91,10 @@ def test_append_and_public_read_cannot_overlap(hub, make_page):
     assert hub.set_append("radar", ["queue"]) == ["queue"]
 
 
-def test_shared_data_cannot_go_off_while_public_or_agent(hub, make_page):
+def test_shared_data_cannot_go_off_while_public_agent_or_hidden(hub, make_page):
     make_shared(hub, make_page, "radar")
-    for kw, off in (({"public": True}, {"public": False}), ({"agent": True}, {"agent": False})):
+    for kw, off in (({"public": True}, {"public": False}), ({"agent": True}, {"agent": False}),
+                    ({"guests_hidden": True}, {"guests_hidden": False})):
         hub.set_public("radar", **kw)
         with pytest.raises(hub.HubError):
             hub.set_data_mode("radar", False)

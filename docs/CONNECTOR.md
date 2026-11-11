@@ -68,7 +68,7 @@ changes four settings with `update_app_info`, or `create_app` for a new app. All
 | `guests_hidden` | `true` hides the guests' replies from their owner, and from Claude. `false` is refused while there are replies; do it on the admin page, which deletes them after a confirmation. |
 | `agent_zone` | `true` lets an admin read and write `data/users/<any e-mail>/agent/...`. |
 
-Shared data cannot be turned off while `public_sharing` or `agent_zone` is on. If one of these is refused when an app
+Shared data cannot be turned off while `public_sharing`, `guests_hidden` or `agent_zone` is on. If one of these is refused when an app
 is created, the app is still created; if it is refused after other changes in `update_app_info`, Claude says what went
 through before the refusal. Claude only changes the settings when asked.
 
