@@ -16,6 +16,9 @@ The settings are meta keys: "public": true, "public_read": [names], "guests_hidd
 from __future__ import annotations
 
 import re
+import secrets
+import sqlite3
+import time
 from typing import NamedTuple
 
 from . import shared
@@ -72,3 +75,71 @@ def public_read(meta: dict) -> list[str]:
     if not shared.is_shared(meta) or not isinstance(names, list):
         return []
     return [n for n in names if isinstance(n, str) and NAME_RE.match(n) and n != "data"]
+
+
+# ---------------------------------------------------------------- links
+class Link(NamedTuple):
+    token: str
+    slug: str
+    owner: str  # lower case e-mail
+    name: str
+    title: str  # shown in the share sheet and on the settings page only
+    created_at: int
+
+
+def create_tables(con: sqlite3.Connection) -> None:
+    """One link per app, owner and share name. The token is kept in clear so the owner can copy the link again."""
+    con.execute("""CREATE TABLE IF NOT EXISTS public_links (
+        token TEXT PRIMARY KEY, slug TEXT NOT NULL, owner TEXT NOT NULL, name TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, UNIQUE(slug, owner, name))""")
+
+
+def get_link(con: sqlite3.Connection, slug: str, owner: str, name: str) -> Link | None:
+    row = con.execute("SELECT * FROM public_links WHERE slug=? AND owner=? AND name=?",
+                      (slug, owner.lower(), name)).fetchone()
+    return Link(*row) if row else None
+
+
+def by_token(con: sqlite3.Connection, token: str) -> Link | None:
+    row = con.execute("SELECT * FROM public_links WHERE token=?", (token,)).fetchone()
+    return Link(*row) if row else None
+
+
+def links_of(con: sqlite3.Connection, owner: str) -> list[Link]:
+    rows = con.execute("SELECT * FROM public_links WHERE owner=? ORDER BY slug, name", (owner.lower(),)).fetchall()
+    return [Link(*r) for r in rows]
+
+
+def make_link(con: sqlite3.Connection, slug: str, owner: str, name: str, title: str) -> Link:
+    """The link for this share name, made if it does not exist; an existing one keeps its token and takes the new title."""
+    owner = owner.lower()
+    con.execute("INSERT OR IGNORE INTO public_links(token, slug, owner, name, title, created_at) VALUES (?,?,?,?,?,?)",
+                (secrets.token_urlsafe(16), slug, owner, name, title, int(time.time())))
+    con.execute("UPDATE public_links SET title=? WHERE slug=? AND owner=? AND name=?", (title, slug, owner, name))
+    return get_link(con, slug, owner, name)
+
+
+def rotate(con: sqlite3.Connection, slug: str, owner: str, name: str) -> Link:
+    """A new token for the link, made if needed; the old token stops working at once."""
+    link = get_link(con, slug, owner, name)
+    if not link:
+        return make_link(con, slug, owner, name, "")
+    con.execute("UPDATE public_links SET token=? WHERE token=?", (secrets.token_urlsafe(16), link.token))
+    return get_link(con, slug, owner, name)
+
+
+def remove_link(con: sqlite3.Connection, slug: str, owner: str, name: str) -> bool:
+    return con.execute("DELETE FROM public_links WHERE slug=? AND owner=? AND name=?",
+                       (slug, owner.lower(), name)).rowcount > 0
+
+
+def rename(con: sqlite3.Connection, old: str, new: str) -> None:
+    con.execute("UPDATE OR REPLACE public_links SET slug=? WHERE slug=?", (new, old))
+
+
+def delete_owner(con: sqlite3.Connection, owner: str) -> None:
+    con.execute("DELETE FROM public_links WHERE owner=?", (owner.lower(),))
+
+
+def count_links(con: sqlite3.Connection, slug: str) -> int:
+    return con.execute("SELECT COUNT(*) FROM public_links WHERE slug=?", (slug,)).fetchone()[0]

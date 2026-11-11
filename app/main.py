@@ -250,6 +250,8 @@ with db() as con:
     access.create_tables(con)
     # When the connector last wrote data in an app, per user, for the admin warning (app/shared.py)
     shared.create_tables(con)
+    # Secret links for public sharing (app/public.py)
+    public.create_tables(con)
     # Password hashes for LOGIN_MODE=password (app/passwd.py)
     passwd.ensure_table(con)
     # App code lock: codes, locked apps and the attempt limit (app/applock.py)
@@ -1766,6 +1768,7 @@ async def delete_my_data(request: Request, user: str = Depends(api_user)):
         docs = con.execute("DELETE FROM docs WHERE owner=?", (email,)).rowcount
         keys = con.execute("DELETE FROM app_data WHERE lower(email)=?", (email,)).rowcount
         con.execute("DELETE FROM claude_writes WHERE email=?", (email,))
+        public.delete_owner(con, email)
         # who added a shared document is personal data too; the document itself is shared content and stays
         con.execute("UPDATE docs SET data=json_remove(data, '$._added_by') WHERE owner=? AND json_extract(data, '$._added_by')=?",
                     (shared.SHARED, email))
@@ -2386,7 +2389,8 @@ def public_settings_get(slug: str, request: Request, user: str = Depends(require
         raise HTTPException(404) from None
     return {"public": public.is_public(meta), "public_read": public.public_read(meta),
             "guests_hidden": public.guests_hidden(meta), "agent": public.has_agent(meta),
-            "guest_docs": guest_doc_count(slug), "clash": zone_name_clash(slug), "links": 0}
+            "guest_docs": guest_doc_count(slug), "clash": zone_name_clash(slug),
+            "links": _count_links(slug)}
 
 
 @app.post("/api/public-settings")
@@ -2406,6 +2410,112 @@ async def public_settings_set(request: Request, user: str = Depends(require_admi
     except HubError as e:
         raise HTTPException(400, str(e)) from e
     return {"ok": True, **stored}
+
+
+def _count_links(slug: str) -> int:
+    with db() as con:
+        return public.count_links(con, slug)
+
+
+# ---------------------------------------------------------------- secret links (app/public.py)
+def resolve_link(token: str) -> tuple[public.Link, dict] | None:
+    """The link and its app's meta, or None: unknown token, no such app, "public" off, or an owner who may no longer
+    log in or see the app. Callers answer all of these alike."""
+    with db() as con:
+        link = public.by_token(con, token)
+    meta_path = _meta_path(link.slug) if link else None
+    if not link or not meta_path:
+        return None
+    meta = _read_meta(meta_path)
+    if not public.is_public(meta) or not email_allowed(link.owner) or not can_see(meta, link.owner):
+        return None
+    return link, meta
+
+
+def _share_app(slug: str, user: str) -> dict:
+    """The meta of an app the user may share from; 404 when they cannot see it or it has no "public"."""
+    meta_path = _meta_path(slug)
+    meta = _read_meta(meta_path) if meta_path else {}
+    if not meta_path or not public.is_public(meta) or not can_see(meta, user):
+        raise HTTPException(404)
+    return meta
+
+
+def _guest_docs_where(slug: str, owner: str, name: str) -> tuple[str, tuple]:
+    """SQL condition and parameters for the documents in an owner's guests/<name> zone (exact comparison, not LIKE)."""
+    col = public.zone_collection(owner, "guests", name)
+    return ("slug=? AND owner=? AND (collection=? OR substr(collection, 1, ?) = ?)",
+            (slug, owner.lower(), col, len(col) + 1, col + "/"))
+
+
+def _share_state(slug: str, user: str, name: str) -> dict:
+    """What the share sheet shows: the link of this name (or null), how many guest documents it has and whether the
+    app is locked for the user. Never the documents themselves."""
+    where, params = _guest_docs_where(slug, user, name)
+    with db() as con:
+        link = public.get_link(con, slug, user, name)
+        docs = con.execute(f"SELECT COUNT(*) FROM docs WHERE {where}", params).fetchone()[0]
+    return {"link": {"url": f"{BASE_URL}/p/{link.token}/", "title": link.title, "created_at": link.created_at}
+            if link else None, "guest_docs": docs, "locked": app_locked(user, slug)}
+
+
+def _share_name(value) -> str:
+    if not isinstance(value, str) or not public.NAME_RE.match(value):
+        raise HTTPException(400, i18n.t("err.invalid_name", name=str(value)[:64]))
+    return value
+
+
+@app.get("/api/share")
+def share_list(user: str = Depends(api_user)):
+    """Every link the user has made, for the settings page. Links of apps they can no longer share from are left out."""
+    with db() as con:
+        links = public.links_of(con, user)
+    titles = {a["slug"]: a["title"] for a in list_artifacts(user)}
+    items = []
+    for link in links:
+        if link.slug not in titles:
+            continue
+        try:
+            _share_app(link.slug, user)
+        except HTTPException:
+            continue
+        items.append({"slug": link.slug, "app_title": titles[link.slug], "name": link.name, "title": link.title,
+                      "url": f"{BASE_URL}/p/{link.token}/", "guest_docs": _share_state(link.slug, user, link.name)["guest_docs"]})
+    return {"links": items}
+
+
+@app.get("/api/share/{slug}")
+def share_get(slug: str, name: str = public.DEFAULT_NAME, user: str = Depends(api_user)):
+    _share_app(slug, user)
+    return _share_state(slug, user, _share_name(name))
+
+
+@app.post("/api/share/{slug}")
+async def share_set(slug: str, request: Request, user: str = Depends(api_user)):
+    """{"name", "title"?, "action": "create" | "rotate" | "off" | "clear"}: make, replace or remove the link of one
+    share name, or delete the guest documents of that name. Documents in the public zone are never touched."""
+    _require_json(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, 'Send {"name", "action"}')
+    _share_app(slug, user)
+    name, action = _share_name(body.get("name")), body.get("action")
+    if action not in ("create", "rotate", "off", "clear"):
+        raise HTTPException(400, 'action must be "create", "rotate", "off" or "clear"')
+    with db() as con:
+        if action in ("create", "rotate"):
+            title = body.get("title")
+            if not isinstance(title, str):
+                title = (public.get_link(con, slug, user, name) or public.Link("", "", "", "", "", 0)).title
+            public.make_link(con, slug, user, name, title.strip()[:100])
+            if action == "rotate":
+                public.rotate(con, slug, user, name)
+        elif action == "off":
+            public.remove_link(con, slug, user, name)
+        else:
+            where, params = _guest_docs_where(slug, user, name)
+            con.execute(f"DELETE FROM docs WHERE {where}", params)
+    return _share_state(slug, user, name)
 
 
 # ---------------------------------------------------------------- shared data on and off (app/shared.py)
@@ -2524,6 +2634,7 @@ def remove_person(email: str) -> list[str]:
     email = access.norm(email)
     with db() as con:
         access.uninvite(con, email)
+        public.delete_owner(con, email)
     removed = []
     for slug in _all_slugs():
         meta_path = _meta_path(slug)
@@ -2709,6 +2820,7 @@ async def api_edit(
             home.rename(con, slug, new_slug)
             applock.rename(con, slug, new_slug)
             shared.rename(con, slug, new_slug)
+            public.rename(con, slug, new_slug)
         log.info("Renamed artifact %s -> %s", slug, new_slug)
     return JSONResponse({"ok": True, "slug": new_slug})
 
