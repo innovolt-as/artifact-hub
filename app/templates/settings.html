@@ -55,6 +55,7 @@
   {% for l in share_links %}
   <div class="srow" data-slug="{{ l.slug }}" data-name="{{ l.name }}">
     <p class="stitle"><strong>{{ l.app_title }}</strong>{% if l.title %} · {{ l.title }}{% endif %}</p>
+    <p class="warn small swarn"{% if l.ready %} hidden{% endif %}>{{ t("js.share.not_ready") }}</p>
     <input type="text" class="surl" readonly value="{{ l.url }}" aria-label="{{ t('js.share.link') }}">
     <p class="muted small scount">{{ tn("js.share.guests", l.guest_docs) }}</p>
     <div class="sacts">

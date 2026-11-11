@@ -2,6 +2,7 @@
 // public sharing.
 (() => {
   const { T, $, fmt, postJson, failText, reach } = window.Admin;
+  const { chips, press, typed } = window.AdminChips;
   const sheet = $('appSheet');
   let current = null;  // the slug of the app in the sheet
 
@@ -89,15 +90,21 @@
     for (const id of ['asPublicRead', 'asGuestsHiddenRow', 'asLinks']) $(id).hidden = !pub;  // only while the switch is on
     $('asPublicReadLabel').textContent = d.publicRead ? d.publicRead.split(',').join(', ') : T.appendNone;
     $('asGuestsHidden').checked = d.guestsHidden === '1';
+    $('asUnready').hidden = true;
     if (shared && pub) showLinks(d.slug);
     $('asBanner').checked = d.banner === '1';
     $('asOffline').checked = d.offline === '1';
   }
-  // The number of active links is not in the list: ask for it when the sheet shows a public app
+  // The number of active links and whether the page is written for sharing are not in the list: ask for them when the
+  // sheet shows a public app
   async function showLinks(slug) {
     $('asLinksCount').textContent = '';
     const r = await reach(fetch('/api/public-settings?slug=' + encodeURIComponent(slug)));
-    if (r.ok && slug === current) $('asLinksCount').textContent = (await r.json()).links;
+    if (!r.ok) return;
+    const p = await r.json();
+    if (slug !== current) return;
+    $('asLinksCount').textContent = p.links;
+    $('asUnready').hidden = p.uses_share !== false;
   }
   // visit counts every change of view, so a save or a preview that lands late can tell if the person is still there
   let visit = 0, shownAt = 0;
@@ -312,16 +319,72 @@
     save('acError', () => reach(postJson('/api/access', { slug: current, level: acForm.level.value, people })));
   });
 
+  // --- the choice of collection names, for the add-only and the guest-readable collections: a button for every existing
+  // collection and every chosen name, and a field for a name that does not exist yet (the logic is in admin-chips.js).
+  // The collections come from the server when the view opens; if that fails the field alone does the job.
+  const names = attr => rowOf(current).dataset[attr].split(',').filter(Boolean);
+  function picker(p, mine, theirs, reason) {
+    const box = $(p + 'Chips'), input = $(p + 'Names');
+    let existing = [], selected = [], taken = [], loaded = false;
+    function draw(focus) {
+      const list = chips(existing, selected, taken);
+      box.replaceChildren(...list.map(c => {
+        const b = document.createElement('button'), name = document.createElement('span');
+        b.type = 'button'; b.className = 'chip'; b.disabled = c.disabled;
+        b.setAttribute('aria-pressed', c.on);
+        name.textContent = c.name;
+        b.append(name);
+        if (c.disabled) {
+          const why = document.createElement('small');
+          why.textContent = reason;
+          b.append(why);
+        }
+        b.onclick = () => { selected = press(selected, c.name); draw(c.name); };
+        if (c.name === focus) queueMicrotask(() => b.focus());
+        return b;
+      }));
+      $(p + 'None').hidden = !loaded || list.length > 0;
+    }
+    // Everything typed that the server would take becomes a chosen button; the rest stays in the field with the reason
+    function add() {
+      const r = typed(selected, input.value, taken);
+      selected = r.selected;
+      input.value = r.refused.map(x => x.name).join(', ');
+      $(p + 'Error').textContent = r.refused.length
+        ? fmt(r.refused[0].why === 'bad' ? T.chipBad : T.chipOther, { name: r.refused[0].name }) : '';
+      draw();
+      return r.refused.length === 0;
+    }
+    $(p + 'Add').onclick = add;
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    async function open(view) {
+      selected = names(mine);
+      taken = names(theirs);
+      existing = [];
+      loaded = false;
+      input.value = '';
+      $(p + 'Error').textContent = '';
+      draw();
+      show(view);
+      const here = visit;
+      const r = await publicState();
+      if (here !== visit || r.ok === false) return;  // the person went elsewhere, or no list: the field alone is enough
+      existing = r.collections;
+      loaded = true;
+      draw();
+    }
+    return { open, add, selected: () => selected };
+  }
+
   // --- add-only collections: everyone with access may add documents there, not change or delete (app/shared.py)
   const apForm = $('appendForm');
-  $('asAppend').onclick = () => {
-    $('apNames').value = rowOf(current).dataset.append.split(',').filter(Boolean).join(', ');
-    $('apError').textContent = '';
-    show('append');
-  };
+  const append = picker('ap', 'append', 'publicRead', T.chipInPublicRead);
+  $('asAppend').onclick = () => append.open('append');
   apForm.addEventListener('submit', e => {
     e.preventDefault();
-    const fd = new FormData(apForm);
+    if (!append.add()) return;  // a name typed but not added yet still counts
+    const fd = new FormData();
+    fd.append('names', append.selected().join(', '));
     fd.append('slug', current);
     save('apError', () => reach(fetch('/api/append', { method: 'POST', body: fd })));
   });
@@ -362,21 +425,22 @@
     return r.ok ? r.json() : r;
   };
   // A switch that first asks the server what its change would touch, then asks the person. ask() gets the new state and
-  // the server's numbers and returns the question, or null for none.
+  // the server's numbers and returns the question (or a list of them, asked in turn), or null for none.
   function guarded(box, key, ask) {
     box.addEventListener('change', () => flip(async () => {
       const on = box.checked;
       const p = await publicState();
       if (p.ok === false) return p;
-      const question = ask(on, p);
-      if (question && !confirm(question)) { unflip(); return null; }
+      for (const question of [].concat(ask(on, p))) {  // one question, or several asked in turn
+        if (question && !confirm(question)) { unflip(); return null; }
+      }
       return setPublic({ [key]: on });
     }));
   }
   // Turning a zone on makes documents that already sit under its name visible: say how many. Turning sharing off stops
   // the links, so that asks too when there are any
   guarded($('asPublic'), 'public', (on, p) =>
-    on ? (p.clash > 0 && fmt(T.confirmClashPublic, { n: p.clash }))
+    on ? [p.uses_share === false && T.confirmUnreadyPublic, p.clash > 0 && fmt(T.confirmClashPublic, { n: p.clash })]
       : (p.links > 0 && fmt(p.links === 1 ? T.confirmLinksOffOne : T.confirmLinksOffOther, { n: p.links })));
   guarded($('asAgent'), 'agent', (on, p) => on && p.clash > 0 && fmt(T.confirmClashAgent, { n: p.clash }));
   // Showing the replies to their owners again deletes them, so the server only agrees with wipe_guests
@@ -391,14 +455,12 @@
 
   // "Guests can read": names like the add-only collections
   const prForm = $('publicReadForm');
-  $('asPublicRead').onclick = () => {
-    $('prNames').value = rowOf(current).dataset.publicRead.split(',').filter(Boolean).join(', ');
-    $('prError').textContent = '';
-    show('public_read');
-  };
+  const publicRead = picker('pr', 'publicRead', 'append', T.chipInAppend);
+  $('asPublicRead').onclick = () => publicRead.open('public_read');
   prForm.addEventListener('submit', e => {
     e.preventDefault();
-    const names = new FormData(prForm).get('names').split(',').map(n => n.trim()).filter(Boolean);
-    save('prError', () => setPublic({ public_read: names }));
+    if (!publicRead.add()) return;
+    const list = publicRead.selected();
+    save('prError', () => setPublic({ public_read: list }));
   });
 })();

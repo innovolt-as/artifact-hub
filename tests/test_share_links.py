@@ -34,7 +34,8 @@ def test_create_is_idempotent_and_per_name(pub, user_client):
     assert b.json()["link"]["title"] == "Julen"
     assert share(user_client, name="bursdag").json()["link"]["url"] != a.json()["link"]["url"]
     got = user_client.get("/api/share/radar", params={"name": "jul"}).json()
-    assert got == {"link": b.json()["link"], "guest_docs": 0, "locked": False}
+    assert got == {"link": b.json()["link"], "guest_docs": 0, "locked": False,
+                   "ready": False}
 
 
 def test_rotate_kills_old_token(hub, pub, user_client):

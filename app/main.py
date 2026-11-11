@@ -2487,6 +2487,66 @@ def _settings_body(body: dict) -> dict:
     return kw
 
 
+def shared_collections(slug: str) -> list[str]:
+    """The sorted names of an app's top-level shared collections that the append and public_read settings accept
+    (the first path segment, compared as text and never with LIKE)."""
+    with db() as con:
+        rows = con.execute("SELECT DISTINCT substr(collection, 1, instr(collection || '/', '/') - 1) FROM docs "
+                           "WHERE slug=? AND owner=?", (slug, shared.SHARED)).fetchall()
+    return sorted(r[0] for r in rows if APPEND_NAME_RE.match(r[0]) and r[0] != "data")
+
+
+_USES_SHARE = re.compile(r"""\buse\s*\(\s*(["'])share\1\s*\)""")
+MAX_SHARE_SCAN = 2 * 1024 * 1024
+MAX_SHARE_ENTRIES = 200
+
+
+def uses_share(slug: str) -> bool:
+    """Whether the app's page source calls use("share"), the only capability a guest page offers. A folder app is
+    searched in index.html and the .js and .html files in the folder and one level down, 2 MB in all."""
+    if not SLUG_RE.match(slug):
+        return False
+    single = ARTIFACTS_DIR / f"{slug}.html"
+    folder = ARTIFACTS_DIR / slug
+    plain = lambda p: p.is_file() and not p.is_symlink()  # noqa: E731  (a link could point outside the app)
+    if plain(single):
+        files = [single]
+    elif plain(folder / "index.html") and not folder.is_symlink():
+        files = [folder / "index.html"]
+        seen = 0  # directory entries listed in all, so a huge folder cannot keep the request busy
+        try:
+            for p in sorted(folder.iterdir()):
+                seen += 1
+                if seen > MAX_SHARE_ENTRIES:
+                    break
+                near = [p]
+                if p.is_dir() and not p.is_symlink() and not p.name.startswith("."):
+                    near = []
+                    for f in sorted(p.iterdir()):
+                        seen += 1
+                        if seen > MAX_SHARE_ENTRIES:
+                            break
+                        near.append(f)
+                files += [f for f in near if plain(f) and f.suffix in (".js", ".html") and f != files[0]]
+        except OSError:
+            pass
+    else:
+        return False
+    left = MAX_SHARE_SCAN
+    for f in files:
+        try:
+            with f.open("rb") as fh:
+                raw = fh.read(left)
+        except OSError:
+            continue
+        left -= len(raw)
+        if _USES_SHARE.search(raw.decode("utf-8", errors="ignore")):
+            return True
+        if left <= 0:
+            break
+    return False
+
+
 @app.get("/api/public-settings")
 def public_settings_get(slug: str, request: Request, user: str = Depends(require_admin)):
     """The public sharing settings of one app, with what the admin page warns about."""
@@ -2498,7 +2558,7 @@ def public_settings_get(slug: str, request: Request, user: str = Depends(require
     return {"public": public.is_public(meta), "public_read": public.public_read(meta),
             "guests_hidden": public.guests_hidden(meta), "agent": public.has_agent(meta),
             "guest_docs": guest_doc_count(slug), "clash": zone_name_clash(slug),
-            "links": _count_links(slug)}
+            "links": _count_links(slug), "collections": shared_collections(slug), "uses_share": uses_share(slug)}
 
 
 @app.post("/api/public-settings")
@@ -2564,7 +2624,8 @@ def _share_state(slug: str, user: str, name: str) -> dict:
         link = public.get_link(con, slug, user, name)
         docs = con.execute(f"SELECT COUNT(*) FROM docs WHERE {where}", params).fetchone()[0]
     return {"link": {"url": f"{BASE_URL}/p/{link.token}/", "title": link.title, "created_at": link.created_at}
-            if link else None, "guest_docs": docs, "locked": app_locked(user, slug)}
+            if link else None, "guest_docs": docs, "locked": app_locked(user, slug),
+            "ready": uses_share(slug)}
 
 
 def _share_name(value) -> str:
@@ -2587,8 +2648,9 @@ def share_list(user: str = Depends(api_user)):
             _share_app(link.slug, user)
         except HTTPException:
             continue
+        state = _share_state(link.slug, user, link.name)
         items.append({"slug": link.slug, "app_title": titles[link.slug], "name": link.name, "title": link.title,
-                      "url": f"{BASE_URL}/p/{link.token}/", "guest_docs": _share_state(link.slug, user, link.name)["guest_docs"]})
+                      "url": f"{BASE_URL}/p/{link.token}/", **{k: state[k] for k in ("guest_docs", "ready")}})
     return {"links": items}
 
 

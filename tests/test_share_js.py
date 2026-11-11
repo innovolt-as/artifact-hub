@@ -84,3 +84,54 @@ def test_only_a_tap_outside_the_sheet_closes_it():
     # inside the dialog's own box (its padding) or on a child: stays open; on the dim area around it: closes. A click
     # with no pointer position (from the keyboard: detail 0, or both coordinates 0) stays open
     assert json.loads(out) == [False, False, False, False, True, True, False, False, False, True]
+
+
+# A page with the banner's sheet: a minimal DOM that records what the script builds
+PAGE_STUBS = """
+const CALLS = [];
+let RESPOND = () => ({ status: 200, body: { link: null, guest_docs: 0, locked: false, ready: false } });
+globalThis.window = globalThis;
+class El {
+  constructor(tag) { this.tag = tag; this.kids = []; this.on = {}; this.found = {}; }
+  append(...k) { this.kids.push(...k); }
+  replaceChildren(...k) { this.kids = k; }
+  setAttribute() {}
+  addEventListener(t, f) { this.on[t] = f; }
+  querySelector(s) { return this.found[s] || null; }
+  get textContent() { return this.own; }
+  set textContent(v) { this.own = v; }
+}
+const button = new El("button"), sheet = new El("dialog"), body = new El("div"), x = new El("button");
+sheet.found = { ".body": body, ".x": x };
+sheet.showModal = () => {};
+const host = { shadowRoot: new El("root") };
+host.shadowRoot.found = { "button.share": button, "dialog.sheet": sheet };
+globalThis.document = { currentScript: { dataset: { slug: "wishes", strings: JSON.stringify({ not_ready: "NOT READY", explain: "EXPLAIN" }) } },
+  readyState: "complete", querySelector: (s) => (s === "hub-banner" ? host : null), addEventListener() {},
+  createElement: (t) => new El(t) };
+globalThis.navigator = {};
+globalThis.fetch = async (url, opts) => {
+  CALLS.push(url);
+  const r = RESPOND();
+  return { ok: r.status < 400, status: r.status, json: async () => r.body };
+};
+"""
+
+
+def open_sheet(state):
+    ctx = MiniRacer()
+    ctx.eval(PAGE_STUBS + SHARE_JS)
+    ctx.eval(f"RESPOND = () => ({{ status: 200, body: {json.dumps(state)} }});")
+    out = ctx.eval("(async () => { button.on.click(); for (let i = 0; i < 20; i++) await Promise.resolve();"
+                   " return JSON.stringify(body.kids.map((k) => [k.className || '', k.own || ''])); })()")
+    return json.loads(out.get(timeout=5))
+
+
+def test_the_sheet_warns_when_the_app_is_not_written_for_sharing():
+    kids = open_sheet({"link": None, "guest_docs": 0, "locked": False, "ready": False})
+    assert ["warn", "NOT READY"] in kids
+
+
+def test_the_sheet_is_quiet_for_a_ready_app_and_for_an_answer_without_the_flag():
+    assert not any(k[0] == "warn" for k in open_sheet({"link": None, "guest_docs": 0, "locked": False, "ready": True}))
+    assert not any(k[0] == "warn" for k in open_sheet({"link": None, "guest_docs": 0, "locked": False}))

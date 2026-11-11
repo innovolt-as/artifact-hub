@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- *Everyone can add to* and *Guests can read* in the admin page's app settings are chosen with buttons: one for every
+  collection that already has a document, and a field for a name that does not exist yet. A collection chosen in the
+  other setting is shown disabled. What is saved is the same as before.
+- The hub warns when an app is not written for sharing, that is, when its page never calls
+  `window.claude.use("share")` and guests would see an empty page or one stuck on "Loading". The admin page asks before
+  *Public sharing* is turned on and keeps a warning under the switch; the share sheet and *Shared links* on the settings
+  page show a line too.
+
 ## v1.9.0 (2026-11-11)
 
 ### Before you upgrade

@@ -78,7 +78,10 @@ Sometimes people who can only read should still be able to put something in, suc
 agent to answer. A shared app can name top-level collections that everyone with access may add to: the
 *Everyone can add to* row in the app's settings on the admin page (shown while shared data is on), `"append":
 ["queue"]` in its meta, or `append_collections` from [Claude](CONNECTOR.md). You can name up to 10 collections; a name has
-at most 64 characters, uses letters, digits, `_` and `-`, and is not `data`.
+at most 64 characters, uses letters, digits, `_` and `-`, and is not `data`. On the admin page the row opens a view
+with a toggle button for every collection that already has a document (and for every name chosen), and a field for a
+name that does not exist yet, since a collection only exists once it has a document. A collection chosen under *Guests
+can read* shows as a disabled button.
 
 - A non-admin can create a new document in such a collection. They cannot overwrite, merge into or delete one: those
   writes reject with `invalid_argument`, as for any other shared document. Admins can still change everything.
@@ -111,7 +114,13 @@ the app can keep a gift a surprise. Read the [security model](../README.md#secur
 link is not checked in any other way.
 
 The settings are on the admin page, under *Public sharing* in the app's settings, in the app's `meta.json`, or from
-[Claude](CONNECTOR.md#public-sharing). All of them need [shared data](#shared-data):
+[Claude](CONNECTOR.md#public-sharing). All of them need [shared data](#shared-data). On the admin page, *Guests can
+read* is chosen with the same buttons as *Everyone can add to*. An app has to be written for sharing: on a guest page
+`window.claude.use("db")` is `null`, so an app that never calls `use("share")` shows guests an empty page or one stuck
+on "Loading". The hub looks for that call in the app's page source (for a folder app, `index.html` and the `.js` and
+`.html` files in the folder and one level down). When it finds none, the admin page asks before *Public sharing* is
+turned on and keeps a warning under the switch, and the share sheet and *Shared links* on the settings page warn too:
+the page is not blocked, the app is not edited.
 
 | Setting | |
 |---|---|
