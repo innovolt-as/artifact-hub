@@ -187,7 +187,8 @@ share.shared          // share.shared.doc("products/k1").get(): a public_read co
 `onSnapshot`), rooted in the user's branch and one share name, and it reaches only `public/...` and `guests/...`; any
 other path rejects with `invalid_argument`. The owner's `share.db.doc("public/abc")` is stored as
 `data/users/<e-mail>/public/<name>/abc`, and the guest reads the same path `public/abc`, so neither needs the
-e-mail or the share name. `scope(name, title)` throws at once for a name that does not fit the rule above, and `remove(name)` returns a rejected promise; `title` is
+e-mail or the share name. A guest creates with `set` or `add` and deletes with `delete`; `update` rejects with
+`invalid_argument` on a public page, without a request. `scope(name, title)` throws at once for a name that does not fit the rule above, and `remove(name)` returns a rejected promise; `title` is
 only shown in the share sheet and on the settings page. A guest cannot call `scope` or `remove`.
 
 The share sheet follows the device's light or dark setting. It shows the link, how many replies there are (never what they say),
@@ -217,7 +218,9 @@ another browser is another guest.
   wants to see. The share sheet still counts the replies.
 - `guests_hidden` cannot be turned off through Claude while there are replies. On the admin page, turning it off deletes every guest
   reply in the app after a confirmation. So no single click or message to Claude reveals what was hidden. Turning it on is always allowed.
-- `public_read` collections are read with `share.shared.doc("<collection>/<id>").get()`, by owner and guest alike. The
+- `public_read` collections are read with `share.shared.doc("<collection>/<id>").get()`, by owner and guest alike. Any
+  other path, a collection below such a document included, rejects with `invalid_argument` before any request, for the
+  owner too, so a page tried out as the owner behaves the same for a guest. The
   guest gets the document without the hub's fields (`_added_by`, `_added_at`). The app puts the ids in the user's public
   zone, so a guest only finds what the user points at. In any zone a guest reads documents without `_added_by`.
 

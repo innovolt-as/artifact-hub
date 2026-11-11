@@ -28,6 +28,7 @@
   const API = `/api/store/${encodeURIComponent(SLUG)}`;
   const TOKEN = me.dataset.token || "";
   const SHARING = GUEST || me.dataset.public === "1";
+  const PUBLIC_READ = (me.dataset.publicRead || "").split(",").filter(Boolean);  // what share.shared may read
   const POLL_MS = 5000;
   // Texts come from the hub's language files as data-strings on this script tag; without them the key shows.
   let S = {};
@@ -188,6 +189,7 @@
   // ------------------------------------------------------------------ where a reference reads and writes
   // A backend says where the data lives: base is the API root, map turns the path the app uses into the path sent
   // (it throws for a path the backend does not reach, so the promise rejects before any request), headers adds to a request.
+  // createOnly (a guest) rejects update() before any request: the guest API never merges.
   const STORE = { base: API, map: (p) => p, headers: () => ({}) };
 
   // ------------------------------------------------------------------ queries
@@ -258,7 +260,10 @@
       id, path,
       get,
       set: (data) => write("PUT", "", data),
-      update: (data) => write("PUT", "&merge=1", data),
+      update: async (data) => {
+        if (be.createOnly) throw dbError("invalid_argument", tr("guest_no_update"));
+        return write("PUT", "&merge=1", data);
+      },
       delete: () => write("DELETE", ""),
       acquire: async () => ({ acquired: true, expiresAt: new Date(Date.now() + 30000).toISOString() }), // one user per store
       onSnapshot(next, error) {
@@ -345,18 +350,24 @@
   function shareCap() {
     // Owner: public/<rest> is stored in the owner's branch under the share name; guest: the public API takes the path as it is.
     const backend = (name) => GUEST
-      ? { base: `/api/public/${encodeURIComponent(TOKEN)}`, map: (p) => (zoneOf(p), p), headers: () => ({ "X-Hub-Guest": guestSecret() }) }
+      ? { base: `/api/public/${encodeURIComponent(TOKEN)}`, map: (p) => (zoneOf(p), p), headers: () => ({ "X-Hub-Guest": guestSecret() }),
+        createOnly: true }
       : { base: API, headers: () => ({}), map: (p) => {
         const [zone, rest] = zoneOf(p);
         return ["data", "users", EMAIL, zone, name(), ...rest].join("/");
       } };
     const ownerOnly = () => dbError("invalid_argument", tr("share_owner_only"));
+    // Only a document straight in a public_read collection, for the owner as for a guest, so both see the same refusals.
     const shared = Object.freeze({
       doc(path) {
         path = checkPath(path, true);
-        const id = path.split("/").pop();
+        const [col, id] = path.split("/");
+        const open = path.split("/").length === 2 && PUBLIC_READ.includes(col);
         const url = GUEST ? `/api/public/${encodeURIComponent(TOKEN)}/s?path=` : `${API}/d?path=`;
-        return Object.freeze({ get: async () => docSnap(id, (await api("GET", url + encodeURIComponent(path), undefined, GUEST ? { "X-Hub-Guest": guestSecret() } : undefined)).data ?? undefined) });
+        return Object.freeze({ get: async () => {
+          if (!open) throw dbError("invalid_argument", tr("not_public_read", { path }));
+          return docSnap(id, (await api("GET", url + encodeURIComponent(path), undefined, GUEST ? { "X-Hub-Guest": guestSecret() } : undefined)).data ?? undefined);
+        } });
       },
     });
     return Object.freeze({

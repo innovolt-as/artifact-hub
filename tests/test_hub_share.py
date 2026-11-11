@@ -229,3 +229,33 @@ def test_owner_429_is_unchanged():
 def test_share_object_is_frozen():
     res, _ = run(GUEST, "const s = await claude.use('share'); 'use strict'; try { s.mode = 'owner'; } catch (e) {} return s.mode;")
     assert res == "guest"
+
+
+# ---------------------------------------------------------------- final review
+def test_guest_update_rejected_without_request():
+    res, calls = run(GUEST, """
+      const share = await claude.use('share'); const out = [];
+      for (const ref of [share.db.doc('guests/a'), share.db.collection('guests').doc('b'), share.db.doc('public/c')]) {
+        try { await ref.update({ n: 1 }); out.push('resolved'); } catch (e) { out.push(e.code); }
+      }
+      return out;""")
+    assert res == ["invalid_argument"] * 3 and calls == []
+    _, calls = run(OWNER, "const share = await claude.use('share'); await share.db.doc('public/a').update({ n: 1 }); return 1;")
+    assert calls[0]["method"] == "PUT" and calls[0]["url"].endswith("public%2Fmain%2Fa&merge=1")
+
+
+@pytest.mark.parametrize("dataset", [OWNER, GUEST])
+def test_shared_reads_only_public_read_collections(dataset):
+    res, calls = run(dataset, """
+      const share = await claude.use('share'); const out = [];
+      for (const p of ['other/x', 'products/k1/notes/n1', 'productsx/k1', 'data/users']) {
+        try { await share.shared.doc(p).get(); out.push('resolved'); } catch (e) { out.push(e.code); }
+      }
+      await share.shared.doc('products/k1').get();
+      return out;""")
+    assert res == ["invalid_argument"] * 4
+    assert len(calls) == 1 and calls[0]["url"].endswith("path=products%2Fk1")
+    res, calls = run({**dataset, "publicRead": ""}, """
+      const share = await claude.use('share');
+      try { await share.shared.doc('products/k1').get(); return 'resolved'; } catch (e) { return e.code; }""")
+    assert res == "invalid_argument" and calls == []
