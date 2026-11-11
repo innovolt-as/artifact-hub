@@ -499,3 +499,25 @@ def test_instructions_mention_public_sharing():
         assert needle in t, needle
     assert "sensitive" in t and "hidden" in t
     assert "hubCard({{" not in t and "{ db, today, now, timeZone }" not in t
+
+
+# ---------------------------------------------------------------- final review
+@pytest.mark.parametrize("settings", [{}, {"agent_zone": True}])
+def test_delete_in_guests_path_is_plain_where_no_guest_zone_applies(mcp, token, hub, settings):
+    _shared_app(hub, mcp, token, **settings)
+    _guest_reply(hub)
+    path = f"data/users/{ME}/guests/main/r1"
+    assert text(call(mcp, token, "delete_app_data", slug="radar", path=path)) == i18n.t("mcp.deleted", path=path)
+    assert text(call(mcp, token, "delete_app_data", slug="radar", path=path)) == i18n.t("mcp.not_deleted", path=path)
+    _page(hub, "mat")  # personal data
+    path = f"data/users/{ME}/guests/main/x"
+    assert text(call(mcp, token, "delete_app_data", slug="mat", path=path)) == i18n.t("mcp.not_deleted", path=path)
+
+
+@pytest.mark.parametrize("settings", [{"public_sharing": True}, {"guests_hidden": True}])
+def test_delete_in_guest_zone_is_handled_wherever_the_rules_apply(mcp, token, hub, settings):
+    _shared_app(hub, mcp, token, **settings)
+    path = f"data/users/{ME}/guests/main/r1"
+    assert text(call(mcp, token, "delete_app_data", slug="radar", path=path)) == i18n.t("mcp.guest_zone_deleted", path=path)
+    path = f"data/users/{ME}/guests"  # the document guests itself is not in the zone
+    assert text(call(mcp, token, "delete_app_data", slug="radar", path=path)) == i18n.t("mcp.not_deleted", path=path)

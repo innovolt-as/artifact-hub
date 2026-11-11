@@ -19,7 +19,6 @@ from pydantic import AnyHttpUrl, BaseModel, Field
 
 from app import i18n
 from app import main as hub
-from app import public
 from app.oauth import HubOAuthProvider
 
 INSTRUCTIONS = f"""\
@@ -411,8 +410,8 @@ def build_mcp() -> MCPServer:
         name="delete_app_data",
         title="Delete app data",
         description="Delete one document from the user's data in an app (path like 'days/2026-10-22'). "
-        "In the user's own guests/ zone the reply says only that the request was handled, never whether a "
-        "document existed. "
+        "In the user's own guests/ zone of an app with public_sharing or guests_hidden on, the reply says only that "
+        "the request was handled, never whether a document existed. "
         "Only when the user explicitly asks to delete it.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True),
         structured_output=False,
@@ -420,10 +419,11 @@ def build_mcp() -> MCPServer:
     def delete_app_data(slug: str, path: str) -> str:
         try:
             gone = hub.doc_delete(slug, _user(), path)
+            collection = "/".join(seg for seg in path.split("/") if seg).rpartition("/")[0]  # as doc_delete reads it
+            guest_zone = hub.doc_scope(slug, _user(), collection).guest_zone  # only where the app's zone rules apply
         except hub.HubError as e:
             return _error(str(e))
-        zone = public.zone_of("/".join(seg for seg in path.split("/") if seg))  # as doc_delete reads the path
-        if zone and zone.zone == "guests" and zone.email == _user().lower():
+        if guest_zone:
             return i18n.t("mcp.guest_zone_deleted", path=path)  # it may be a hidden reply: do not confirm either way
         return i18n.t("mcp.deleted", path=path) if gone else i18n.t("mcp.not_deleted", path=path)
 
