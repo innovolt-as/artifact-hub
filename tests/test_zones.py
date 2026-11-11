@@ -112,7 +112,7 @@ def test_owner_cannot_read_hidden_guest_zone(hub, make_page, admin_client, user_
         con.execute("INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES (?,?,?,'n1','{}',0)",
                     ("radar", U, f"{GUESTS}/r0/notes"))
     put(user_client, "radar", f"data/users/{U}/wishes/jul/w1", {"x": 1})
-    for path in (f"{GUESTS}/r0", f"data/users/User@Test.no/guests/main/r0", f"{GUESTS}/r0/notes/n1"):
+    for path in (f"{GUESTS}/r0", "data/users/User@Test.no/guests/main/r0", f"{GUESTS}/r0/notes/n1"):
         assert get(user_client, "radar", path) is None
         assert hub.doc_get("radar", U, path) is None
     for col in (GUESTS, f"{GUESTS}/r0/notes"):
@@ -139,7 +139,7 @@ def test_owner_reads_guest_zone_when_not_hidden(hub, make_page, user_client):
 def test_owner_cannot_create_guest_docs(hub, make_page, user_client, hidden):
     make_zoned(hub, make_page, public=True, guests_hidden=hidden)
     add_guest_docs(hub, "radar", U, "main")
-    for path in (f"{GUESTS}/r0", f"{GUESTS}/new", f"{GUESTS}/r0/notes/n1", f"data/users/User@Test.no/guests/x/new"):
+    for path in (f"{GUESTS}/r0", f"{GUESTS}/new", f"{GUESTS}/r0/notes/n1", "data/users/User@Test.no/guests/x/new"):
         assert put(user_client, "radar", path, {"i": 9}).status_code == 403
         assert put(user_client, "radar", path, {"i": 9}, merge="true").status_code == 403
         for merge in (False, True):

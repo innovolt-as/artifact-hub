@@ -182,7 +182,7 @@ def test_locked_app_refuses_changes_until_unlocked(hub, pub, user_client):
         assert share(user_client, action=action).status_code == 423
         assert share(user_client, name="ny", action=action).status_code == 423
     with hub.db() as con:
-        assert [l.token for l in public.links_of(con, U)] == [tok]
+        assert [link.token for link in public.links_of(con, U)] == [tok]
     assert count_docs(hub, "radar") == 2
     got = user_client.get("/api/share/radar", params={"name": "jul"})
     assert got.status_code == 200 and got.json()["locked"] is True
