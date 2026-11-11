@@ -459,11 +459,42 @@ def test_delete_in_own_guest_zone_does_not_claim_a_deletion(mcp, token, hub):
     assert text(res) != i18n.t("mcp.deleted", path=path)
 
 
+def test_create_app_partly_refused_says_the_app_exists(mcp, token, hub):
+    res = call(mcp, token, "create_app", slug="radar", html=PAGE, title="Radar", shared_data=True,
+               public_sharing=True, public_read=["bad name"])
+    assert res["isError"]
+    assert (hub.ARTIFACTS_DIR / "radar.html").exists()
+    assert text(res).startswith(i18n.t("mcp.created_but", url="https://hub.test/a/radar/", reason="")[:30])
+    assert "bad name" in text(res)
+
+
+def test_update_app_info_partly_refused_lists_what_went_through(mcp, token, hub):
+    _shared_app(hub, mcp, token, public_sharing=True, guests_hidden=True)
+    _guest_reply(hub)
+    res = call(mcp, token, "update_app_info", slug="radar", title="New title", guests_hidden=False)
+    assert res["isError"]
+    assert i18n.t("mcp.info_updated", slug="radar") in text(res)
+    assert _app(mcp, token)["title"] == "New title" and _app(mcp, token)["guests_hidden"] is True
+
+
+def test_update_app_info_refused_first_step_says_no_progress(mcp, token, hub):
+    res = call(mcp, token, "update_app_info", slug="missing", title="x")
+    assert res["isError"] and i18n.t("mcp.info_updated", slug="missing") not in text(res)
+
+
+def test_delete_guest_zone_path_is_normalized(mcp, token, hub):
+    _shared_app(hub, mcp, token, public_sharing=True, guests_hidden=True)
+    _guest_reply(hub)
+    for path in (f"/data/users/{ME}/guests/main/r1", f"data//users/{ME}/guests/main//r1"):
+        res = call(mcp, token, "delete_app_data", slug="radar", path=path)
+        assert text(res) == i18n.t("mcp.guest_zone_deleted", path=path), path
+
+
 def test_instructions_mention_public_sharing():
     from app import connector
     t = connector.INSTRUCTIONS
     for needle in ("public_sharing", "data/users/<e-mail>/public/<name>/", "data/users/<e-mail>/guests/<name>/",
-                   "data/users/<e-mail>/agent/", 'window.claude.use("share")', "scope(name, title)",
+                   "data/users/<e-mail>/agent/", 'window.claude.use("share")', "share.scope(name, title)", "by id", "share panel" if False else "share sheet",
                    "{ db, today, now, timeZone, user }"):
         assert needle in t, needle
     assert "sensitive" in t and "hidden" in t

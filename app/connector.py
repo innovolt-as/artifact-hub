@@ -50,13 +50,17 @@ In a shared app, update_app_info(append_collections=[...]) names collections eve
 documents to (not change or delete); the hub stamps each with _added_by and _added_at. list_apps and get_app show them as "append".
 An app can be marked to work offline (update_app_info offline=true); only do that for apps that keep their own data on the device and send it later.
 Public sharing (update_app_info public_sharing=true, needs shared data) lets a user hand out a link that works without
-logging in: a visitor reads data/users/<e-mail>/public/<name>/... and reads, adds and deletes their own documents in
-data/users/<e-mail>/guests/<name>/..., and an app asks for a link with window.claude.use("share") and scope(name, title).
-Never put anything sensitive under public/, since anyone with the link reads it. public_read=[collections] also opens
-whole shared collections to guests, guests_hidden=true hides the guests' replies from their owner (so they cannot be read
-here, and guests_hidden cannot be turned off here once replies exist), and agent_zone=true lets a scheduled agent serve
-every user through data/users/<e-mail>/agent/... (an admin reads and writes those paths, and list_app_data shows them).
-list_apps and get_app show these settings as public, public_read, guests_hidden and agent.
+logging in; the user makes and revokes links in the share sheet (the button in the hub's banner) or on the settings page,
+an app cannot. A visitor reads data/users/<e-mail>/public/<name>/... and reads, adds and deletes their own documents in
+data/users/<e-mail>/guests/<name>/.... In the page: const share = await window.claude.use("share") (null without public
+sharing); share.mode is "owner" or "guest"; share.scope(name, title) chooses what the share button shares and returns a db;
+share.db.doc("public/<id>") and share.db.collection("guests") are the same paths for owner and guest. Never put anything
+sensitive under public/, since anyone with the link reads it. public_read=[collections] lets guests read single documents
+of those shared collections by id (share.shared.doc("<collection>/<id>").get()), with no listing or query, so the app
+must put the ids in the owner's public zone. guests_hidden=true hides the guests' replies from their owner (so they cannot
+be read here, and guests_hidden cannot be turned off here once replies exist), and agent_zone=true lets a scheduled agent
+serve every user through data/users/<e-mail>/agent/... (an admin reads and writes those paths, and list_app_data shows
+them). list_apps and get_app show these settings as public, public_read, guests_hidden and agent.
 A user can lock an app behind a code on the hub; the lock covers the hub's own storage, not the browser's, so keep
 anything sensitive in window.claude.use("db"), never in localStorage.
 
@@ -214,7 +218,7 @@ def build_mcp() -> MCPServer:
         "everyone who can open the app (shared_data=true) or personal to each user (the default). "
         "offline=true marks an app that keeps its own data on the device, so the hub stores its page on the phone. "
         "public_sharing, public_read, guests_hidden and agent_zone set the public sharing settings and need "
-        "shared_data=true (see update_app_info). "
+        "shared_data=true (see update_app_info); if one is refused the app is still created. "
         "slug: lowercase letters, digits, '.', '-', '_'. emoji: one emoji used as the gallery icon.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
         structured_output=False,
@@ -223,16 +227,20 @@ def build_mcp() -> MCPServer:
                    private: bool = True, shared_data: bool | None = None, offline: bool = False,
                    public_sharing: bool | None = None, public_read: list[str] | None = None,
                    guests_hidden: bool | None = None, agent_zone: bool | None = None) -> str:
+        created = False
         try:
             _user()
             hub.save_page(slug, html, create=True, title=title, description=description, emoji=emoji,
                           private=private)
+            created = True
             if shared_data:
                 hub.set_data_mode(slug, True)
             if offline:
                 hub.set_offline(slug, True)
             _set_public(slug, public_sharing, public_read, guests_hidden, agent_zone)
         except hub.HubError as e:
+            if created:  # the page is saved: say so, so the caller does not create it again
+                return _error(i18n.t("mcp.created_but", url=_url(slug), reason=str(e)))
             return _error(str(e))
         return i18n.t("mcp.created_private" if private else "mcp.created", url=_url(slug))
 
@@ -298,7 +306,7 @@ def build_mcp() -> MCPServer:
         "collections, but not change or delete them (the hub stamps _added_by and _added_at); [] turns it off. "
         "public_sharing=true lets users make links that work without logging in (needs shared data; guests read "
         "data/users/<e-mail>/public/<name>/ and write only their own documents in data/users/<e-mail>/guests/<name>/); "
-        "public_read=[names] also opens those shared collections to guests (a collection cannot be in both "
+        "public_read=[names] lets guests read single documents of those shared collections by id, with no listing or query, so the app must put the ids in the owner's public zone (a collection cannot be in both "
         "public_read and append_collections); guests_hidden=true hides the guests' replies from their owner, and "
         "false is refused here while replies exist; agent_zone=true lets an admin and a scheduled agent read and "
         "write data/users/<any e-mail>/agent/. Only change these when the user asks. "
@@ -312,10 +320,11 @@ def build_mcp() -> MCPServer:
                         append_collections: list[str] | None = None, public_sharing: bool | None = None,
                         public_read: list[str] | None = None, guests_hidden: bool | None = None,
                         agent_zone: bool | None = None) -> str:
+        said: list[str] = []
         try:
             user = _user()
             hub.set_info(slug, title=title, description=description, emoji=emoji, private=private)
-            said = [i18n.t("mcp.info_updated", slug=slug)]
+            said.append(i18n.t("mcp.info_updated", slug=slug))
             if shared_data is not None:
                 existed = shared_data and copy_my_data and hub.share_preview(slug, user)["shared_exists"]
                 copied = hub.set_data_mode(slug, shared_data, copy_from=user if copy_my_data else None)
@@ -340,6 +349,8 @@ def build_mcp() -> MCPServer:
             if private is False and slug in hub.claude_warned(hub.list_artifacts(user)):
                 said.append(i18n.t("mcp.claude_warning"))
         except hub.HubError as e:
+            if said:  # earlier steps went through: list them before the refusal
+                return _error(i18n.t("mcp.partly_applied", done=" ".join(said), reason=str(e)))
             return _error(str(e))
         return " ".join(said)
 
@@ -411,7 +422,7 @@ def build_mcp() -> MCPServer:
             gone = hub.doc_delete(slug, _user(), path)
         except hub.HubError as e:
             return _error(str(e))
-        zone = public.zone_of(path)
+        zone = public.zone_of("/".join(seg for seg in path.split("/") if seg))  # as doc_delete reads the path
         if zone and zone.zone == "guests" and zone.email == _user().lower():
             return i18n.t("mcp.guest_zone_deleted", path=path)  # it may be a hidden reply: do not confirm either way
         return i18n.t("mcp.deleted", path=path) if gone else i18n.t("mcp.not_deleted", path=path)
