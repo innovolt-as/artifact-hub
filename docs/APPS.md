@@ -46,7 +46,9 @@ Artifacts made on claude.ai save data through `window.claude.use(...)`, which on
 | Anything else (`sample`, `room`, `mcp`, …) | `null`. These need claude.ai. |
 
 The data follows an app when it is renamed, and stays when the app is deleted, so it comes back if the app is
-uploaded again. The exceptions are the app's [secret links](#the-link) and guest replies, which are deleted with it.
+uploaded again. The exceptions are the app's [secret links](#the-link), which are deleted with it, and its guest
+replies if `public` or `guests_hidden` is on when it is deleted. In an app with neither, `guests/...` is ordinary
+data and stays.
 `GET /api/store/<name>` returns everything you can read in one app as JSON.
 
 ## Shared data
@@ -165,9 +167,10 @@ link and leaves the documents in the zones.
   this page.
 - Visits by link are not counted. A public page does not load the service worker or pull to refresh, and has no
   back arrow, link to the front page or share button in the banner.
-- The link follows the app when it is renamed. Deleting the app deletes all its links and every guest reply in it;
-  the public and agent zones stay, like the rest of its data. *Delete my data* removes the user's links, their zones and the guest
-  replies on their lists. Removing a person from the hub removes only their links.
+- The link follows the app when it is renamed. Deleting the app deletes all its links and, if `public` or
+  `guests_hidden` is on, every guest reply in it; the public and agent zones stay, like the rest of its data. *Delete
+  my data* removes the user's links, their zones and the guest replies on their lists. Removing a person from the hub
+  removes only their links.
 
 ### On the page
 

@@ -32,7 +32,17 @@
 - The settings of an app on the admin page are in four groups: *Who can open*, *Data*, *Public sharing* and *Display*.
 - *Delete my data* also removes the user's secret links, their public and guest zones and the guest replies on their lists.
   Removing a person from the hub removes their links.
-- Deleting an app also deletes its secret links and its guest replies. The rest of its data stays, as before.
+- Deleting an app also deletes its secret links, and its guest replies if *Public sharing* or *Hide guests' replies* is
+  on. The rest of its data stays, as before.
+
+### Fixed
+
+- An upload that is refused (not `.html` or `.zip`, a zip without `index.html` or with paths outside it, or a file that
+  is not a zip) leaves the app as it was. Before, it had already removed the app's page and settings; this bug is older
+  than this version. With public sharing it could also show the owner the guest replies hidden from them after the next
+  upload.
+- Deleting an app removes its links and guest replies before its files, in one step, so a delete that fails leaves the
+  app whole and can be tried again.
 
 ## v1.8.0 (2026-11-04)
 

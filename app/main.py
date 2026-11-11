@@ -1954,60 +1954,74 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
     slug = _upload_slug(upload.filename, slug)
     if not SLUG_RE.match(slug):
         raise HTTPException(400, i18n.t("err.invalid_name", name=slug))
-    # a new version keeps the old name, emoji, private flag and banner switch (stored as false) unless overridden
-    old = _meta_path(slug)
-    is_new = old is None
-    old_meta = _read_meta(old) if old else {}
-    meta = {k: old_meta[k] for k in META_KEYS if old_meta.get(k) or old_meta.get(k) is False}
-    if title:
-        meta["title"] = title
-    if admin_only:
-        meta["admin_only"] = True
-    versions.save(ARTIFACTS_DIR, slug)  # keep the previous version before replacing it
-    # remove any existing artifact with that slug
-    for old in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json"):
-        old.unlink(missing_ok=True)
-    if (ARTIFACTS_DIR / slug).is_dir():
-        shutil.rmtree(ARTIFACTS_DIR / slug)
-
-    if ext.lower() == ".zip":
-        dest = ARTIFACTS_DIR / slug
-        dest.mkdir()
-        with zipfile.ZipFile(upload.file) as z:
-            for member in z.infolist():
-                target = (dest / member.filename).resolve()
-                if dest.resolve() not in target.parents:
-                    raise HTTPException(400, i18n.t("err.zip_paths"))
-                if member.is_dir():
-                    target.mkdir(parents=True, exist_ok=True)
-                else:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    with z.open(member) as src, open(target, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-        # allow zips that contain a single top-level folder
-        if not (dest / "index.html").exists():
-            subs = [p for p in dest.iterdir() if p.is_dir()]
-            if len(subs) == 1 and (subs[0] / "index.html").exists():
-                for item in subs[0].iterdir():
-                    shutil.move(str(item), dest / item.name)
-                subs[0].rmdir()
-        if not (dest / "index.html").exists():
-            shutil.rmtree(dest)
-            raise HTTPException(400, i18n.t("err.zip_index"))
-        if meta:
-            (dest / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-    elif ext.lower() in (".html", ".htm"):
-        dest = ARTIFACTS_DIR / f"{slug}.html"
-        with open(dest, "wb") as f:
-            shutil.copyfileobj(upload.file, f)
-        if meta:
-            (ARTIFACTS_DIR / f"{slug}.meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-    else:
+    kind = ext.lower()
+    if kind not in (".zip", ".html", ".htm"):
         raise HTTPException(400, i18n.t("err.upload_type"))
+    # Unpack into a hidden folder first (listings skip names that start with "."): a refused upload leaves the app,
+    # its meta, its icon and its versions exactly as they were
+    staging = ARTIFACTS_DIR / f".upload-{secrets.token_hex(8)}"
+    staging.mkdir()
+    try:
+        new = staging / "app"
+        if kind == ".zip":
+            _unpack_zip(upload.file, new)
+        else:
+            with open(new, "wb") as f:
+                shutil.copyfileobj(upload.file, f)
+        # a new version keeps the old name, emoji, private flag and banner switch (stored as false) unless overridden
+        old = _meta_path(slug)
+        is_new = old is None
+        old_meta = _read_meta(old) if old else {}
+        meta = {k: old_meta[k] for k in META_KEYS if old_meta.get(k) or old_meta.get(k) is False}
+        if title:
+            meta["title"] = title
+        if admin_only:
+            meta["admin_only"] = True
+        versions.save(ARTIFACTS_DIR, slug)  # keep the previous version before replacing it
+        # remove any existing artifact with that slug
+        for old in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json"):
+            old.unlink(missing_ok=True)
+        if (ARTIFACTS_DIR / slug).is_dir():
+            shutil.rmtree(ARTIFACTS_DIR / slug)
+        if kind == ".zip":
+            new.rename(ARTIFACTS_DIR / slug)
+            meta_path = ARTIFACTS_DIR / slug / "meta.json"
+        else:
+            new.rename(ARTIFACTS_DIR / f"{slug}.html")
+            meta_path = ARTIFACTS_DIR / f"{slug}.meta.json"
+        if meta:
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     if is_new:
         _new_app(slug)
     log.info("Uploaded artifact %s", slug)
     return slug
+
+
+def _unpack_zip(file, dest: Path) -> None:
+    """Unpack an uploaded zip into dest (made here); HTTP 400 for a path outside it or no index.html."""
+    dest.mkdir()
+    with zipfile.ZipFile(file) as z:
+        for member in z.infolist():
+            target = (dest / member.filename).resolve()
+            if dest.resolve() not in target.parents:
+                raise HTTPException(400, i18n.t("err.zip_paths"))
+            if member.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with z.open(member) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+    # allow zips that contain a single top-level folder
+    if not (dest / "index.html").exists():
+        subs = [p for p in dest.iterdir() if p.is_dir()]
+        if len(subs) == 1 and (subs[0] / "index.html").exists():
+            for item in subs[0].iterdir():
+                shutil.move(str(item), dest / item.name)
+            subs[0].rmdir()
+    if not (dest / "index.html").exists():
+        raise HTTPException(400, i18n.t("err.zip_index"))
 
 
 # ---------------------------------------------------------------- shared write helpers
@@ -2233,21 +2247,25 @@ def api_delete(request: Request, slug: str = Form(...)):
         raise HTTPException(400)
     if who != "token":
         require_unlocked_to_manage(request, who, slug)
-    removed = False
-    for p in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json", ARTIFACTS_DIR / f"{slug}.link.json"):
-        if p.exists():
-            p.unlink()
-            removed = True
-    if (ARTIFACTS_DIR / slug).is_dir():
-        shutil.rmtree(ARTIFACTS_DIR / slug)
-        removed = True
-    if not removed:
+    files = [p for p in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json",
+                         ARTIFACTS_DIR / f"{slug}.link.json") if p.exists()]
+    folder = ARTIFACTS_DIR / slug
+    if not files and not folder.is_dir():
         raise HTTPException(404)
-    _remove_icon(slug)
-    with db() as con:  # links and guest replies go with the app; the rest of its data stays for a re-upload
-        public.delete_slug(con, slug)
+    meta = _read_meta(_meta_path(slug) or ARTIFACTS_DIR / f"{slug}.meta.json")
+    # The database first, in one transaction: if it fails the app is still whole, and the delete can be tried again.
+    # Links go with the app, and so do guest replies where the guest-zone rules apply (elsewhere a guests/ collection
+    # is ordinary data); the rest of its data stays for a re-upload
+    with db() as con:
         for owner, col, _ in _guest_collections(con, slug):
-            con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=?", (slug, owner, col))
+            if public.in_guest_zone(meta, col):
+                con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=?", (slug, owner, col))
+        public.delete_slug(con, slug)
+    for p in files:
+        p.unlink(missing_ok=True)
+    if folder.is_dir():
+        shutil.rmtree(folder)
+    _remove_icon(slug)
     return JSONResponse({"ok": True})
 
 

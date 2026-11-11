@@ -1,4 +1,8 @@
 """Secret links per user and share name (app/public.py, /api/share): one per (app, owner, name)."""
+import io
+import sqlite3
+import zipfile
+
 import pytest
 
 from app import access, public
@@ -248,3 +252,133 @@ def test_delete_app_removes_its_links_and_guest_replies(hub, make_page, pub, cli
     # the other app keeps its link and its reply
     assert gget(client, other, "guests/abc").json()["data"]["t"] == "stays"
     assert hub.resolve_link(other) is not None
+
+
+# ---------------------------------------------------------------- second fix wave: refused uploads, failed deletes
+def _zip(files):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+BAD_UPLOADS = {  # every reason an upload is refused, with the answer it gets
+    "type": ("radar.txt", b"<body>new</body>", 400, "err.upload_type"),
+    "no_index": ("radar.zip", _zip({"readme.txt": "new"}), 400, "err.zip_index"),
+    "no_index_in_folder": ("radar.zip", _zip({"sub/readme.txt": "new"}), 400, "err.zip_index"),
+    "paths": ("radar.zip", _zip({"index.html": "<body>new</body>", "../evil.txt": "x"}), 400, "err.zip_paths"),
+    "not_a_zip": ("radar.zip", b"not a zip", 500, None),
+}
+
+
+def _hidden_reply_app(hub, admin_client, upload, user_client, client, folder):
+    """radar with public and guests_hidden on, a link, a hidden reply, an icon and one saved version."""
+    from tests.test_guest_api import gput
+    name = "radar.zip" if folder else "radar.html"
+    page = _zip({"index.html": "<body>old radar</body>", "style.css": "body{}"}) if folder else "<body>old radar</body>"
+    upload(admin_client, name, page, title="Radar")
+    upload(admin_client, name, page)  # the first one goes into the history
+    path = hub._meta_path("radar")
+    hub._write_meta(path, {**hub._read_meta(path), "data": "shared"})
+    hub.set_public("radar", public=True, guests_hidden=True)
+    tok = token_of(share(user_client))
+    assert gput(client, tok, "guests/abc", {"t": "hidden"}).status_code == 200
+    hub.ICONS_DIR.mkdir(exist_ok=True)
+    (hub.ICONS_DIR / "radar.png").write_bytes(b"\x89PNG")
+    return tok
+
+
+@pytest.mark.parametrize("folder", [False, True], ids=["page", "folder"])
+@pytest.mark.parametrize("reason", list(BAD_UPLOADS))
+def test_a_refused_upload_leaves_the_app_as_it_was(hub, upload, admin_client, user_client, client, folder, reason):
+    from app import i18n, versions
+    from tests.conftest import make_client
+    from tests.test_guest_api import gget
+    from tests.test_shared_data import ids
+
+    tok = _hidden_reply_app(hub, admin_client, upload, user_client, client, folder)
+    meta_path = hub._meta_path("radar")
+    meta_before, saved = meta_path.read_text(), versions.list_versions(hub.ARTIFACTS_DIR, "radar")
+    name, data, status, key = BAD_UPLOADS[reason]
+    tolerant = make_client("admin@test.no")
+    tolerant._transport.raise_server_exceptions = False  # a zip that is not one ends in a bare 500, as before
+    r = tolerant.post("/api/upload", files={"file": (name, data)}, data={"slug": "radar"})
+    assert r.status_code == status
+    if key:
+        assert r.json()["detail"] == i18n.t(key)
+    assert hub._meta_path("radar") == meta_path and meta_path.read_text() == meta_before
+    assert versions.list_versions(hub.ARTIFACTS_DIR, "radar") == saved
+    assert (hub.ICONS_DIR / "radar.png").read_bytes() == b"\x89PNG"
+    assert "old radar" in admin_client.get("/a/radar/").text
+    if folder:
+        assert admin_client.get("/a/radar/style.css").text == "body{}"
+    assert not (hub.ARTIFACTS_DIR / "evil.txt").exists()
+    assert not [p.name for p in hub.ARTIFACTS_DIR.iterdir() if p.name.startswith(".upload")]
+    assert ids(user_client, "radar", f"data/users/{U}/guests/jul") == []
+    assert client.get(f"/p/{tok}/").status_code == 200
+    assert gget(client, tok, "guests/abc").json()["data"]["t"] == "hidden"
+
+
+def test_a_refused_upload_keeps_an_ordinary_apps_settings(hub, make_page, admin_client):
+    make_page("plain", level="people", people=["venn@test.no"], title="Plain")
+    meta_path = hub._meta_path("plain")
+    before = meta_path.read_text()
+    r = admin_client.post("/api/upload", files={"file": ("plain.zip", _zip({"readme.txt": "x"}))}, data={"slug": "plain"})
+    assert r.status_code == 400
+    assert meta_path.read_text() == before and hub._read_meta(meta_path)["title"] == "Plain"
+    assert access.level(hub._read_meta(meta_path)) == "people"
+
+
+def test_a_failed_delete_leaves_the_app_and_can_be_retried(hub, pub, client, user_client, admin_client, monkeypatch):
+    from tests.test_guest_api import gget, gput
+    from tests.test_shared_data import ids
+
+    hub.set_public("radar", guests_hidden=True)
+    tok = token_of(share(user_client))
+    assert gput(client, tok, "guests/abc", {"t": "hidden"}).status_code == 200
+
+    def boom(con, slug):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(public, "delete_slug", boom)
+    with pytest.raises(sqlite3.OperationalError):
+        admin_client.post("/api/delete", data={"slug": "radar"})
+    # nothing is gone: the files, the link, the reply, and it is still hidden from the owner
+    assert hub._meta_path("radar") is not None and hub._read_meta(hub._meta_path("radar"))["guests_hidden"] is True
+    assert client.get(f"/p/{tok}/").status_code == 200
+    assert gget(client, tok, "guests/abc").json()["data"]["t"] == "hidden"
+    assert ids(user_client, "radar", f"data/users/{U}/guests/jul") == []
+    monkeypatch.undo()
+    assert admin_client.post("/api/delete", data={"slug": "radar"}).status_code == 200
+    assert hub._meta_path("radar") is None and hub.resolve_link(tok) is None
+    assert count_docs(hub, "radar") == 0
+
+
+@pytest.mark.parametrize("settings, kept", [(None, True), ({}, True), ({"public": True}, False),
+                                            ({"guests_hidden": True}, False)],
+                         ids=["personal", "shared", "public", "guests_hidden"])
+def test_delete_takes_guests_documents_only_where_the_zone_rule_applies(hub, make_page, upload, admin_client,
+                                                                        user_client, settings, kept):
+    from tests.test_shared_data import ids
+
+    if settings is None:
+        make_page("radar")
+    else:
+        make_shared(hub, make_page, "radar")
+        if settings:
+            hub.set_public("radar", **settings)
+    branch = f"data/users/{U}"
+    paths = [f"{branch}/guests/x/d1", f"{branch}/guests/x/d1/notes/n1"]
+    with hub.db() as con:
+        for path in paths:
+            col, doc_id = path.rsplit("/", 1)
+            con.execute("INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES (?,?,?,?,'{}',0)",
+                        ("radar", U, col, doc_id))
+    assert admin_client.post("/api/delete", data={"slug": "radar"}).status_code == 200
+    upload(admin_client, "radar.html", "<body>again</body>")
+    with hub.db() as con:
+        left = [r[0] for r in con.execute("SELECT collection || '/' || doc_id FROM docs WHERE slug='radar' ORDER BY 1")]
+    assert left == (sorted(paths) if kept else [])
+    if settings is None:  # the user still reads their own documents
+        assert ids(user_client, "radar", f"{branch}/guests/x") == ["d1"]
