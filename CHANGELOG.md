@@ -2,6 +2,11 @@
 
 ## v1.9.0 (unreleased)
 
+### Before you upgrade
+
+- Nothing to do with the Caddy that ships with the hub. With another reverse proxy, make sure it sets `X-Forwarded-For`
+  and that the hub's port cannot be reached around it: the limit on guest writes per IP address goes by that header.
+
 ### New
 
 - Public sharing. An app can be switched on for it (*Public sharing* in its settings on the admin page, or

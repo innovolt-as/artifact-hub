@@ -86,7 +86,8 @@ These people can log in:
 
 Anyone else who asks for a link is told to check their e-mail, but nothing is sent, so the form does not reveal who
 is on the list. A magic link works once, within 15 minutes, and a login lasts 30 days. There can be at most 3 open
-links per address, and 10 sent per IP address per hour.
+links per address, and 10 sent per IP address per hour. IP addresses are the ones the reverse proxy reports in
+`X-Forwarded-For`, so the proxy must set it and the hub's port must not be reachable around it.
 
 Each app has an access level, set on the admin page:
 

@@ -25,7 +25,7 @@ everyone".
 | `update_app` | Replaces the whole HTML of an app. |
 | `edit_app` | Small changes: a list of `{old, new}` replacements, applied all or nothing. |
 | `update_app_info` | Changes title, description, emoji, `private`, `shared_data`, `offline` (the [*Works offline* switch](APPS.md#offline)), `append_collections` or the [public sharing](#public-sharing) settings without touching the HTML. |
-| `list_app_data`, `get_app_data`, `set_app_data`, `delete_app_data` | Read and write the documents an app keeps with `window.claude.use("db")`: the data of the user behind the connection, or in an app with shared data the shared documents and that user's own `data/users/<e-mail>/` branch., and, where the app has the agent zone on, every user's `data/users/<e-mail>/agent/` too. |
+| `list_app_data`, `get_app_data`, `set_app_data`, `delete_app_data` | Read and write the documents an app keeps with `window.claude.use("db")`: the data of the user behind the connection, or in an app with shared data the shared documents and that user's own `data/users/<e-mail>/` branch, and, where the app has the agent zone on, every user's `data/users/<e-mail>/agent/` too. |
 
 The data tools let you, say, tell Claude what you had for lunch and have it log that in your food diary app.
 

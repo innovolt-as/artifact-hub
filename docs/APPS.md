@@ -185,7 +185,7 @@ share.shared          // share.shared.doc("products/k1").get(): a public_read co
 `onSnapshot`), rooted in the user's branch and one share name, and it reaches only `public/...` and `guests/...`; any
 other path rejects with `invalid_argument`. The owner's `share.db.doc("public/abc")` is stored as
 `data/users/<e-mail>/public/<name>/abc`, and the guest reads the same path `public/abc`, so neither needs the
-e-mail or the share name. `scope(name, title)` rejects a name that does not fit the rule above; `title` is
+e-mail or the share name. `scope(name, title)` throws at once for a name that does not fit the rule above, and `remove(name)` returns a rejected promise; `title` is
 only shown in the share sheet and on the settings page. A guest cannot call `scope` or `remove`.
 
 The share sheet follows the device's light or dark setting. It shows the link, how many replies there are (never what they say),
@@ -225,9 +225,12 @@ Limits:
 |---|---|
 | A guest document | 4096 bytes as sent (`413` above that). JSON that is not an object, with `NaN` or `Infinity`, nested deeper than 32 levels, or with a lone surrogate in a string is refused with `400`. |
 | Guest documents per link | 500, collections below them included (`429`). |
-| Writes per hour | 30 per IP address and 200 per link, creates and deletes alike (`429`). Counted in memory, so a restart resets them. |
+| Writes per hour | 30 per IP address and 200 per link (`429`). Every create or delete attempt counts, also one that is then refused (a too large body, a taken id), because the count comes before the body is checked. Counted in memory, so a restart resets them. |
 
-The address is the one the reverse proxy passes on, as for the login limit.
+The per-address limit counts the client address as the reverse proxy reports it in `X-Forwarded-For`: the image runs
+`uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*`, as the login limit relies on too. A proxy
+that does not set the header makes all guests share one allowance of 30 writes an hour. A hub reachable without its
+proxy lets a guest set the header and dodge the per-address limit. The per-link limit and the 500-document cap hold either way.
 
 The guest API is `/api/public/<token>/...`, used by `hub.js`, and it answers `404` for a missing or dead link on every route. A write
 to `public/...` gives `403`, a path outside the two zones `404`, a second creator of the same id `403`, deleting someone
@@ -317,6 +320,7 @@ test harness that records them):
 | | Owner | Guest |
 |---|---|---|
 | Items | `GET /api/store/<slug>/c?path=data/users/<e-mail>/public/cabin` | `GET /api/public/<token>/c?path=public` |
+| Replies | `GET /api/store/<slug>/c?path=data/users/<e-mail>/guests/cabin` | `GET /api/public/<token>/c?path=guests` |
 | Add an item | `PUT /api/store/<slug>/d?path=data/users/<e-mail>/public/cabin/<id>` | refused, so the form is not shown |
 | Take an item | | `PUT /api/public/<token>/d?path=guests/<id>` with `X-Hub-Guest` |
 | Undo | | `DELETE /api/public/<token>/d?path=guests/<id>` |
