@@ -420,3 +420,15 @@ html[data-hub-offline="1"] #offline-no .summary { display: none; }
 .hub-toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 40; max-width: calc(100vw - 32px); padding: 10px 16px; border-radius: 12px; background: #1d1c1a; color: #f3f6fb; font-size: 14px; box-shadow: 0 8px 24px rgb(0 0 0 / .3); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hub-toast { background: #ece9e2; color: #1d1c1a; } }
 :root[data-theme="dark"] .hub-toast { background: #ece9e2; color: #1d1c1a; }
+
+/* settings: shared links; every target is 44 px, the address is a read-only field you can select */
+.srow { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.srow p { margin: 6px 0; overflow-wrap: anywhere; }
+.srow .surl { display: block; box-sizing: border-box; width: 100%; min-height: 44px; margin: 8px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; font-size: 16px; }  /* 16 px: see .editor */
+.sacts { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.srow button { min-height: 44px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--fg); font: inherit; font-weight: 600; cursor: pointer; }
+.srow button.pri { border: 0; background: var(--accent); color: var(--accent-fg); }
+.srow button.danger { border: 0; background: var(--danger); color: #fff; }
+.srow button:disabled { opacity: .5; cursor: default; }
+.srow [hidden] { display: none !important; }
+.sask { margin: 8px 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }

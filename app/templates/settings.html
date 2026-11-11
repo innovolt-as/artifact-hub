@@ -48,6 +48,28 @@
   {% endif %}
   <p id="lockError" class="err small" role="alert"></p>
 </section>
+{% if share_links %}
+<section class="card settings" id="shareCard" data-strings="{{ share_strings }}">
+  <h2>{{ t("share.heading") }}</h2>
+  <p class="muted small">{{ t("share.hint") }}</p>
+  {% for l in share_links %}
+  <div class="srow" data-slug="{{ l.slug }}" data-name="{{ l.name }}">
+    <p class="stitle"><strong>{{ l.app_title }}</strong>{% if l.title %} · {{ l.title }}{% endif %}</p>
+    <input type="text" class="surl" readonly value="{{ l.url }}" aria-label="{{ t('js.share.link') }}">
+    <p class="muted small scount">{{ tn("js.share.guests", l.guest_docs) }}</p>
+    <div class="sacts">
+      <button type="button" class="pri" data-act="copy">{{ t("js.share.copy") }}</button>
+      <button type="button" data-act="send" hidden>{{ t("js.share.send") }}</button>
+      <button type="button" data-act="rotate">{{ t("js.share.rotate") }}</button>
+      <button type="button" data-act="off">{{ t("js.share.off") }}</button>
+      <button type="button" data-act="clear"{% if not l.guest_docs %} disabled{% endif %}>{{ t("js.share.clear") }}</button>
+    </div>
+    <div class="sask" hidden></div>
+    <p class="err small" role="alert"></p>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
 <section class="card settings" id="accountCard" data-failed="{{ t('settings.save_failed') }}" data-done="{{ t('settings.deleted') }}">
   <h2>{{ t("settings.account") }}</h2>
   <form method="post" action="/logout"><button class="setrow">{{ t("nav.logout") }}</button></form>
@@ -85,6 +107,7 @@
 {% endif %}
 <script src="{{ static_url('settings.js') }}" defer></script>
 <script src="{{ static_url('settings-lock.js') }}" defer></script>
-<script src="{{ static_url('forget.js') }}" defer></script>
+{% if share_links %}<script src="{{ static_url('settings-share.js') }}" defer></script>
+{% endif %}<script src="{{ static_url('forget.js') }}" defer></script>
 <script src="{{ static_url('settings-account.js') }}" defer></script>
 {% endblock %}

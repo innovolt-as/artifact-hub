@@ -745,7 +745,8 @@ def settings_page(request: Request, user: str = Depends(require_user)):
                 for a in list_artifacts(user) if a["kind"] != "link"]
     return templates.TemplateResponse(request, "settings.html", {
         "site": SITE_NAME, "user": user, "admin": is_admin(user), "chosen": chosen,
-        "has_code": has_code, "lockable": lockable})
+        "has_code": has_code, "lockable": lockable, "share_links": share_list(user)["links"],
+        "share_strings": json.dumps(i18n.js("js.share."))})
 
 
 @app.post("/password", response_class=HTMLResponse)
@@ -1084,7 +1085,10 @@ def _html_with_shim(path: Path, slug: str, user: str | None, *, with_banner: boo
            if found and public.is_public(found[1]) else "")
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
-    share_button = bool(app and app["public"])
+    share_button = bool(app and app["public"] and app["banner"])
+    if share_button:  # the sheet's behaviour; the button and the empty sheet come with the banner
+        tag += '<script src="/static/share.js" defer data-slug="{}" data-strings="{}"></script>'.format(
+            escape(slug), escape(json.dumps(i18n.js("js.share.")), quote=True))
     html = banner.inject(html, tag, banner.render(app, SITE_NAME, share=share_button) if app and app["banner"] else None)
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 

@@ -240,3 +240,18 @@ def test_share_button_only_when_asked():
     assert '<button class="share" type="button" aria-label="Del"' in out
     assert 'href="/"' in out and out.index("Matboka") < out.index('class="share"')
     assert "share" not in banner.render(APP, "S")
+
+
+def test_share_sheet_is_inside_the_shadow_root_and_only_with_the_button():
+    out = banner.render(APP, "S", share=True)
+    sheet = out.split('<dialog class="sheet"')[1].split("</dialog>")[0]
+    assert 'aria-labelledby="share-heading"' in sheet and 'class="body"' in sheet
+    assert out.index("<dialog") < out.index("</template>") and out.endswith("</template></hub-banner>")
+    assert "<dialog" not in banner.render(APP, "S") and "<dialog" not in banner.render(APP, "S", guest=True)
+    assert ">Del<" in sheet and 'aria-label="Lukk"' in sheet
+
+
+def test_share_sheet_touch_targets_and_input_size():
+    css = banner.render(APP, "S", share=True).replace(" ", "").replace("\n", "")
+    assert "min-height:44px" in css and "font-size:16px" in css and "env(safe-area-inset-bottom)" in css
+    assert "prefers-color-scheme:dark" in css
