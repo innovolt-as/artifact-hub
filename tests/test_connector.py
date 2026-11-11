@@ -494,7 +494,7 @@ def test_instructions_mention_public_sharing():
     from app import connector
     t = connector.INSTRUCTIONS
     for needle in ("public_sharing", "data/users/<e-mail>/public/<name>/", "data/users/<e-mail>/guests/<name>/",
-                   "data/users/<e-mail>/agent/", 'window.claude.use("share")', "share.scope(name, title)", "by id", "share panel" if False else "share sheet",
+                   "data/users/<e-mail>/agent/", 'window.claude.use("share")', "share.scope(name, title)", "by id", "share sheet",
                    "{ db, today, now, timeZone, user }"):
         assert needle in t, needle
     assert "sensitive" in t and "hidden" in t
