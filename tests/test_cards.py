@@ -16,7 +16,7 @@ def _run(src, data=None, cols=None, **kw):
         return [{"id": k, "data": v} for k, v in sorted(cols.get(path, {}).items())]
 
     return cards.run_recipe(src, read, today=kw.get("today", "2026-10-28"), now_ms=kw.get("now_ms", 0),
-                            tz=kw.get("tz", "Europe/Oslo"))
+                            tz=kw.get("tz", "Europe/Oslo"), user=kw.get("user", "user@test.no"))
 
 
 def test_returns_text_from_docs():
@@ -92,14 +92,14 @@ def test_bad_path_from_reader():
         raise ValueError("bad")
 
     assert cards.run_recipe("async function hubCard({db}){ await db.doc('a/b').get() }", read,
-                            today="2026-10-28", now_ms=0, tz="UTC").error == "bad_path"
+                            today="2026-10-28", now_ms=0, tz="UTC", user="user@test.no").error == "bad_path"
 
 
 def test_inputs_passed():
-    src = ("function hubCard({today, now, timeZone}) {"
-           " return [today, now, timeZone, (1572).toLocaleString('no-NO')].join('|') }")
+    src = ("function hubCard({today, now, timeZone, user}) {"
+           " return [today, now, timeZone, user, (1572).toLocaleString('no-NO')].join('|') }")
     # Intl groups the digits with a no-break space
-    assert _run(src, now_ms=123, tz="Europe/Oslo").text == "2026-10-28|123|Europe/Oslo|1\u00a0572"
+    assert _run(src, now_ms=123, tz="Europe/Oslo", user="a@t.no").text == "2026-10-28|123|Europe/Oslo|a@t.no|1\u00a0572"
 
 
 def test_today_and_day_of():
@@ -171,7 +171,7 @@ def test_slow_reads_stop_at_the_deadline():  # reads count against the time; the
 
     src = "async function hubCard({db}) { await Promise.all([...Array(20).keys()].map(i => db.doc('x/' + i).get())) }"
     t = time.monotonic()
-    assert cards.run_recipe(src, read, today="2026-10-28", now_ms=0, tz="UTC").error == "timeout"
+    assert cards.run_recipe(src, read, today="2026-10-28", now_ms=0, tz="UTC", user="user@test.no").error == "timeout"
     assert time.monotonic() - t < 1 and len(calls) < 20
     assert cards._worker.proc is not None and cards._worker.proc.pid == pid
 
@@ -184,7 +184,8 @@ def test_too_many_paths_in_one_round():
 
     src = (f"async function hubCard({{db}}) {{ await Promise.all([...Array({cards.MAX_READS + 1}).keys()]"
            ".map(i => db.doc('x/' + i).get())); return 'all read' }")
-    assert cards.run_recipe(src, read, today="2026-10-28", now_ms=0, tz="UTC").error == "too_many_reads"
+    result = cards.run_recipe(src, read, today="2026-10-28", now_ms=0, tz="UTC", user="user@test.no")
+    assert result.error == "too_many_reads"
     assert calls == []
 
 
@@ -239,3 +240,29 @@ def test_failed_start_is_not_tried_again_for_a_while(monkeypatch, tmp_path):
     assert len(starts) == 1
     monkeypatch.undo()  # the real worker, and no wait
     assert _run("function hubCard(){ return 'x' }").text == "x"
+
+
+# ---------------------------------------------------------------- recipes in the hub (card_result)
+def _recipe_app(hub, slug, recipe, shared=False):
+    hub.save_page(slug, f"<!doctype html><html><body><script data-hub-card>{recipe}</script></body></html>",
+                  create=True, private=False)
+    if shared:
+        p = hub._meta_path(slug)
+        hub._write_meta(p, {**hub._read_meta(p), "data": "shared"})
+
+
+def test_recipe_gets_user(hub):
+    _recipe_app(hub, "mat", "function hubCard({user}) { return user; }")
+    assert hub.card_result("User@Test.no", "mat", "Europe/Oslo").text == "user@test.no"
+
+
+@pytest.mark.parametrize("hidden", [False, True])
+def test_recipe_cannot_read_hidden_guest_zone(hub, hidden):
+    from tests.test_public_settings import add_guest_docs
+
+    _recipe_app(hub, "jul", "async function hubCard({db, user}) { const z = `data/users/${user}/guests/main`;"
+                " const [c, d] = await Promise.all([db.collection(z).get(), db.doc(`${z}/r0`).get()]);"
+                " return c.size + '|' + d.exists; }", shared=True)
+    hub.set_public("jul", public=True, guests_hidden=hidden)
+    add_guest_docs(hub, "jul", "user@test.no", "main")
+    assert hub.card_result("user@test.no", "jul", "Europe/Oslo").text == ("0|false" if hidden else "1|true")

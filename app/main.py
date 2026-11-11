@@ -863,7 +863,7 @@ def card_result(user: str, slug: str, tz: str | None, now: float | None = None) 
             return doc_get(slug, user, path)
         return [{"id": i, "data": d} for i, d in doc_list(slug, user, path).items()]
 
-    return cards.run_recipe(source, read, today=day, now_ms=int(now * 1000), tz=zone)
+    return cards.run_recipe(source, read, today=day, now_ms=int(now * 1000), tz=zone, user=user.lower())
 
 
 def card_lines(con: sqlite3.Connection, user: str, apps: list[dict], tz: str | None, now: float | None = None) -> dict[str, str]:
@@ -1136,7 +1136,7 @@ def store_user(slug: str, request: Request, user: str = Depends(require_user)) -
 @app.get("/api/store/{slug}/c")
 def store_list(slug: str, path: str, user: str = Depends(store_user)):
     collection, _ = _split_path(path, want_doc=False)
-    owner, collection, _ = _store_scope(slug, user, collection)
+    owner, collection, _, _ = _store_scope(slug, user, collection)
     if owner is None:
         return {"docs": []}
     with db() as con:
@@ -1150,7 +1150,7 @@ def store_list(slug: str, path: str, user: str = Depends(store_user)):
 @app.get("/api/store/{slug}/d")
 def store_get(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
-    owner, collection, _ = _store_scope(slug, user, collection)
+    owner, collection, _, _ = _store_scope(slug, user, collection)
     if owner is None:
         return {"data": None}
     with db() as con:
@@ -1164,7 +1164,9 @@ def store_get(slug: str, path: str, user: str = Depends(store_user)):
 @app.put("/api/store/{slug}/d")
 async def store_set(slug: str, path: str, request: Request, merge: bool = False, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
-    owner, collection, append = _store_scope(slug, user, collection, write=True)
+    owner, collection, append, guest_zone = _store_scope(slug, user, collection, write=True)
+    if guest_zone:
+        raise HTTPException(403, i18n.t("data.guests_only"))
     body = await request.body()
     if len(body) > MAX_DOC_BYTES:  # before parsing it; _put_doc checks the document as stored
         raise HTTPException(413, i18n.t("store.too_big"))
@@ -1197,7 +1199,7 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
 @app.delete("/api/store/{slug}/d")
 def store_delete(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
-    owner, collection, append = _store_scope(slug, user, collection, write=True)
+    owner, collection, append, _ = _store_scope(slug, user, collection, write=True)
     if append == ADD_ONLY:
         raise HTTPException(403, i18n.t("data.add_only"))
     with db() as con:
@@ -1242,24 +1244,34 @@ class Scope(NamedTuple):
     owner: str | None
     collection: str
     append: str | None  # None, STAMP (an admin writes, stamped) or ADD_ONLY (anyone else: create only, stamped)
+    guest_zone: bool  # the user's own guest zone (app/public.py): only guests create there; the owner may delete
 
 
 def doc_scope(slug: str, user: str, collection: str, *, write: bool = False) -> Scope:
     """Scope of one collection of an app (app/shared.py). Personal apps: the user.
     Shared apps: SHARED, the user's own branch, or None for someone else's branch, where reads find nothing.
     A write to shared data by a non-admin, or to someone else's branch, raises ReadOnly, except in a collection
-    everyone may add to (shared.appendable): there the write is let through as ADD_ONLY. The whole decision
-    comes from this one read of the meta; the write paths act on Scope.append and never read it again."""
+    everyone may add to (shared.appendable): there the write is let through as ADD_ONLY. The zones of
+    app/public.py: with "agent" an admin reads and writes everyone's agent zone; with "public" the user's own
+    guest zone has guest_zone set, and with "guests_hidden" too its reads find nothing. The whole decision
+    comes from this one read of the meta; the write paths act on Scope.append and Scope.guest_zone and never
+    read it again."""
     meta = _data_meta(slug, user)
     if not shared.is_shared(meta):
-        return Scope(user.lower(), collection, None)
+        return Scope(user.lower(), collection, None, False)
     owner = shared.branch_owner(collection, user)
+    zone = public.zone_of(collection)
+    if owner is None and zone and zone.zone == "agent" and public.has_agent(meta) and is_admin(user):
+        owner = zone.email
+    guest_zone = owner is not None and zone is not None and zone.zone == "guests" and public.is_public(meta)
+    if guest_zone and not write and public.guests_hidden(meta):
+        owner = None
     append = (STAMP if is_admin(user) else ADD_ONLY) if shared.appendable(meta, collection) else None
     if write and owner is None:
         raise ReadOnly(i18n.t("data.not_yours"))
     if write and owner == shared.SHARED and not is_admin(user) and append is None:
         raise ReadOnly(i18n.t("data.read_only"))
-    return Scope(owner, shared.normalize(collection), append)
+    return Scope(owner, shared.normalize(collection), append, guest_zone)
 
 
 def _append_rules(append: str | None, user: str, data: dict, old: dict | None, *, merge: bool) -> dict:
@@ -1297,19 +1309,25 @@ def _put_doc(con: sqlite3.Connection, slug: str, owner: str, collection: str, do
 
 
 def visible_docs(con: sqlite3.Connection, slug: str, user: str) -> list[sqlite3.Row]:
-    """collection, doc_id and data of every document the user can read in an app, by collection and id."""
+    """collection, doc_id and data of every document the user can read in an app, by collection and id: what
+    doc_scope lets them read, so with "agent" an admin also gets every agent zone, and a hidden guest zone never."""
     meta = _data_meta(slug, user)
     user = user.lower()
     if not shared.is_shared(meta):
         return con.execute("SELECT collection, doc_id, data FROM docs WHERE slug=? AND owner=? ORDER BY collection, doc_id",
                            (slug, user)).fetchall()
     own = shared.own_prefix(user)  # compared with substr, not LIKE: an e-mail may hold _ or %
-    return con.execute(
+    agents = public.has_agent(meta) and is_admin(user)  # and every branch's agent zone, data/users/<owner>/agent/...
+    rows = con.execute(
         """SELECT collection, doc_id, data FROM docs
-             WHERE slug=? AND (owner=? OR (owner=? AND (collection=? OR substr(collection, 1, ?)=?)))
+             WHERE slug=? AND (owner=? OR (owner=? AND (collection=? OR substr(collection, 1, ?)=?))
+               OR (? AND owner!=? AND substr(collection, 1, length(owner) + 18)='data/users/' || owner || '/agent/'))
              ORDER BY collection, doc_id""",
-        (slug, shared.SHARED, user, own, len(own) + 1, own + "/"),
+        (slug, shared.SHARED, user, own, len(own) + 1, own + "/", agents, shared.SHARED),
     ).fetchall()
+    if not (public.is_public(meta) and public.guests_hidden(meta)):
+        return rows
+    return [r for r in rows if not ((z := public.zone_of(r["collection"])) and z.zone == "guests")]
 
 
 def _data_path(path: str, want_doc: bool) -> tuple[str, str]:
@@ -1332,7 +1350,7 @@ def doc_overview(slug: str, user: str) -> dict[str, list[str]]:
 def doc_list(slug: str, user: str, collection: str) -> dict[str, dict]:
     """{doc_id: data} for one collection (at most MAX_DATA_DOCS_LISTED, newest ids last)."""
     col, _ = _data_path(collection, want_doc=False)
-    owner, col, _ = doc_scope(slug, user, col)
+    owner, col, _, _ = doc_scope(slug, user, col)
     if owner is None:
         return {}
     with db() as con:
@@ -1343,7 +1361,7 @@ def doc_list(slug: str, user: str, collection: str) -> dict[str, dict]:
 
 def doc_get(slug: str, user: str, path: str) -> dict | None:
     col, doc_id = _data_path(path, want_doc=True)
-    owner, col, _ = doc_scope(slug, user, col)
+    owner, col, _, _ = doc_scope(slug, user, col)
     if owner is None:
         return None
     with db() as con:
@@ -1355,7 +1373,9 @@ def doc_get(slug: str, user: str, path: str) -> dict | None:
 def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False) -> dict:
     """Write one document (merge=True deep-merges into an existing one); returns what is stored now."""
     col, doc_id = _data_path(path, want_doc=True)
-    owner, col, append = doc_scope(slug, user, col, write=True)
+    owner, col, append, guest_zone = doc_scope(slug, user, col, write=True)
+    if guest_zone:
+        raise ReadOnly(i18n.t("data.guests_only"))
     if not isinstance(data, dict):
         raise HubError(i18n.t("data.not_object"))
     with db() as con:
@@ -1372,15 +1392,16 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
 
 
 def doc_delete(slug: str, user: str, path: str) -> bool:
+    """Whether a document was deleted. In the user's guest zone always True: it may be hidden from them."""
     col, doc_id = _data_path(path, want_doc=True)
-    owner, col, append = doc_scope(slug, user, col, write=True)
+    owner, col, append, guest_zone = doc_scope(slug, user, col, write=True)
     if append == ADD_ONLY:
         raise ReadOnly(i18n.t("data.add_only"))
     with db() as con:
         n = con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                         (slug, owner, col, doc_id)).rowcount
         shared.record_write(con, slug, user)
-    return n > 0
+    return n > 0 or guest_zone
 
 
 # ---------------------------------------------------------------- routes: per-user app data

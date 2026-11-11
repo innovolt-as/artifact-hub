@@ -122,8 +122,9 @@ def _result(answer: dict) -> CardResult:
     return CardResult(None, "failed: " + _clean(message if isinstance(message, str) else "worker")[:200])
 
 
-def run_recipe(source: str, read: Callable[[str, str], object], *, today: str, now_ms: int, tz: str) -> CardResult:
-    """Run the recipe `source` (it defines hubCard) and return its line or an error code.
+def run_recipe(source: str, read: Callable[[str, str], object], *, today: str, now_ms: int, tz: str,
+               user: str) -> CardResult:
+    """Run the recipe `source` (it defines hubCard) for the viewer `user` and return its line or an error code.
 
     read("doc", path) gives the document's data or None, read("col", path) gives [{"id", "data"}]; anything it
     raises makes the result "bad_path". The reads count against TIME_LIMIT, and a round that asks for more than
@@ -139,7 +140,7 @@ def run_recipe(source: str, read: Callable[[str, str], object], *, today: str, n
             if time.monotonic() >= deadline:  # the reads used up the time; the worker is idle and stays
                 return CardResult(None, "timeout")
             job = {"source": source, "docs": docs, "cols": cols, "today": today, "now": now_ms, "tz": tz,
-                   "time_limit": deadline - time.monotonic(), "memory_limit": MEMORY_LIMIT}
+                   "user": user, "time_limit": deadline - time.monotonic(), "memory_limit": MEMORY_LIMIT}
             answer = _worker.ask(job, deadline + GRACE)
             if "need" not in answer:
                 return _result(answer)

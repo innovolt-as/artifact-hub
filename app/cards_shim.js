@@ -1,11 +1,13 @@
 /*
  * cards_shim.js — loaded by app/cards_worker.py into a fresh V8 context before an app's card recipe.
  *
- * It gives hubCard({ db, today, now, timeZone }) a read-only `db` with the same shape as the one in hub.js, so code
- * can be copied between an app and its recipe. The data comes with the job: input.docs maps document paths to their
- * data (null when missing) and input.cols maps collection paths to [{id, data}]. Reading a path the job does not
- * carry records it in `need` and rejects; the worker then answers {need}, the server reads those paths and runs the
- * recipe again with them. __hubRun(input) returns the answer as a JSON string:
+ * It gives hubCard({ db, today, now, timeZone, user }) a read-only `db` with the same shape as the one in hub.js, so
+ * code can be copied between an app and its recipe; `user` is the viewer's e-mail in lower case, so a recipe in an
+ * app with shared data can find the viewer's own branch data/users/<e-mail>/. The data comes with the job:
+ * input.docs maps document paths to their data (null when missing) and input.cols maps collection paths to
+ * [{id, data}]. Reading a path the job does not carry records it in `need` and rejects; the worker then answers
+ * {need}, the server reads those paths and runs the recipe again with them. __hubRun(input) returns the answer as a
+ * JSON string:
  *   {"text": string|null} | {"need": [["doc"|"col", path], ...]} | {"error": code, "message"?: string}
  */
 
@@ -106,7 +108,8 @@ const __hubRun = (() => {
     const need = [];
     let out;
     try {
-      const v = await hubCard({ db: makeDb(input, need), today: input.today, now: input.now, timeZone: input.tz });
+      const v = await hubCard({ db: makeDb(input, need), today: input.today, now: input.now, timeZone: input.tz,
+        user: input.user });
       out = v == null || v === "" ? { text: null } : typeof v === "string" ? { text: v } : { error: "not_text" };
     } catch (e) {
       out = { error: "failed", message: describe(e) };

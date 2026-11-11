@@ -123,6 +123,7 @@
   "data.add_only": "Her kan du bare legge til nye, ikke endre eller slette.",
   "data.bad_path_col": "Ugyldig sti «{path}»: må være en samling (oddetall ledd, f.eks. days).",
   "data.bad_path_doc": "Ugyldig sti «{path}»: må være et dokument (partall ledd, f.eks. days/2026-10-22).",
+  "data.guests_only": "Her lager bare gjestene svar. Du kan slette dem, men ikke lage eller endre dem.",
   "data.no_app": "Fant ingen app som heter «{slug}». Lenkekort har ikke data.",
   "data.not_object": "Et dokument må være et JSON-objekt.",
   "data.not_yours": "Du kan bare skrive dine egne data her, under data/users/<din e-post>/.",

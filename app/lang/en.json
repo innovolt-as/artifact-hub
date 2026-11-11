@@ -123,6 +123,7 @@
   "data.add_only": "You can only add new documents here, not change or delete them.",
   "data.bad_path_col": "Invalid path \"{path}\": must be a collection (an odd number of segments, e.g. days).",
   "data.bad_path_doc": "Invalid path \"{path}\": must be a document (an even number of segments, e.g. days/2026-10-22).",
+  "data.guests_only": "Only guests add replies here. You can delete them, but not create or change them.",
   "data.no_app": "Found no app called \"{slug}\". Link cards have no data.",
   "data.not_object": "A document must be a JSON object.",
   "data.not_yours": "You can only write your own data here, under data/users/<your e-mail>/.",
