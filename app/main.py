@@ -2498,6 +2498,7 @@ def shared_collections(slug: str) -> list[str]:
 
 _USES_SHARE = re.compile(r"""\buse\s*\(\s*(["'])share\1\s*\)""")
 MAX_SHARE_SCAN = 2 * 1024 * 1024
+MAX_SHARE_ENTRIES = 200
 
 
 def uses_share(slug: str) -> bool:
@@ -2507,14 +2508,26 @@ def uses_share(slug: str) -> bool:
         return False
     single = ARTIFACTS_DIR / f"{slug}.html"
     folder = ARTIFACTS_DIR / slug
-    if single.is_file():
+    plain = lambda p: p.is_file() and not p.is_symlink()  # noqa: E731  (a link could point outside the app)
+    if plain(single):
         files = [single]
-    elif (folder / "index.html").is_file():
+    elif plain(folder / "index.html") and not folder.is_symlink():
         files = [folder / "index.html"]
+        seen = 0  # directory entries listed in all, so a huge folder cannot keep the request busy
         try:
             for p in sorted(folder.iterdir()):
-                near = [p] if p.is_file() else sorted(p.iterdir()) if p.is_dir() and not p.name.startswith(".") else []
-                files += [f for f in near if f.is_file() and f.suffix in (".js", ".html") and f != files[0]]
+                seen += 1
+                if seen > MAX_SHARE_ENTRIES:
+                    break
+                near = [p]
+                if p.is_dir() and not p.is_symlink() and not p.name.startswith("."):
+                    near = []
+                    for f in sorted(p.iterdir()):
+                        seen += 1
+                        if seen > MAX_SHARE_ENTRIES:
+                            break
+                        near.append(f)
+                files += [f for f in near if plain(f) and f.suffix in (".js", ".html") and f != files[0]]
         except OSError:
             pass
     else:

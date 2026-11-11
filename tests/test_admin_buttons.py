@@ -84,6 +84,25 @@ def test_uses_share_in_a_folder_app():
     assert [main.uses_share(s) for s in ("f1", "f2", "f3", "f4", "f5", "f6")] == [True, True, False, True, True, False]
 
 
+def test_uses_share_does_not_follow_symlinks(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x.js").write_text(USE, "utf-8")
+    (outside / "dir").mkdir()
+    (outside / "dir" / "y.js").write_text(USE, "utf-8")
+    root = _folder("s1", {"index.html": "<body></body>"})
+    (root / "app.js").symlink_to(outside / "x.js")
+    (root / "sub").symlink_to(outside / "dir")
+    (main.ARTIFACTS_DIR / "s2.html").symlink_to(outside / "x.js")
+    assert main.uses_share("s1") is False and main.uses_share("s2") is False
+
+
+def test_uses_share_stops_listing_after_200_entries():
+    files = {"index.html": "<body></body>"} | {f"a{i:03}.txt": "" for i in range(200)} | {"z.js": USE}
+    _folder("many", files)
+    assert main.uses_share("many") is False
+
+
 def test_uses_share_reads_at_most_two_megabytes():
     big = "x" * (2 * 1024 * 1024 + 10)
     _folder("g1", {"index.html": big, "app.js": USE})   # the match lies past the limit
@@ -142,7 +161,10 @@ def test_both_views_have_chips_a_field_an_add_button_and_keep_their_ids(admin_cl
             assert f'id="{i}"' in v, (view, i)
         assert 'name="names"' in v
         assert v.index(f'id="{p}Chips"') < v.index(f'id="{p}Names"')  # the buttons come above the field
-    assert 'id="asUnready"' in html
+    sheet = html[html.index('<dialog id="appSheet"'):]
+    # the hint sits right under the Public sharing switch, before the Guests can read row
+    assert sheet.index('id="asPublic"') < sheet.index('id="asUnready"') < sheet.index('id="asPublicRead"')
+    assert 'maxlength="800"' in _view(html, "append") and 'maxlength="800"' in _view(html, "public_read")
     assert html.index("admin-chips.js") < html.index("admin-apps.js")  # the script reads AdminChips when it loads
 
 

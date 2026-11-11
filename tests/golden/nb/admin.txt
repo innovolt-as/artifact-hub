@@ -41,11 +41,11 @@ Felles data: alle med tilgang ser det samme. Du får se hva som kopieres før de
 Agentsone: en agent (Claude) kan jobbe for alle brukerne og skrive i hver brukers agent-samling. Admin ser alle agentsonene.
 Offentlig deling
 Offentlig deling
+Appen ser ikke ut til å bruke deling, så de som åpner en lenke, ser mest sannsynlig en tom side. Appen må være skrevet for deling.
 Gjester kan lese
 ›
 Skjul gjestenes svar for eieren
 Aktive lenker
-Appen ser ikke ut til å bruke deling, så de som åpner en lenke, ser mest sannsynlig en tom side. Appen må være skrevet for deling.
 Brukere kan lage en lenke som gir alle med lenken tilgang til det de har lagt i den offentlige sonen, og la gjester svare.
 Visning
 Navn og ikon

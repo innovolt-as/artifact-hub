@@ -64,11 +64,11 @@
         <h2 class="as-heading" id="asgPublic">{{ t('admin.group_public') }}</h2>
         <div class="as-group">
           <label class="set"><span>{{ t('admin.public_share') }}</span><input type="checkbox" role="switch" id="asPublic"><span class="sw" aria-hidden="true"></span></label>
+        <p class="as-hint warn" id="asUnready" hidden>{{ t('admin.public_unready_hint') }}</p>
           <button type="button" class="set" id="asPublicRead" hidden><span>{{ t('admin.public_read') }}</span><em><span id="asPublicReadLabel"></span> <span aria-hidden="true">›</span></em></button>
           <label class="set" id="asGuestsHiddenRow" hidden><span>{{ t('admin.guests_hidden') }}</span><input type="checkbox" role="switch" id="asGuestsHidden"><span class="sw" aria-hidden="true"></span></label>
           <div class="set static" id="asLinks" hidden><span>{{ t('admin.links_active') }}</span><em id="asLinksCount"></em></div>
         </div>
-        <p class="as-hint warn" id="asUnready" hidden>{{ t('admin.public_unready_hint') }}</p>
         <p class="as-hint">{{ t('admin.public_hint') }}</p>
       </div>
     </div>
@@ -121,7 +121,7 @@
       <div class="chips" id="apChips"></div>
       <label for="apNames">{{ t("admin.append_label") }}</label>
       <div class="link-form">
-        <input name="names" id="apNames" maxlength="64" placeholder="queue" autocapitalize="none" autocomplete="off" spellcheck="false">
+        <input name="names" id="apNames" maxlength="800" placeholder="queue" autocapitalize="none" autocomplete="off" spellcheck="false">
         <button type="button" class="small" id="apAdd">{{ t("admin.add") }}</button>
       </div>
       <p class="small muted">{{ t("admin.collection_new_hint") }}</p>
@@ -144,7 +144,7 @@
       <div class="chips" id="prChips"></div>
       <label for="prNames">{{ t("admin.public_read_label") }}</label>
       <div class="link-form">
-        <input name="names" id="prNames" maxlength="64" placeholder="products" autocapitalize="none" autocomplete="off" spellcheck="false">
+        <input name="names" id="prNames" maxlength="800" placeholder="products" autocapitalize="none" autocomplete="off" spellcheck="false">
         <button type="button" class="small" id="prAdd">{{ t("admin.add") }}</button>
       </div>
       <p class="small muted">{{ t("admin.collection_new_hint") }}</p>
