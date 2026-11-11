@@ -25,6 +25,9 @@ It is one FastAPI process with SQLite and plain files, behind Caddy, meant for o
 - **Versions.** The last 10 versions of every app are kept when it is replaced.
 - **Shared data** for apps whose content is the same for everyone, such as a digest a scheduled Claude agent
   writes every morning. Each user still gets a private corner in it.
+- **Public sharing** for apps where each user shares something with people who have no account, such as a wish
+  list. A user makes a secret link per list; guests read what the user made public and can leave replies of their
+  own, which can be hidden from the user. An *agent zone* lets a scheduled Claude agent work for every user of an app.
 - **A code lock** you can switch on per app, so someone who borrows your logged-in phone cannot open it.
 - **Link cards** for apps that run somewhere else, next to the hosted ones.
 - **English or Norwegian** interface (`HUB_LANG`). Another language is one JSON file.
@@ -148,6 +151,21 @@ person using it, plus the [shared data](docs/APPS.md#shared-data) of apps that h
 
 Passwords, login links and connector tokens are stored as hashes. App data is stored as plain text. To report a
 vulnerability, see [SECURITY.md](SECURITY.md).
+
+### Public sharing
+
+An app with public sharing on can be opened without logging in, through a secret link a user makes. This is what holds,
+and what does not:
+
+- A public page runs the app's code on the hub's domain. If a logged-in person opens the link, the code runs with that
+  person's login, as for any other app, so the rule to only publish apps you trust applies as before.
+- Everyone with the link can read the user's public zone and write in the guest zone. The link is the only barrier:
+  128 random bits, kept in clear so the user can see it again, answered with `X-Robots-Tag: noindex, nofollow`,
+  `Referrer-Policy: no-referrer` and `Cache-Control: no-store`. Guests are limited in size, number and speed, see
+  [docs/APPS.md](docs/APPS.md#guest-replies).
+- Hiding guests' replies from the user prevents accidents, such as Claude reading a surprise aloud. It does not stop
+  a user who wants to see.
+- With the agent zone on, an admin sees every user's agent zone. The rest of a user's branch stays private, to admins too.
 
 ### Offline copies
 
