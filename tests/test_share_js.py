@@ -51,3 +51,34 @@ def test_a_locked_app_is_told_apart_from_other_failures():
     assert res == {"ok": False, "locked": False}
     res, _ = run("RESPOND = () => ({ fail: true }); return await hubShare.request('wishes', 'main');")
     assert res == {"ok": False, "locked": False}
+
+
+SHEET_STUBS = """
+const HANDLERS = {};
+let CLOSED = 0;
+const node = (name) => ({ addEventListener(type, fn) { HANDLERS[name + ":" + type] = fn; }, replaceChildren() {},
+  querySelector(sel) { return NODES[sel] || null; } });
+const NODES = { ".body": node("body"), ".x": node("x"), "button.share": node("button") };
+const SHEET = Object.assign(node("sheet"), { close() { CLOSED++; },
+  getBoundingClientRect: () => ({ left: 100, top: 50, right: 300, bottom: 400 }) });
+NODES["dialog.sheet"] = SHEET;
+NODES["hub-banner"] = { shadowRoot: { querySelector: (sel) => NODES[sel] || null } };
+globalThis.document.querySelector = (sel) => NODES[sel] || null;
+"""
+
+
+def test_only_a_tap_outside_the_sheet_closes_it():
+    ctx = MiniRacer()
+    ctx.eval(STUBS + SHEET_STUBS + SHARE_JS)
+    out = ctx.eval("""(() => {
+      const click = HANDLERS["sheet:click"], seen = [];
+      for (const [x, y, target] of [[150, 60, SHEET], [101, 399, SHEET], [200, 200, NODES[".x"]],
+                                    [50, 200, NODES[".x"]], [50, 200, SHEET], [200, 450, SHEET]]) {
+        const before = CLOSED;
+        click({ clientX: x, clientY: y, target });
+        seen.push(CLOSED > before);
+      }
+      return JSON.stringify(seen);
+    })()""")
+    # inside the dialog's own box (its padding) or on a child: stays open; on the dim area around it: closes
+    assert json.loads(out) == [False, False, False, False, True, True]

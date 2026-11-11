@@ -50,7 +50,12 @@
     const current = () => (window.claude && window.claude.__share) || { name: "main", title: "" };
     const close = () => { if (sheet.close) sheet.close(); else sheet.removeAttribute("open"); };
     sheet.querySelector(".x").addEventListener("click", close);
-    sheet.addEventListener("click", (e) => { if (e.target === sheet) close(); });  // a tap on the dim area
+    // A tap on the dim area: the target is the dialog itself, but so is a tap in its own padding, so go by where it was
+    sheet.addEventListener("click", (e) => {
+      if (e.target !== sheet) return;
+      const r = sheet.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) close();
+    });
 
     // What the sheet shows: the explanation, then "Create link" or the link with its actions
     function show(state, message) {
