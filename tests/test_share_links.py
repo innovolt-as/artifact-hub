@@ -168,5 +168,46 @@ def test_share_list_and_settings_count(hub, pub, user_client, admin_client):
 
 def test_locked_flag(hub, pub, user_client):
     from tests.conftest import lock
+    assert user_client.get("/api/share/radar", params={"name": "jul"}).json()["locked"] is False
     lock(U, "radar")
-    assert share(user_client).json()["locked"] is True
+    assert user_client.get("/api/share/radar", params={"name": "jul"}).json()["locked"] is True
+
+
+def test_locked_app_refuses_changes_until_unlocked(hub, pub, user_client):
+    from tests.conftest import lock, unlock
+    tok = token_of(share(user_client))
+    add_guest_docs(hub, "radar", U, "jul", 2)
+    lock(U, "radar")
+    for action in ("create", "rotate", "off", "clear"):
+        assert share(user_client, action=action).status_code == 423
+        assert share(user_client, name="ny", action=action).status_code == 423
+    with hub.db() as con:
+        assert [l.token for l in public.links_of(con, U)] == [tok]
+    assert count_docs(hub, "radar") == 2
+    got = user_client.get("/api/share/radar", params={"name": "jul"})
+    assert got.status_code == 200 and got.json()["locked"] is True
+    assert user_client.get("/api/share").status_code == 200
+    assert unlock(user_client, "radar").status_code in (302, 303)
+    assert token_of(share(user_client, action="rotate")) != tok
+    assert share(user_client, action="clear").json()["guest_docs"] == 0
+
+
+def test_underscore_in_name_is_not_a_wildcard(hub, pub, user_client):
+    share(user_client, name="a_b")
+    add_guest_docs(hub, "radar", U, "a_b", 1)
+    add_guest_docs(hub, "radar", U, "aXb", 2)
+    assert user_client.get("/api/share/radar", params={"name": "a_b"}).json()["guest_docs"] == 1
+    assert share(user_client, name="a_b", action="clear").json()["guest_docs"] == 0
+    assert user_client.get("/api/share/radar", params={"name": "aXb"}).json()["guest_docs"] == 2
+    assert count_docs(hub, "radar") == 2
+
+
+def test_clear_removes_sub_collections_but_not_a_longer_name(hub, pub, user_client):
+    base = public.zone_collection(U, "guests", "jul")
+    with hub.db() as con:
+        for col in (base, f"{base}/r0/sub", f"{base}x", f"{base}-2/r0"):
+            con.execute("INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES (?,?,?,?,?,0)",
+                        ("radar", U, col, "d", "{}"))
+    assert user_client.get("/api/share/radar", params={"name": "jul"}).json()["guest_docs"] == 2
+    assert share(user_client, action="clear").json()["guest_docs"] == 0
+    assert count_docs(hub, "radar") == 2

@@ -2499,6 +2499,7 @@ async def share_set(slug: str, request: Request, user: str = Depends(api_user)):
     if not isinstance(body, dict):
         raise HTTPException(400, 'Send {"name", "action"}')
     _share_app(slug, user)
+    require_unlocked(request, user, slug)  # a link would open the public zone of a locked app without the code
     name, action = _share_name(body.get("name")), body.get("action")
     if action not in ("create", "rotate", "off", "clear"):
         raise HTTPException(400, 'action must be "create", "rotate", "off" or "clear"')
@@ -2506,7 +2507,8 @@ async def share_set(slug: str, request: Request, user: str = Depends(api_user)):
         if action in ("create", "rotate"):
             title = body.get("title")
             if not isinstance(title, str):
-                title = (public.get_link(con, slug, user, name) or public.Link("", "", "", "", "", 0)).title
+                old = public.get_link(con, slug, user, name)
+                title = old.title if old else ""
             public.make_link(con, slug, user, name, title.strip()[:100])
             if action == "rotate":
                 public.rotate(con, slug, user, name)
