@@ -230,7 +230,7 @@ Limits:
 |---|---|
 | A guest document | 4096 bytes as sent (`413` above that). JSON that is not an object, with `NaN` or `Infinity`, nested deeper than 32 levels, or with a lone surrogate in a string is refused with `400`. |
 | Guest documents per link | 500, collections below them included (`429`). |
-| Writes per hour | 30 per IP address and 200 per link (`429`). Every create or delete attempt counts, also one that is then refused (a too large body, a taken id), because the count comes before the body is checked. Counted in memory, so a restart resets them. |
+| Writes per hour | 30 per IP address and 200 per link (`429`). A create or delete counts once its path and guest secret have been checked: a malformed path, a path outside the two zones, a write to `public/...` or a missing secret does not count. After that it counts even if it is refused: a body too large or not valid, a link that is full or a taken id, and deleting a reply that is missing or someone else's. A write refused by the limit itself does not count. Counted in memory, so a restart resets them. |
 
 The per-address limit counts the client address as the reverse proxy reports it in `X-Forwarded-For`: the image runs
 `uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*`, as the login limit relies on too. A proxy
