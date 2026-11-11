@@ -466,6 +466,11 @@ def test_create_app_partly_refused_says_the_app_exists(mcp, token, hub):
     assert (hub.ARTIFACTS_DIR / "radar.html").exists()
     assert text(res).startswith(i18n.t("mcp.created_but", url="https://hub.test/a/radar/", reason="")[:30])
     assert "bad name" in text(res)
+    # the reason comes last, so the reply reads the same whether or not it ends in a period
+    reason = i18n.t("err.public_read_bad", name="bad name")
+    assert text(res) == i18n.t("mcp.created_but", url="https://hub.test/a/radar/", reason=reason)
+    for lang in ("nb", "en"):
+        assert i18n._load(lang)["mcp.created_but"].endswith(": {reason}"), lang
 
 
 def test_update_app_info_partly_refused_lists_what_went_through(mcp, token, hub):

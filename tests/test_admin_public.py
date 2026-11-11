@@ -76,6 +76,20 @@ def test_sheet_texts_reach_the_script(admin_client, make_page):
     make_page("p")
     html = admin_client.get("/admin").text
     strings = json.loads(re.search(r'id="__admin_strings">(.*?)</script>', html, re.S).group(1))
-    for key in ("confirmClashPublic", "confirmClashAgent", "confirmLinksOff", "confirmWipeGuests"):
+    for key in ("confirmClashPublic", "confirmClashAgent", "confirmLinksOffOne", "confirmLinksOffOther",
+                "confirmWipeGuests"):
         assert strings[key], key
-    assert "{n}" in strings["confirmClashPublic"] and "{n}" in strings["confirmLinksOff"]
+    assert "{n}" in strings["confirmClashPublic"] and "{n}" in strings["confirmLinksOffOther"]
+    assert "{n} aktiv lenke slutter" in strings["confirmLinksOffOne"]
+    assert "{n} aktive lenker slutter" in strings["confirmLinksOffOther"]
+    # the script picks the singular for one link
+    js = admin_client.get("/static/admin-apps.js").text
+    assert "p.links === 1 ? T.confirmLinksOffOne : T.confirmLinksOffOther" in js
+
+
+def test_links_off_text_has_a_singular_in_english(admin_client, make_page, english):
+    make_page("p")
+    html = admin_client.get("/admin").text
+    strings = json.loads(re.search(r'id="__admin_strings">(.*?)</script>', html, re.S).group(1))
+    assert strings["confirmLinksOffOne"].startswith("{n} active link stops working. It is not deleted")
+    assert strings["confirmLinksOffOther"].startswith("{n} active links stop working. They are not deleted")

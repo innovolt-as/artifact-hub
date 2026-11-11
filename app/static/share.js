@@ -50,9 +50,10 @@
     const current = () => (window.claude && window.claude.__share) || { name: "main", title: "" };
     const close = () => { if (sheet.close) sheet.close(); else sheet.removeAttribute("open"); };
     sheet.querySelector(".x").addEventListener("click", close);
-    // A tap on the dim area: the target is the dialog itself, but so is a tap in its own padding, so go by where it was
+    // A tap on the dim area: the target is the dialog itself, but so is a tap in its own padding, so go by where it was.
+    // A click from the keyboard has no position (detail 0, or both coordinates 0) and is never on the dim area
     sheet.addEventListener("click", (e) => {
-      if (e.target !== sheet) return;
+      if (e.target !== sheet || e.detail === 0 || (e.clientX === 0 && e.clientY === 0)) return;
       const r = sheet.getBoundingClientRect();
       if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) close();
     });

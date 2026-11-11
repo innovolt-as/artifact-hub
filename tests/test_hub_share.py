@@ -198,6 +198,25 @@ def test_secret_is_stored_and_reused():
     assert len(h) == 32 and all(ch in "0123456789abcdef" for ch in h)
 
 
+@pytest.mark.parametrize("stored", ["short", "A" * 32, "g" * 32, "a" * 31, "a" * 33, " " + "a" * 31, ""])
+def test_a_stored_secret_of_the_wrong_shape_is_replaced(stored):
+    res, calls = run(GUEST, f"""
+      localStorage.setItem('hub_guest', {json.dumps(stored)});
+      const share = await claude.use('share');
+      await share.db.doc('guests/a').get(); await share.db.doc('guests/b').get();
+      return [localStorage.getItem('hub_guest')];""")
+    h = calls[0]["headers"]["X-Hub-Guest"]
+    assert h != stored and len(h) == 32 and all(ch in "0123456789abcdef" for ch in h)
+    assert res == [h] and calls[1]["headers"]["X-Hub-Guest"] == h
+
+
+def test_a_stored_secret_of_the_right_shape_is_kept():
+    _, calls = run(GUEST, """
+      localStorage.setItem('hub_guest', '0123456789abcdef0123456789abcdef');
+      const share = await claude.use('share'); await share.db.doc('guests/a').get();""")
+    assert calls[0]["headers"]["X-Hub-Guest"] == "0123456789abcdef0123456789abcdef"
+
+
 def test_secret_survives_storage_failure():
     _, calls = run(GUEST, """
       const share = await claude.use('share');

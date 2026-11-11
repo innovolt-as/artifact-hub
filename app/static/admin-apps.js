@@ -376,7 +376,8 @@
   // Turning a zone on makes documents that already sit under its name visible: say how many. Turning sharing off stops
   // the links, so that asks too when there are any
   guarded($('asPublic'), 'public', (on, p) =>
-    on ? (p.clash > 0 && fmt(T.confirmClashPublic, { n: p.clash })) : (p.links > 0 && fmt(T.confirmLinksOff, { n: p.links })));
+    on ? (p.clash > 0 && fmt(T.confirmClashPublic, { n: p.clash }))
+      : (p.links > 0 && fmt(p.links === 1 ? T.confirmLinksOffOne : T.confirmLinksOffOther, { n: p.links })));
   guarded($('asAgent'), 'agent', (on, p) => on && p.clash > 0 && fmt(T.confirmClashAgent, { n: p.clash }));
   // Showing the replies to their owners again deletes them, so the server only agrees with wipe_guests
   $('asGuestsHidden').addEventListener('change', () => flip(async () => {

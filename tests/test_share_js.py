@@ -72,13 +72,15 @@ def test_only_a_tap_outside_the_sheet_closes_it():
     ctx.eval(STUBS + SHEET_STUBS + SHARE_JS)
     out = ctx.eval("""(() => {
       const click = HANDLERS["sheet:click"], seen = [];
-      for (const [x, y, target] of [[150, 60, SHEET], [101, 399, SHEET], [200, 200, NODES[".x"]],
-                                    [50, 200, NODES[".x"]], [50, 200, SHEET], [200, 450, SHEET]]) {
+      for (const [x, y, target, detail] of [[150, 60, SHEET], [101, 399, SHEET], [200, 200, NODES[".x"]],
+                                            [50, 200, NODES[".x"]], [50, 200, SHEET], [200, 450, SHEET],
+                                            [50, 200, SHEET, 0], [0, 0, SHEET, 0], [0, 0, SHEET, 1], [50, 200, SHEET, 1]]) {
         const before = CLOSED;
-        click({ clientX: x, clientY: y, target });
+        click({ clientX: x, clientY: y, target, detail });
         seen.push(CLOSED > before);
       }
       return JSON.stringify(seen);
     })()""")
-    # inside the dialog's own box (its padding) or on a child: stays open; on the dim area around it: closes
-    assert json.loads(out) == [False, False, False, False, True, True]
+    # inside the dialog's own box (its padding) or on a child: stays open; on the dim area around it: closes. A click
+    # with no pointer position (from the keyboard: detail 0, or both coordinates 0) stays open
+    assert json.loads(out) == [False, False, False, False, True, True, False, False, False, True]

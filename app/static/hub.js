@@ -327,11 +327,12 @@
 
   // ------------------------------------------------------------------ share (public sharing)
   // The guest secret proves which guest documents are theirs: random, kept in localStorage, in memory when that fails.
+  // A stored value that is not one this script made (32 lower-case hex characters) is replaced.
   let secret = null;
   function guestSecret() {
     if (secret) return secret;
     try { secret = localStorage.getItem("hub_guest"); } catch (e) { /* no storage */ }
-    if (!secret) {
+    if (!/^[0-9a-f]{32}$/.test(secret || "")) {
       secret = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
       try { localStorage.setItem("hub_guest", secret); } catch (e) { /* kept in memory */ }
     }
