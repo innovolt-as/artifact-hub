@@ -45,6 +45,7 @@ Gjester kan lese
 ›
 Skjul gjestenes svar for eieren
 Aktive lenker
+Appen ser ikke ut til å bruke deling, så de som åpner en lenke, ser mest sannsynlig en tom side. Appen må være skrevet for deling.
 Brukere kan lage en lenke som gir alle med lenken tilgang til det de har lagt i den offentlige sonen, og la gjester svare.
 Visning
 Navn og ikon
@@ -72,17 +73,23 @@ Lagre
 @aria-label: Tilbake
 ‹
 Alle kan legge til i
-Samlinger, skilt med komma
-@placeholder: queue, tips
-Brukere med tilgang kan legge til nye dokumenter i disse samlingene, men ikke endre eller slette. Huben lagrer hvem som la til hvert dokument, og alle med tilgang ser det.
+Alle som har tilgang til appen, kan legge til nye dokumenter i samlingene du velger her, men ikke endre eller slette. Huben lagrer hvem som la til hvert dokument.
+Appen har ingen samlinger med felles data ennå.
+Navn på en samling som ikke finnes ennå
+@placeholder: queue
+Legg til
+En samling finnes først når den har et dokument. Skriv navnet og trykk Legg til, så blir den valgt.
 Avbryt
 Lagre
 @aria-label: Tilbake
 ‹
 Gjester kan lese
-Samlinger, skilt med komma
-@placeholder: products, tips
-Gjester kan lese ett dokument om gangen i disse samlingene, ut fra id. En samling kan ikke stå både her og under «Alle kan legge til i».
+Gjester som har en lenke, kan lese ett dokument om gangen, ut fra id, i samlingene du velger her.
+Appen har ingen samlinger med felles data ennå.
+Navn på en samling som ikke finnes ennå
+@placeholder: products
+Legg til
+En samling finnes først når den har et dokument. Skriv navnet og trykk Legg til, så blir den valgt.
 Avbryt
 Lagre
 @aria-label: Tilbake

@@ -68,6 +68,7 @@
           <label class="set" id="asGuestsHiddenRow" hidden><span>{{ t('admin.guests_hidden') }}</span><input type="checkbox" role="switch" id="asGuestsHidden"><span class="sw" aria-hidden="true"></span></label>
           <div class="set static" id="asLinks" hidden><span>{{ t('admin.links_active') }}</span><em id="asLinksCount"></em></div>
         </div>
+        <p class="as-hint warn" id="asUnready" hidden>{{ t('admin.public_unready_hint') }}</p>
         <p class="as-hint">{{ t('admin.public_hint') }}</p>
       </div>
     </div>
@@ -115,8 +116,15 @@
       <h1 tabindex="-1">{{ t("admin.append") }}</h1>
     </header>
     <form id="appendForm" method="dialog">
-      <label>{{ t("admin.append_label") }}<input name="names" id="apNames" maxlength="800" placeholder="queue, tips" autocapitalize="none" autocomplete="off" spellcheck="false"></label>
       <p class="small muted">{{ t("admin.append_hint") }}</p>
+      <p class="small muted" id="apNone" hidden>{{ t("admin.collections_none") }}</p>
+      <div class="chips" id="apChips"></div>
+      <label for="apNames">{{ t("admin.append_label") }}</label>
+      <div class="link-form">
+        <input name="names" id="apNames" maxlength="64" placeholder="queue" autocapitalize="none" autocomplete="off" spellcheck="false">
+        <button type="button" class="small" id="apAdd">{{ t("admin.add") }}</button>
+      </div>
+      <p class="small muted">{{ t("admin.collection_new_hint") }}</p>
       <p id="apError" class="err small" role="alert"></p>
       <div class="editor-actions">
         <button type="button" class="small view-cancel">{{ t("admin.cancel") }}</button>
@@ -131,8 +139,15 @@
       <h1 tabindex="-1">{{ t("admin.public_read") }}</h1>
     </header>
     <form id="publicReadForm" method="dialog">
-      <label>{{ t("admin.public_read_label") }}<input name="names" id="prNames" maxlength="800" placeholder="products, tips" autocapitalize="none" autocomplete="off" spellcheck="false"></label>
       <p class="small muted">{{ t("admin.public_read_hint") }}</p>
+      <p class="small muted" id="prNone" hidden>{{ t("admin.collections_none") }}</p>
+      <div class="chips" id="prChips"></div>
+      <label for="prNames">{{ t("admin.public_read_label") }}</label>
+      <div class="link-form">
+        <input name="names" id="prNames" maxlength="64" placeholder="products" autocapitalize="none" autocomplete="off" spellcheck="false">
+        <button type="button" class="small" id="prAdd">{{ t("admin.add") }}</button>
+      </div>
+      <p class="small muted">{{ t("admin.collection_new_hint") }}</p>
       <p id="prError" class="err small" role="alert"></p>
       <div class="editor-actions">
         <button type="button" class="small view-cancel">{{ t("admin.cancel") }}</button>
@@ -186,5 +201,6 @@
 <script type="application/json" id="known">{{ known|tojson }}</script>
 
 {% include "_admin_js.html" %}
+<script src="{{ static_url('admin-chips.js') }}"></script>
 <script src="{{ static_url('admin-apps.js') }}"></script>
 {% endblock %}

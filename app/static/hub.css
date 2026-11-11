@@ -387,6 +387,16 @@ dialog { overscroll-behavior: contain; }
 .as-heading { margin: 18px 2px 0; color: var(--muted); font-size: 12.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
 .as-heading + .as-group { margin-top: 6px; }
 .set.static { cursor: default; }
+/* the choice of collection names in the sheet: toggle chips, 44 px to tap, the chosen ones filled and ticked */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.chips:empty { display: none; }
+.chip { display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center; box-sizing: border-box; max-width: 100%; min-height: 44px; padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--fg); font: inherit; font-size: 14px; line-height: 1.25; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.chip[aria-pressed="true"] span::before { content: "✓ "; }
+.chip:disabled { opacity: .6; cursor: default; }
+.chip small { color: var(--muted); font-size: 12px; }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.warn { color: var(--danger); }
 .as-hint { margin: 6px 2px 0; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
 #asError { margin: 0; min-height: 0; }
 #asError:not(:empty) { margin-top: 10px; }

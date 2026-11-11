@@ -121,6 +121,7 @@ _SHARE_STYLE = """<style>
 .sheet p{margin:8px 0;overflow-wrap:anywhere}
 .sheet .muted{color:var(--muted);font-size:13.5px}
 .sheet .err{color:var(--danger);font-size:13.5px}
+.sheet .warn{color:var(--danger);font-size:13.5px}
 .sheet input{display:block;box-sizing:border-box;width:100%;min-height:44px;margin:10px 0;padding:8px 12px;border:1px solid var(--line);
   border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:16px}
 .sheet .acts{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}

@@ -9,7 +9,7 @@
   try { T = JSON.parse((me && me.dataset.strings) || "{}"); } catch { /* texts stay empty */ }
   const fmt = (s, vars) => String(s || "").replace(/\{(\w+)\}/g, (_, k) => vars[k]);
 
-  // The state ({link, guest_docs, locked}) of one share name, or after an action {ok: false, locked?} with no state.
+  // The state ({link, guest_docs, locked, ready}) of one share name, or after an action {ok: false, locked?} with no state.
   // A 423 means the app is locked and not unlocked on this device.
   async function request(slug, name, body) {
     const url = `/api/share/${encodeURIComponent(slug)}`;
@@ -63,6 +63,7 @@
       const { title } = current();
       const parts = [el("p", { textContent: T.explain })];
       if (title) parts.push(el("p", { className: "muted", textContent: fmt(T.for, { title }) }));
+      if (state.ready === false) parts.push(el("p", { className: "warn", textContent: T.not_ready }));  // no use("share") in the app
       if (!state.link) {
         parts.push(action(T.create, "pri", () => run({ action: "create", title })));
       } else {

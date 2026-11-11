@@ -84,6 +84,7 @@
       return;
     }
     row.querySelector(".surl").value = r.state.link.url;
+    row.querySelector(".swarn").hidden = r.state.ready !== false;
     showCount(row, r.state.guest_docs);
   }
 
