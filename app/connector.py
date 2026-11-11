@@ -19,6 +19,7 @@ from pydantic import AnyHttpUrl, BaseModel, Field
 
 from app import i18n
 from app import main as hub
+from app import public
 from app.oauth import HubOAuthProvider
 
 INSTRUCTIONS = f"""\
@@ -48,17 +49,26 @@ everyone with access sees them, so check them for personal content first.
 In a shared app, update_app_info(append_collections=[...]) names collections everyone with access may add new
 documents to (not change or delete); the hub stamps each with _added_by and _added_at. list_apps and get_app show them as "append".
 An app can be marked to work offline (update_app_info offline=true); only do that for apps that keep their own data on the device and send it later.
+Public sharing (update_app_info public_sharing=true, needs shared data) lets a user hand out a link that works without
+logging in: a visitor reads data/users/<e-mail>/public/<name>/... and reads, adds and deletes their own documents in
+data/users/<e-mail>/guests/<name>/..., and an app asks for a link with window.claude.use("share") and scope(name, title).
+Never put anything sensitive under public/, since anyone with the link reads it. public_read=[collections] also opens
+whole shared collections to guests, guests_hidden=true hides the guests' replies from their owner (so they cannot be read
+here, and guests_hidden cannot be turned off here once replies exist), and agent_zone=true lets a scheduled agent serve
+every user through data/users/<e-mail>/agent/... (an admin reads and writes those paths, and list_app_data shows them).
+list_apps and get_app show these settings as public, public_read, guests_hidden and agent.
 A user can lock an app behind a code on the hub; the lock covers the hub's own storage, not the browser's, so keep
 anything sensitive in window.claude.use("db"), never in localStorage.
 
 The hub's front page can show one line from each app on its card. Give the app a card recipe: a
-<script data-hub-card> block with a function hubCard({{ db, today, now, timeZone }}) that returns the line as a
+<script data-hub-card> block with a function hubCard({{ db, today, now, timeZone, user }}) that returns the line as a
 string (or null for none), e.g.
 <script data-hub-card>async function hubCard({{ db, today }}) {{ const d = await db.doc(`days/${{today}}`).get(); return d.exists ? d.data().kcal + " kcal" : null; }}</script>
 The recipe is read-only (db.doc(path).get(), and db.collection(path).get() with .where(...), .orderBy(...) and
 .limit(...); a collection read sees at most the 500 documents with the highest ids), has no network and no DOM, gets
 only plain functions, and has 0.25 s. today is the viewer's date as YYYY-MM-DD, now is milliseconds and timeZone the
-viewer's zone. Every read of a path the hub has not handed the recipe yet ends a round: the hub reads what that round
+viewer's zone, and user the viewer's e-mail in lower case (to read the viewer's own branch,
+data/users/<user>/..., in a shared-data app). Every read of a path the hub has not handed the recipe yet ends a round: the hub reads what that round
 asked for and runs the recipe again. There are at most {hub.cards.MAX_ROUNDS} rounds and {hub.cards.MAX_READS} paths
 per round, so read in parallel (Promise.all) or read a whole collection with where/orderBy/limit, not one document at
 a time in a loop with await (such a loop over seven days fails with too_many_reads). The server runs the recipe
@@ -88,6 +98,19 @@ def _user() -> str:
     if not hub.is_admin(email):
         raise hub.HubError(i18n.t("mcp.admin_only"))
     return email
+
+
+def _state(on: bool) -> str:
+    return i18n.t("mcp.state_on" if on else "mcp.state_off")
+
+
+def _set_public(slug: str, public_sharing: bool | None, public_read: list[str] | None,
+                guests_hidden: bool | None, agent_zone: bool | None) -> dict | None:
+    """Apply the public sharing settings that were given; None when none were. Shared data must already be on."""
+    if public_sharing is None and public_read is None and guests_hidden is None and agent_zone is None:
+        return None
+    return hub.set_public(slug, public=public_sharing, public_read=public_read, guests_hidden=guests_hidden,
+                          agent=agent_zone, via_connector=True)
 
 
 def _url(slug: str) -> str:
@@ -135,6 +158,10 @@ def build_mcp() -> MCPServer:
                 "access": a["access_text"],
                 "data": a["data"],
                 "append": a["append"],
+                "public": a["public"],
+                "public_read": a["public_read"],
+                "guests_hidden": a["guests_hidden"],
+                "agent": a["agent"],
                 "editable": a["kind"] in ("page", "app"),
                 "updated": datetime.fromtimestamp(a["updated"], timezone.utc).isoformat(timespec="seconds"),
             }
@@ -169,6 +196,8 @@ def build_mcp() -> MCPServer:
         return json.dumps({"slug": slug, "title": info.get("title", ""), "description": info.get("description", ""),
                            "emoji": info.get("emoji", ""), "kind": info.get("kind", ""),
                            "data": info.get("data", "personal"), "append": info.get("append", []),
+                           "public": info.get("public", False), "public_read": info.get("public_read", []),
+                           "guests_hidden": info.get("guests_hidden", False), "agent": info.get("agent", False),
                            "html": html, "card": card},
                           ensure_ascii=False)
 
@@ -184,12 +213,16 @@ def build_mcp() -> MCPServer:
         "If Claude or a scheduled agent will write the app's content, first ask the user whether it is the same for "
         "everyone who can open the app (shared_data=true) or personal to each user (the default). "
         "offline=true marks an app that keeps its own data on the device, so the hub stores its page on the phone. "
+        "public_sharing, public_read, guests_hidden and agent_zone set the public sharing settings and need "
+        "shared_data=true (see update_app_info). "
         "slug: lowercase letters, digits, '.', '-', '_'. emoji: one emoji used as the gallery icon.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
         structured_output=False,
     )
     def create_app(slug: str, html: str, title: str, description: str | None = None, emoji: str | None = None,
-                   private: bool = True, shared_data: bool | None = None, offline: bool = False) -> str:
+                   private: bool = True, shared_data: bool | None = None, offline: bool = False,
+                   public_sharing: bool | None = None, public_read: list[str] | None = None,
+                   guests_hidden: bool | None = None, agent_zone: bool | None = None) -> str:
         try:
             _user()
             hub.save_page(slug, html, create=True, title=title, description=description, emoji=emoji,
@@ -198,6 +231,7 @@ def build_mcp() -> MCPServer:
                 hub.set_data_mode(slug, True)
             if offline:
                 hub.set_offline(slug, True)
+            _set_public(slug, public_sharing, public_read, guests_hidden, agent_zone)
         except hub.HubError as e:
             return _error(str(e))
         return i18n.t("mcp.created_private" if private else "mcp.created", url=_url(slug))
@@ -262,6 +296,12 @@ def build_mcp() -> MCPServer:
         "false takes the mark off. "
         "append_collections=[names] lets everyone who can see a shared-data app add new documents to those top-level "
         "collections, but not change or delete them (the hub stamps _added_by and _added_at); [] turns it off. "
+        "public_sharing=true lets users make links that work without logging in (needs shared data; guests read "
+        "data/users/<e-mail>/public/<name>/ and write only their own documents in data/users/<e-mail>/guests/<name>/); "
+        "public_read=[names] also opens those shared collections to guests (a collection cannot be in both "
+        "public_read and append_collections); guests_hidden=true hides the guests' replies from their owner, and "
+        "false is refused here while replies exist; agent_zone=true lets an admin and a scheduled agent read and "
+        "write data/users/<any e-mail>/agent/. Only change these when the user asks. "
         "Use list_apps to find the slug.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
         structured_output=False,
@@ -269,7 +309,9 @@ def build_mcp() -> MCPServer:
     def update_app_info(slug: str, title: str | None = None, description: str | None = None,
                         emoji: str | None = None, private: bool | None = None, shared_data: bool | None = None,
                         copy_my_data: bool = False, offline: bool | None = None,
-                        append_collections: list[str] | None = None) -> str:
+                        append_collections: list[str] | None = None, public_sharing: bool | None = None,
+                        public_read: list[str] | None = None, guests_hidden: bool | None = None,
+                        agent_zone: bool | None = None) -> str:
         try:
             user = _user()
             hub.set_info(slug, title=title, description=description, emoji=emoji, private=private)
@@ -290,6 +332,11 @@ def build_mcp() -> MCPServer:
                 info = next((a for a in hub.list_artifacts(user) if a["slug"] == slug), {})
                 if names and info.get("data") != "shared":
                     said.append(i18n.t("mcp.append_needs_shared"))
+            settings = _set_public(slug, public_sharing, public_read, guests_hidden, agent_zone)
+            if settings:
+                said.append(i18n.t("mcp.public_set", public=_state(settings["public"]),
+                                   read=", ".join(settings["public_read"]) or "-",
+                                   hidden=_state(settings["guests_hidden"]), agent=_state(settings["agent"])))
             if private is False and slug in hub.claude_warned(hub.list_artifacts(user)):
                 said.append(i18n.t("mcp.claude_warning"))
         except hub.HubError as e:
@@ -353,6 +400,8 @@ def build_mcp() -> MCPServer:
         name="delete_app_data",
         title="Delete app data",
         description="Delete one document from the user's data in an app (path like 'days/2026-10-22'). "
+        "In the user's own guests/ zone the reply says only that the request was handled, never whether a "
+        "document existed. "
         "Only when the user explicitly asks to delete it.",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True),
         structured_output=False,
@@ -362,6 +411,9 @@ def build_mcp() -> MCPServer:
             gone = hub.doc_delete(slug, _user(), path)
         except hub.HubError as e:
             return _error(str(e))
+        zone = public.zone_of(path)
+        if zone and zone.zone == "guests" and zone.email == _user().lower():
+            return i18n.t("mcp.guest_zone_deleted", path=path)  # it may be a hidden reply: do not confirm either way
         return i18n.t("mcp.deleted", path=path) if gone else i18n.t("mcp.not_deleted", path=path)
 
     return mcp
