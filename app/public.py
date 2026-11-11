@@ -144,6 +144,10 @@ def rename(con: sqlite3.Connection, old: str, new: str) -> None:
     con.execute("UPDATE OR REPLACE public_links SET slug=? WHERE slug=?", (new, old))
 
 
+def delete_slug(con: sqlite3.Connection, slug: str) -> None:
+    con.execute("DELETE FROM public_links WHERE slug=?", (slug,))
+
+
 def delete_owner(con: sqlite3.Connection, owner: str) -> None:
     con.execute("DELETE FROM public_links WHERE owner=?", (owner.lower(),))
 

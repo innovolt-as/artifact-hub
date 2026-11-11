@@ -32,6 +32,7 @@
 - The settings of an app on the admin page are in four groups: *Who can open*, *Data*, *Public sharing* and *Display*.
 - *Delete my data* also removes the user's secret links, their public and guest zones and the guest replies on their lists.
   Removing a person from the hub removes their links.
+- Deleting an app also deletes its secret links and its guest replies. The rest of its data stays, as before.
 
 ## v1.8.0 (2026-11-04)
 

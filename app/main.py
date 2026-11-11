@@ -2244,6 +2244,10 @@ def api_delete(request: Request, slug: str = Form(...)):
     if not removed:
         raise HTTPException(404)
     _remove_icon(slug)
+    with db() as con:  # links and guest replies go with the app; the rest of its data stays for a re-upload
+        public.delete_slug(con, slug)
+        for owner, col, _ in _guest_collections(con, slug):
+            con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=?", (slug, owner, col))
     return JSONResponse({"ok": True})
 
 

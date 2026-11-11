@@ -211,3 +211,40 @@ def test_clear_removes_sub_collections_but_not_a_longer_name(hub, pub, user_clie
     assert user_client.get("/api/share/radar", params={"name": "jul"}).json()["guest_docs"] == 2
     assert share(user_client, action="clear").json()["guest_docs"] == 0
     assert count_docs(hub, "radar") == 2
+
+
+# ---------------------------------------------------------------- final review: deleting an app
+def test_delete_app_removes_its_links_and_guest_replies(hub, make_page, pub, client, user_client, admin_client):
+    from tests.test_guest_api import gget, gput
+    from tests.test_shared_data import ids
+
+    make_shared(hub, make_page, "radar2")  # another app, whose slug starts with this one's
+    hub.set_public("radar2", public=True)
+    tok, other = token_of(share(user_client)), token_of(share(user_client, slug="radar2"))
+    assert gput(client, tok, "guests/abc", {"t": "secret"}).status_code == 200
+    assert gput(client, tok, "guests/abc/notes/n1", {"t": "more"}).status_code == 200
+    assert gput(client, other, "guests/abc", {"t": "stays"}).status_code == 200
+    add_guest_docs(hub, "radar", "venn@test.no", "x")  # another owner's replies go too
+    branch = f"data/users/{U}"
+    keep = [f"{branch}/public/jul/abc", f"{branch}/agent/a/b", f"{branch}/wishes/w1", f"{branch}/guests/main",
+            f"{branch}/guestbook/g1"]
+    for path in keep:
+        with hub.db() as con:
+            col, doc_id = path.rsplit("/", 1)
+            con.execute("INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES (?,?,?,?,'{}',0)",
+                        ("radar", U, col, doc_id))
+    assert admin_client.post("/api/delete", data={"slug": "radar"}).status_code == 200
+    # uploaded again at the same address, with everything switched on again
+    make_shared(hub, make_page, "radar")
+    hub.set_public("radar", public=True, agent=True)
+    assert client.get(f"/p/{tok}/").status_code == 404
+    assert gget(client, tok, "guests/abc").status_code == 404
+    assert gget(client, tok, "public/abc").status_code == 404
+    assert ids(user_client, "radar", f"{branch}/guests/jul") == []
+    with hub.db() as con:
+        assert public.count_links(con, "radar") == 0
+        left = con.execute("SELECT collection || '/' || doc_id FROM docs WHERE slug='radar' ORDER BY 1").fetchall()
+    assert sorted(r[0] for r in left) == sorted(keep)
+    # the other app keeps its link and its reply
+    assert gget(client, other, "guests/abc").json()["data"]["t"] == "stays"
+    assert hub.resolve_link(other) is not None
