@@ -33,14 +33,15 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote, unquote
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from jinja2 import pass_context
 
-from app import access, applock, banner, cards, home, i18n, loginmail, mail, passwd, shared, versions
+from app import access, applock, banner, cards, home, i18n, loginmail, mail, passwd, public, shared, versions
+from app.public import NAME_RE as PUBLIC_NAME_RE
 
 log = logging.getLogger("hub")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -106,7 +107,8 @@ ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin pag
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
 MAX_ICON_BYTES = 2 * 1024 * 1024
-META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline", "append")  # what survives a re-upload
+META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline", "append",
+             "public", "public_read", "guests_hidden", "agent")  # what survives a re-upload
 
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -248,6 +250,8 @@ with db() as con:
     access.create_tables(con)
     # When the connector last wrote data in an app, per user, for the admin warning (app/shared.py)
     shared.create_tables(con)
+    # Secret links for public sharing (app/public.py)
+    public.create_tables(con)
     # Password hashes for LOGIN_MODE=password (app/passwd.py)
     passwd.ensure_table(con)
     # App code lock: codes, locked apps and the attempt limit (app/applock.py)
@@ -567,6 +571,10 @@ def list_artifacts(user: str) -> list[dict]:
                 "data": "shared" if shared.is_shared(meta) else "personal",  # app/shared.py
                 "offline": kind != "link" and meta.get("offline") is True,  # the page is kept on the phone
                 "append": _append_names(meta),  # collections everyone with access may add to
+                "public": public.is_public(meta),  # app/public.py
+                "public_read": public.public_read(meta),
+                "guests_hidden": public.guests_hidden(meta),
+                "agent": public.has_agent(meta),
                 "updated": mtime,
                 "emoji": meta.get("emoji", ""),
                 "icon_url": f"/icon/{slug}?v={int(icon.stat().st_mtime)}" if icon else None,
@@ -737,7 +745,8 @@ def settings_page(request: Request, user: str = Depends(require_user)):
                 for a in list_artifacts(user) if a["kind"] != "link"]
     return templates.TemplateResponse(request, "settings.html", {
         "site": SITE_NAME, "user": user, "admin": is_admin(user), "chosen": chosen,
-        "has_code": has_code, "lockable": lockable})
+        "has_code": has_code, "lockable": lockable, "share_links": share_list(user)["links"],
+        "share_strings": json.dumps(i18n.js("js.share."))})
 
 
 @app.post("/password", response_class=HTMLResponse)
@@ -857,7 +866,7 @@ def card_result(user: str, slug: str, tz: str | None, now: float | None = None) 
             return doc_get(slug, user, path)
         return [{"id": i, "data": d} for i, d in doc_list(slug, user, path).items()]
 
-    return cards.run_recipe(source, read, today=day, now_ms=int(now * 1000), tz=zone)
+    return cards.run_recipe(source, read, today=day, now_ms=int(now * 1000), tz=zone, user=user.lower())
 
 
 def card_lines(con: sqlite3.Connection, user: str, apps: list[dict], tz: str | None, now: float | None = None) -> dict[str, str]:
@@ -914,6 +923,39 @@ def service_worker():
                         headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 
 
+@app.get("/p/{token}")
+def public_redirect(token: str):
+    return RedirectResponse(f"/p/{token}/", status_code=301)
+
+
+@app.get("/p/{token}/_icon")
+def public_icon(token: str):
+    found = resolve_link(token)
+    icon = _icon_file(found[0].slug) if found else None
+    if not icon:
+        raise HTTPException(404)
+    return _icon_response(icon, PUBLIC_HEADERS)
+
+
+@app.get("/p/{token}/{path:path}")
+def serve_public(token: str, path: str, request: Request):
+    """An app's page for anyone with the secret link. No login, no visit logged, and the owner's code lock is not
+    asked: the owner chose to make this public. The owner herself is sent on to the app."""
+    found = resolve_link(token)
+    if not found:
+        raise HTTPException(404)
+    link = found[0]
+    if (current_user(request) or "").lower() == link.owner.lower():
+        return RedirectResponse(f"/a/{link.slug}/", status_code=302)
+    root = artifact_root(link.slug)
+    if not root:
+        raise HTTPException(404)
+    target = _app_file(root[0], path)
+    if target.suffix.lower() in (".html", ".htm"):
+        return _html_with_shim(target, link.slug, None, with_banner=_opened(request), guest=link)
+    return FileResponse(target, headers={"Cache-Control": "no-store", **PUBLIC_HEADERS})
+
+
 @app.get("/a/{slug}")
 def artifact_redirect(slug: str):
     return RedirectResponse(f"/a/{slug}/", status_code=301)
@@ -944,10 +986,20 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     # only a page the browser opens gets the banner, not HTML an app fetches or shows in an iframe
     with_banner = precache or _opened(request)
     offline = meta.get("offline") is True and not protected
+    target = _app_file(root, path)
+    if target.suffix.lower() in (".html", ".htm"):
+        return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected, offline=offline, copy=precache)
+    # a locked app's files must not outlive the unlock in the browser's cache
+    return FileResponse(target, headers={"Cache-Control": "no-store"} if protected else None)
+
+
+def _app_file(root: Path, path: str) -> Path:
+    """The file of an app that `path` names: the page of a single-page app, a file inside a folder app. 404 for
+    anything else (another page, a path out of the folder, the app's meta.json)."""
     if root.is_file():
         if path not in ("", "index.html"):
             raise HTTPException(404)
-        return _html_with_shim(root, slug, user, with_banner=with_banner, locked=protected, offline=offline, copy=precache)
+        return root
     target = (root / (path or "index.html")).resolve()
     if root.resolve() not in target.parents and target != root.resolve():
         raise HTTPException(404)
@@ -955,10 +1007,7 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
         target = target / "index.html"
     if not target.is_file() or target.name == "meta.json":
         raise HTTPException(404)
-    if target.suffix.lower() in (".html", ".htm"):
-        return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected, offline=offline, copy=precache)
-    # a locked app's files must not outlive the unlock in the browser's cache
-    return FileResponse(target, headers={"Cache-Control": "no-store"} if protected else None)
+    return target
 
 
 def _opened(request: Request) -> bool:
@@ -969,6 +1018,9 @@ def _opened(request: Request) -> bool:
         dest = request.headers.get(DEST_HEADER, dest)
     return dest == "document"
 
+
+# What every answer on a public link carries: no search engine, no referrer to the sites guests click on, no cache
+PUBLIC_HEADERS = {"X-Robots-Tag": "noindex, nofollow", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"}
 
 # Apps are used on phones and must never scroll sideways. iOS zooms in on inputs under 16px and
 # stays zoomed (which reads as sideways scroll), and a stray wide element widens the whole page.
@@ -1002,24 +1054,42 @@ def open_link(slug: str, user: str = Depends(require_user)):
     return RedirectResponse(link["url"], status_code=302)
 
 
-def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool, locked: bool = False, offline: bool = False,
-                    copy: bool = False) -> HTMLResponse:
+def _html_with_shim(path: Path, slug: str, user: str | None, *, with_banner: bool, locked: bool = False,
+                    offline: bool = False, copy: bool = False, guest: public.Link | None = None) -> HTMLResponse:
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
     and the hub banner right after <body> unless the app has it turned off. `locked` marks an app the viewer has
     locked, so hub.js keeps its unlock alive. `offline` marks an app the service worker keeps a copy of, and `copy`
-    the page it fetches to keep (the copy opens without the server)."""
+    the page it fetches to keep (the copy opens without the server). `guest` is the link of a public page: no user,
+    no pull.js, no lock or offline, and a banner with no way out (the owner's e-mail never gets in)."""
     html = path.read_text("utf-8", errors="replace")
     strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
     found = artifact_root(slug)
     data_shared = bool(found) and shared.is_shared(found[1])
     append = _append_names(found[1]) if found else []
+    if guest:
+        tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + (
+            '<script src="/static/hub.js" data-slug="{}" data-guest="1" data-token="{}" data-share-name="{}" '
+            'data-public-read="{}" data-strings="{}"></script>'
+        ).format(escape(slug), escape(guest.token), escape(guest.name),
+                 escape(",".join(public.public_read(found[1] if found else {}))), strings)
+        app = next((a for a in list_artifacts(guest.owner) if a["slug"] == slug), None) if with_banner else None
+        if app and app["icon_url"]:
+            app["icon_url"] = f"/p/{guest.token}/_icon?v={app['icon_url'].rsplit('=', 1)[-1]}"
+        html = banner.inject(html, tag, banner.render(app, SITE_NAME, guest=True) if app and app["banner"] else None)
+        return HTMLResponse(html, headers={"Cache-Control": "no-store", **PUBLIC_HEADERS})
     tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"{}></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings,
         (' data-lock="1"' if locked else "") + (' data-offline="1"' if offline else "") + (' data-copy="1"' if copy else "")
         + (' data-append="{}"'.format(escape(",".join(append))) if append else "")
+        + (' data-public="1" data-public-read="{}"'.format(escape(",".join(public.public_read(found[1]))))
+           if found and public.is_public(found[1]) else "")
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
-    html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
+    share_button = bool(app and app["public"] and app["banner"])
+    if share_button:  # the sheet's behaviour; the button and the empty sheet come with the banner
+        tag += '<script src="/static/share.js" defer data-slug="{}" data-strings="{}"></script>'.format(
+            escape(slug), escape(json.dumps(i18n.js("js.share.")), quote=True))
+    html = banner.inject(html, tag, banner.render(app, SITE_NAME, share=share_button) if app and app["banner"] else None)
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
@@ -1130,7 +1200,7 @@ def store_user(slug: str, request: Request, user: str = Depends(require_user)) -
 @app.get("/api/store/{slug}/c")
 def store_list(slug: str, path: str, user: str = Depends(store_user)):
     collection, _ = _split_path(path, want_doc=False)
-    owner, collection, _ = _store_scope(slug, user, collection)
+    owner, collection, _, guest_zone = _store_scope(slug, user, collection)
     if owner is None:
         return {"docs": []}
     with db() as con:
@@ -1138,13 +1208,13 @@ def store_list(slug: str, path: str, user: str = Depends(store_user)):
             "SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
             (slug, owner, collection),
         ).fetchall()
-    return {"docs": [{"id": r["doc_id"], "data": json.loads(r["data"])} for r in rows]}
+    return {"docs": [{"id": r["doc_id"], "data": read_doc(r["data"], guest_zone)} for r in rows]}
 
 
 @app.get("/api/store/{slug}/d")
 def store_get(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
-    owner, collection, _ = _store_scope(slug, user, collection)
+    owner, collection, _, guest_zone = _store_scope(slug, user, collection)
     if owner is None:
         return {"data": None}
     with db() as con:
@@ -1152,19 +1222,22 @@ def store_get(slug: str, path: str, user: str = Depends(store_user)):
             "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
             (slug, owner, collection, doc_id),
         ).fetchone()
-    return {"data": json.loads(row["data"]) if row else None}
+    return {"data": read_doc(row["data"], guest_zone) if row else None}
 
 
 @app.put("/api/store/{slug}/d")
 async def store_set(slug: str, path: str, request: Request, merge: bool = False, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
-    owner, collection, append = _store_scope(slug, user, collection, write=True)
+    owner, collection, append, guest_zone = _store_scope(slug, user, collection, write=True)
+    if guest_zone:
+        raise HTTPException(403, i18n.t("data.guests_only"))
     body = await request.body()
     if len(body) > MAX_DOC_BYTES:  # before parsing it; _put_doc checks the document as stored
         raise HTTPException(413, i18n.t("store.too_big"))
     try:
         data = json.loads(body)
-    except json.JSONDecodeError:
+        check_json(data)
+    except ValueError:
         raise HTTPException(400, i18n.t("store.bad_json")) from None
     if not isinstance(data, dict):
         raise HTTPException(400, i18n.t("store.not_object"))
@@ -1191,7 +1264,7 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
 @app.delete("/api/store/{slug}/d")
 def store_delete(slug: str, path: str, user: str = Depends(store_user)):
     collection, doc_id = _split_path(path, want_doc=True)
-    owner, collection, append = _store_scope(slug, user, collection, write=True)
+    owner, collection, append, _ = _store_scope(slug, user, collection, write=True)
     if append == ADD_ONLY:
         raise HTTPException(403, i18n.t("data.add_only"))
     with db() as con:
@@ -1211,7 +1284,7 @@ def store_dump(slug: str, user: str = Depends(store_user)):
         raise HTTPException(404) from None
     out: dict[str, dict] = {}
     for r in rows:
-        out.setdefault(r["collection"], {})[r["doc_id"]] = json.loads(r["data"])
+        out.setdefault(r["collection"], {})[r["doc_id"]] = r["data"]
     return out
 
 
@@ -1236,24 +1309,35 @@ class Scope(NamedTuple):
     owner: str | None
     collection: str
     append: str | None  # None, STAMP (an admin writes, stamped) or ADD_ONLY (anyone else: create only, stamped)
+    guest_zone: bool  # the user's own guest zone (app/public.py): only guests create there; the owner may delete
 
 
 def doc_scope(slug: str, user: str, collection: str, *, write: bool = False) -> Scope:
     """Scope of one collection of an app (app/shared.py). Personal apps: the user.
     Shared apps: SHARED, the user's own branch, or None for someone else's branch, where reads find nothing.
     A write to shared data by a non-admin, or to someone else's branch, raises ReadOnly, except in a collection
-    everyone may add to (shared.appendable): there the write is let through as ADD_ONLY. The whole decision
-    comes from this one read of the meta; the write paths act on Scope.append and never read it again."""
+    everyone may add to (shared.appendable): there the write is let through as ADD_ONLY. The zones of
+    app/public.py: with "agent" an admin reads and writes everyone's agent zone; with "public" or "guests_hidden"
+    the user's own guest zone has guest_zone set (public.in_guest_zone), and with "guests_hidden" its reads find
+    nothing. The whole decision
+    comes from this one read of the meta; the write paths act on Scope.append and Scope.guest_zone and never
+    read it again."""
     meta = _data_meta(slug, user)
     if not shared.is_shared(meta):
-        return Scope(user.lower(), collection, None)
+        return Scope(user.lower(), collection, None, False)
     owner = shared.branch_owner(collection, user)
+    zone = public.zone_of(collection)
+    if owner is None and zone and zone.zone == "agent" and public.has_agent(meta) and is_admin(user):
+        owner = zone.email
+    guest_zone = owner is not None and public.in_guest_zone(meta, collection)
+    if guest_zone and not write and public.guests_hidden(meta):
+        owner = None
     append = (STAMP if is_admin(user) else ADD_ONLY) if shared.appendable(meta, collection) else None
     if write and owner is None:
         raise ReadOnly(i18n.t("data.not_yours"))
     if write and owner == shared.SHARED and not is_admin(user) and append is None:
         raise ReadOnly(i18n.t("data.read_only"))
-    return Scope(owner, shared.normalize(collection), append)
+    return Scope(owner, shared.normalize(collection), append, guest_zone)
 
 
 def _append_rules(append: str | None, user: str, data: dict, old: dict | None, *, merge: bool) -> dict:
@@ -1290,20 +1374,44 @@ def _put_doc(con: sqlite3.Connection, slug: str, owner: str, collection: str, do
     )
 
 
-def visible_docs(con: sqlite3.Connection, slug: str, user: str) -> list[sqlite3.Row]:
-    """collection, doc_id and data of every document the user can read in an app, by collection and id."""
+def check_json(value) -> None:
+    """ValueError for a parsed JSON value that cannot be sent back as JSON: NaN or infinity (json.loads takes them)
+    or a lone surrogate in a string. Stored, it would break every later read of the document."""
+    json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")  # UnicodeEncodeError for a surrogate
+
+
+def read_doc(raw: str, guest_zone: bool) -> dict:
+    """A stored document as a logged-in reader gets it: in a guest zone (Scope.guest_zone) without the _guest hash.
+    Every read of documents for a logged-in user goes through here."""
+    data = json.loads(raw)
+    return public.owner_view(data) if guest_zone else data
+
+
+def visible_docs(con: sqlite3.Connection, slug: str, user: str) -> list[dict]:
+    """{"collection", "doc_id", "data"} of every document the user can read in an app, by collection and id, data
+    as read_doc gives it: what doc_scope lets them read, so with "agent" an admin also gets every agent zone, and
+    a hidden guest zone never."""
     meta = _data_meta(slug, user)
     user = user.lower()
     if not shared.is_shared(meta):
-        return con.execute("SELECT collection, doc_id, data FROM docs WHERE slug=? AND owner=? ORDER BY collection, doc_id",
+        rows = con.execute("SELECT collection, doc_id, data FROM docs WHERE slug=? AND owner=? ORDER BY collection, doc_id",
                            (slug, user)).fetchall()
+        return [{"collection": r["collection"], "doc_id": r["doc_id"], "data": json.loads(r["data"])} for r in rows]
     own = shared.own_prefix(user)  # compared with substr, not LIKE: an e-mail may hold _ or %
-    return con.execute(
+    agents = public.has_agent(meta) and is_admin(user)  # and every branch's agent zone, data/users/<owner>/agent/...
+    rows = con.execute(
         """SELECT collection, doc_id, data FROM docs
-             WHERE slug=? AND (owner=? OR (owner=? AND (collection=? OR substr(collection, 1, ?)=?)))
+             WHERE slug=? AND (owner=? OR (owner=? AND (collection=? OR substr(collection, 1, ?)=?))
+               OR (? AND owner!=? AND substr(collection, 1, length(owner) + 18)='data/users/' || owner || '/agent/'))
              ORDER BY collection, doc_id""",
-        (slug, shared.SHARED, user, own, len(own) + 1, own + "/"),
+        (slug, shared.SHARED, user, own, len(own) + 1, own + "/", agents, shared.SHARED),
     ).fetchall()
+    hidden, out = public.guests_hidden(meta), []
+    for r in rows:
+        guest = public.in_guest_zone(meta, r["collection"])
+        if not (guest and hidden):
+            out.append({"collection": r["collection"], "doc_id": r["doc_id"], "data": read_doc(r["data"], guest)})
+    return out
 
 
 def _data_path(path: str, want_doc: bool) -> tuple[str, str]:
@@ -1326,32 +1434,38 @@ def doc_overview(slug: str, user: str) -> dict[str, list[str]]:
 def doc_list(slug: str, user: str, collection: str) -> dict[str, dict]:
     """{doc_id: data} for one collection (at most MAX_DATA_DOCS_LISTED, newest ids last)."""
     col, _ = _data_path(collection, want_doc=False)
-    owner, col, _ = doc_scope(slug, user, col)
+    owner, col, _, guest_zone = doc_scope(slug, user, col)
     if owner is None:
         return {}
     with db() as con:
         rows = con.execute("SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
                            (slug, owner, col)).fetchall()
-    return {r["doc_id"]: json.loads(r["data"]) for r in rows[-MAX_DATA_DOCS_LISTED:]}
+    return {r["doc_id"]: read_doc(r["data"], guest_zone) for r in rows[-MAX_DATA_DOCS_LISTED:]}
 
 
 def doc_get(slug: str, user: str, path: str) -> dict | None:
     col, doc_id = _data_path(path, want_doc=True)
-    owner, col, _ = doc_scope(slug, user, col)
+    owner, col, _, guest_zone = doc_scope(slug, user, col)
     if owner is None:
         return None
     with db() as con:
         row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                           (slug, owner, col, doc_id)).fetchone()
-    return json.loads(row["data"]) if row else None
+    return read_doc(row["data"], guest_zone) if row else None
 
 
 def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False) -> dict:
     """Write one document (merge=True deep-merges into an existing one); returns what is stored now."""
     col, doc_id = _data_path(path, want_doc=True)
-    owner, col, append = doc_scope(slug, user, col, write=True)
+    owner, col, append, guest_zone = doc_scope(slug, user, col, write=True)
+    if guest_zone:
+        raise ReadOnly(i18n.t("data.guests_only"))
     if not isinstance(data, dict):
         raise HubError(i18n.t("data.not_object"))
+    try:
+        check_json(data)
+    except ValueError:
+        raise HubError(i18n.t("store.bad_json")) from None
     with db() as con:
         row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                           (slug, owner, col, doc_id)).fetchone()
@@ -1366,15 +1480,16 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
 
 
 def doc_delete(slug: str, user: str, path: str) -> bool:
+    """Whether a document was deleted. In the user's guest zone always True: it may be hidden from them."""
     col, doc_id = _data_path(path, want_doc=True)
-    owner, col, append = doc_scope(slug, user, col, write=True)
+    owner, col, append, guest_zone = doc_scope(slug, user, col, write=True)
     if append == ADD_ONLY:
         raise ReadOnly(i18n.t("data.add_only"))
     with db() as con:
         n = con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                         (slug, owner, col, doc_id)).rowcount
         shared.record_write(con, slug, user)
-    return n > 0
+    return n > 0 or guest_zone
 
 
 # ---------------------------------------------------------------- routes: per-user app data
@@ -1739,6 +1854,7 @@ async def delete_my_data(request: Request, user: str = Depends(api_user)):
         docs = con.execute("DELETE FROM docs WHERE owner=?", (email,)).rowcount
         keys = con.execute("DELETE FROM app_data WHERE lower(email)=?", (email,)).rowcount
         con.execute("DELETE FROM claude_writes WHERE email=?", (email,))
+        public.delete_owner(con, email)
         # who added a shared document is personal data too; the document itself is shared content and stays
         con.execute("UPDATE docs SET data=json_remove(data, '$._added_by') WHERE owner=? AND json_extract(data, '$._added_by')=?",
                     (shared.SHARED, email))
@@ -1849,60 +1965,74 @@ def _save_upload(upload: UploadFile, slug: str | None, admin_only: bool, title: 
     slug = _upload_slug(upload.filename, slug)
     if not SLUG_RE.match(slug):
         raise HTTPException(400, i18n.t("err.invalid_name", name=slug))
-    # a new version keeps the old name, emoji, private flag and banner switch (stored as false) unless overridden
-    old = _meta_path(slug)
-    is_new = old is None
-    old_meta = _read_meta(old) if old else {}
-    meta = {k: old_meta[k] for k in META_KEYS if old_meta.get(k) or old_meta.get(k) is False}
-    if title:
-        meta["title"] = title
-    if admin_only:
-        meta["admin_only"] = True
-    versions.save(ARTIFACTS_DIR, slug)  # keep the previous version before replacing it
-    # remove any existing artifact with that slug
-    for old in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json"):
-        old.unlink(missing_ok=True)
-    if (ARTIFACTS_DIR / slug).is_dir():
-        shutil.rmtree(ARTIFACTS_DIR / slug)
-
-    if ext.lower() == ".zip":
-        dest = ARTIFACTS_DIR / slug
-        dest.mkdir()
-        with zipfile.ZipFile(upload.file) as z:
-            for member in z.infolist():
-                target = (dest / member.filename).resolve()
-                if dest.resolve() not in target.parents:
-                    raise HTTPException(400, i18n.t("err.zip_paths"))
-                if member.is_dir():
-                    target.mkdir(parents=True, exist_ok=True)
-                else:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    with z.open(member) as src, open(target, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-        # allow zips that contain a single top-level folder
-        if not (dest / "index.html").exists():
-            subs = [p for p in dest.iterdir() if p.is_dir()]
-            if len(subs) == 1 and (subs[0] / "index.html").exists():
-                for item in subs[0].iterdir():
-                    shutil.move(str(item), dest / item.name)
-                subs[0].rmdir()
-        if not (dest / "index.html").exists():
-            shutil.rmtree(dest)
-            raise HTTPException(400, i18n.t("err.zip_index"))
-        if meta:
-            (dest / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-    elif ext.lower() in (".html", ".htm"):
-        dest = ARTIFACTS_DIR / f"{slug}.html"
-        with open(dest, "wb") as f:
-            shutil.copyfileobj(upload.file, f)
-        if meta:
-            (ARTIFACTS_DIR / f"{slug}.meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-    else:
+    kind = ext.lower()
+    if kind not in (".zip", ".html", ".htm"):
         raise HTTPException(400, i18n.t("err.upload_type"))
+    # Unpack into a hidden folder first (listings skip names that start with "."): a refused upload leaves the app,
+    # its meta, its icon and its versions exactly as they were
+    staging = ARTIFACTS_DIR / f".upload-{secrets.token_hex(8)}"
+    staging.mkdir()
+    try:
+        new = staging / "app"
+        if kind == ".zip":
+            _unpack_zip(upload.file, new)
+        else:
+            with open(new, "wb") as f:
+                shutil.copyfileobj(upload.file, f)
+        # a new version keeps the old name, emoji, private flag and banner switch (stored as false) unless overridden
+        old = _meta_path(slug)
+        is_new = old is None
+        old_meta = _read_meta(old) if old else {}
+        meta = {k: old_meta[k] for k in META_KEYS if old_meta.get(k) or old_meta.get(k) is False}
+        if title:
+            meta["title"] = title
+        if admin_only:
+            meta["admin_only"] = True
+        versions.save(ARTIFACTS_DIR, slug)  # keep the previous version before replacing it
+        # remove any existing artifact with that slug
+        for old in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json"):
+            old.unlink(missing_ok=True)
+        if (ARTIFACTS_DIR / slug).is_dir():
+            shutil.rmtree(ARTIFACTS_DIR / slug)
+        if kind == ".zip":
+            new.rename(ARTIFACTS_DIR / slug)
+            meta_path = ARTIFACTS_DIR / slug / "meta.json"
+        else:
+            new.rename(ARTIFACTS_DIR / f"{slug}.html")
+            meta_path = ARTIFACTS_DIR / f"{slug}.meta.json"
+        if meta:
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     if is_new:
         _new_app(slug)
     log.info("Uploaded artifact %s", slug)
     return slug
+
+
+def _unpack_zip(file, dest: Path) -> None:
+    """Unpack an uploaded zip into dest (made here); HTTP 400 for a path outside it or no index.html."""
+    dest.mkdir()
+    with zipfile.ZipFile(file) as z:
+        for member in z.infolist():
+            target = (dest / member.filename).resolve()
+            if dest.resolve() not in target.parents:
+                raise HTTPException(400, i18n.t("err.zip_paths"))
+            if member.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with z.open(member) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+    # allow zips that contain a single top-level folder
+    if not (dest / "index.html").exists():
+        subs = [p for p in dest.iterdir() if p.is_dir()]
+        if len(subs) == 1 and (subs[0] / "index.html").exists():
+            for item in subs[0].iterdir():
+                shutil.move(str(item), dest / item.name)
+            subs[0].rmdir()
+    if not (dest / "index.html").exists():
+        raise HTTPException(400, i18n.t("err.zip_index"))
 
 
 # ---------------------------------------------------------------- shared write helpers
@@ -1912,6 +2042,10 @@ _HTML_HINT = re.compile(r"<html|<!doctype html|<body", re.I)
 
 class HubError(Exception):
     """A problem with a write; the message is text in the hub's language (HUB_LANG) shown to the user."""
+
+
+class SettingsConflict(HubError):
+    """A setting that a rule between the app's settings forbids; the message says which."""
 
 
 class ReadOnly(HubError):
@@ -2124,16 +2258,24 @@ def api_delete(request: Request, slug: str = Form(...)):
         raise HTTPException(400)
     if who != "token":
         require_unlocked_to_manage(request, who, slug)
-    removed = False
-    for p in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json", ARTIFACTS_DIR / f"{slug}.link.json"):
-        if p.exists():
-            p.unlink()
-            removed = True
-    if (ARTIFACTS_DIR / slug).is_dir():
-        shutil.rmtree(ARTIFACTS_DIR / slug)
-        removed = True
-    if not removed:
+    files = [p for p in (ARTIFACTS_DIR / f"{slug}.html", ARTIFACTS_DIR / f"{slug}.meta.json",
+                         ARTIFACTS_DIR / f"{slug}.link.json") if p.exists()]
+    folder = ARTIFACTS_DIR / slug
+    if not files and not folder.is_dir():
         raise HTTPException(404)
+    meta = _read_meta(_meta_path(slug) or ARTIFACTS_DIR / f"{slug}.meta.json")
+    # The database first, in one transaction: if it fails the app is still whole, and the delete can be tried again.
+    # Links go with the app, and so do guest replies where the guest-zone rules apply (elsewhere a guests/ collection
+    # is ordinary data); the rest of its data stays for a re-upload
+    with db() as con:
+        for owner, col, _ in _guest_collections(con, slug):
+            if public.in_guest_zone(meta, col):
+                con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=?", (slug, owner, col))
+        public.delete_slug(con, slug)
+    for p in files:
+        p.unlink(missing_ok=True)
+    if folder.is_dir():
+        shutil.rmtree(folder)
     _remove_icon(slug)
     return JSONResponse({"ok": True})
 
@@ -2231,6 +2373,9 @@ def set_append(slug: str, names: list[str]) -> list[str]:
     if len(names) > MAX_APPEND:
         raise HubError(i18n.t("err.append_many", max=MAX_APPEND))
     meta = _read_meta(meta_path)
+    both = [n for n in names if n in public.public_read(meta)]
+    if both:
+        raise HubError(i18n.t("err.public_overlap", name=both[0]))
     if names:
         meta[shared.APPEND_KEY] = names
     else:
@@ -2250,6 +2395,412 @@ def api_set_append(request: Request, slug: str = Form(...), names: str = Form(""
     except HubError as e:
         raise HTTPException(400, str(e)) from e
     return JSONResponse({"ok": True, "append": stored})
+
+# ---------------------------------------------------------------- public sharing settings (app/public.py)
+def _branch_collections(con: sqlite3.Connection, slug: str) -> list[tuple[str, str, int]]:
+    """(owner, collection, documents) for every collection of the app inside a data/users/ branch."""
+    rows = con.execute(
+        """SELECT owner, collection, COUNT(*) AS n FROM docs WHERE slug=? AND substr(collection, 1, 11) = 'data/users/'
+           GROUP BY owner, collection""", (slug,)).fetchall()
+    return [(r["owner"], r["collection"], r["n"]) for r in rows]
+
+
+def _guest_collections(con: sqlite3.Connection, slug: str) -> list[tuple[str, str, int]]:
+    return [r for r in _branch_collections(con, slug)
+            if (z := public.zone_of(r[1])) and z.zone == "guests"]
+
+
+def guest_doc_count(slug: str) -> int:
+    """Documents in any guests zone of the app."""
+    with db() as con:
+        return sum(n for _, _, n in _guest_collections(con, slug))
+
+
+def zone_name_clash(slug: str) -> int:
+    """Documents already under a collection named public, guests or agent in any branch of the app: turning a
+    setting on would make them visible to guests or the admin."""
+    with db() as con:
+        return sum(n for _, col, n in _branch_collections(con, slug)
+                   if len(segs := col.split("/")) > 3 and segs[3] in public.ZONES)
+
+
+def set_public(slug: str, *, public: bool | None = None, public_read: list[str] | None = None,
+               guests_hidden: bool | None = None, agent: bool | None = None, via_connector: bool = False,
+               wipe_guests: bool = False) -> dict:
+    """Change the public sharing settings of a shared app; None leaves a setting as it is. Returns the settings
+    as stored. Turning guests_hidden off while guests zones hold documents is refused through the connector,
+    and on the admin page unless wipe_guests is set, which then deletes all of them first."""
+    meta_path = _data_meta_path(slug)
+    meta = _read_meta(meta_path)
+    names = None
+    if public_read is not None:
+        names = list(dict.fromkeys(public_read))
+        for name in names:
+            if not PUBLIC_NAME_RE.match(name) or name == "data":
+                raise HubError(i18n.t("err.public_read_bad", name=name))
+        if len(names) > MAX_APPEND:
+            raise HubError(i18n.t("err.append_many", max=MAX_APPEND))
+        both = [n for n in names if n in _append_names(meta)]
+        if both:
+            raise SettingsConflict(i18n.t("err.public_overlap", name=both[0]))
+    wants_on = bool(public or agent or guests_hidden or names)
+    if wants_on and not shared.is_shared(meta):
+        raise SettingsConflict(i18n.t("err.public_needs_shared"))
+    wipe = False
+    if guests_hidden is False and meta.get("guests_hidden") is True and guest_doc_count(slug):
+        if via_connector:
+            raise SettingsConflict(i18n.t("err.public_guests_replies"))
+        if not wipe_guests:
+            raise SettingsConflict(i18n.t("err.public_guests_wipe"))
+        wipe = True
+    if wipe:
+        with db() as con:
+            for owner, col, _ in _guest_collections(con, slug):
+                con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=?", (slug, owner, col))
+    for key, value in (("public", public), ("guests_hidden", guests_hidden), ("agent", agent)):
+        if value is True:
+            meta[key] = True
+        elif value is False:
+            meta.pop(key, None)
+    if names:
+        meta["public_read"] = names
+    elif names is not None:
+        meta.pop("public_read", None)
+    _write_meta(meta_path, meta)
+    return {"public": meta.get("public") is True, "public_read": meta.get("public_read", []),
+            "guests_hidden": meta.get("guests_hidden") is True, "agent": meta.get("agent") is True}
+
+
+def _settings_body(body: dict) -> dict:
+    """The keyword arguments of set_public from a request body; HTTP 400 for a field of the wrong type."""
+    kw: dict = {}
+    for key in ("public", "guests_hidden", "agent", "wipe_guests"):
+        if key in body:
+            if not isinstance(body[key], bool):
+                raise HTTPException(400, f"{key} must be true or false")
+            kw[key] = body[key]
+    if "public_read" in body:
+        names = body["public_read"]
+        if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+            raise HTTPException(400, "public_read must be a list of names")
+        kw["public_read"] = names
+    return kw
+
+
+@app.get("/api/public-settings")
+def public_settings_get(slug: str, request: Request, user: str = Depends(require_admin)):
+    """The public sharing settings of one app, with what the admin page warns about."""
+    require_unlocked(request, user, slug)
+    try:
+        meta = _read_meta(_data_meta_path(slug))
+    except HubError:
+        raise HTTPException(404) from None
+    return {"public": public.is_public(meta), "public_read": public.public_read(meta),
+            "guests_hidden": public.guests_hidden(meta), "agent": public.has_agent(meta),
+            "guest_docs": guest_doc_count(slug), "clash": zone_name_clash(slug),
+            "links": _count_links(slug)}
+
+
+@app.post("/api/public-settings")
+async def public_settings_set(request: Request, user: str = Depends(require_admin)):
+    """Change the public sharing settings of one app: {"slug", "public"?, "public_read"?, "guests_hidden"?,
+    "agent"?, "wipe_guests"?}."""
+    _require_json(request)
+    body = await request.json()
+    if not isinstance(body, dict) or not isinstance(body.get("slug"), str):
+        raise HTTPException(400, 'Send {"slug", ...}')
+    require_unlocked(request, user, body["slug"])
+    kw = _settings_body(body)
+    if not _meta_path(body["slug"]):
+        raise HTTPException(404)
+    try:
+        stored = set_public(body["slug"], **kw)
+    except HubError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, **stored}
+
+
+def _count_links(slug: str) -> int:
+    with db() as con:
+        return public.count_links(con, slug)
+
+
+# ---------------------------------------------------------------- secret links (app/public.py)
+def resolve_link(token: str) -> tuple[public.Link, dict] | None:
+    """The link and its app's meta, or None: unknown token, no such app, "public" off, or an owner who may no longer
+    log in or see the app. Callers answer all of these alike."""
+    with db() as con:
+        link = public.by_token(con, token)
+    meta_path = _meta_path(link.slug) if link else None
+    if not link or not meta_path:
+        return None
+    meta = _read_meta(meta_path)
+    if not public.is_public(meta) or not email_allowed(link.owner) or not can_see(meta, link.owner):
+        return None
+    return link, meta
+
+
+def _share_app(slug: str, user: str) -> dict:
+    """The meta of an app the user may share from; 404 when they cannot see it or it has no "public"."""
+    meta_path = _meta_path(slug)
+    meta = _read_meta(meta_path) if meta_path else {}
+    if not meta_path or not public.is_public(meta) or not can_see(meta, user):
+        raise HTTPException(404)
+    return meta
+
+
+def _guest_docs_where(slug: str, owner: str, name: str) -> tuple[str, tuple]:
+    """SQL condition and parameters for the documents in an owner's guests/<name> zone (exact comparison, not LIKE)."""
+    col = public.zone_collection(owner, "guests", name)
+    return ("slug=? AND owner=? AND (collection=? OR substr(collection, 1, ?) = ?)",
+            (slug, owner.lower(), col, len(col) + 1, col + "/"))
+
+
+def _share_state(slug: str, user: str, name: str) -> dict:
+    """What the share sheet shows: the link of this name (or null), how many guest documents it has and whether the
+    app is locked for the user. Never the documents themselves."""
+    where, params = _guest_docs_where(slug, user, name)
+    with db() as con:
+        link = public.get_link(con, slug, user, name)
+        docs = con.execute(f"SELECT COUNT(*) FROM docs WHERE {where}", params).fetchone()[0]
+    return {"link": {"url": f"{BASE_URL}/p/{link.token}/", "title": link.title, "created_at": link.created_at}
+            if link else None, "guest_docs": docs, "locked": app_locked(user, slug)}
+
+
+def _share_name(value) -> str:
+    if not isinstance(value, str) or not public.NAME_RE.match(value):
+        raise HTTPException(400, i18n.t("err.invalid_name", name=str(value)[:64]))
+    return value
+
+
+@app.get("/api/share")
+def share_list(user: str = Depends(api_user)):
+    """Every link the user has made, for the settings page. Links of apps they can no longer share from are left out."""
+    with db() as con:
+        links = public.links_of(con, user)
+    titles = {a["slug"]: a["title"] for a in list_artifacts(user)}
+    items = []
+    for link in links:
+        if link.slug not in titles:
+            continue
+        try:
+            _share_app(link.slug, user)
+        except HTTPException:
+            continue
+        items.append({"slug": link.slug, "app_title": titles[link.slug], "name": link.name, "title": link.title,
+                      "url": f"{BASE_URL}/p/{link.token}/", "guest_docs": _share_state(link.slug, user, link.name)["guest_docs"]})
+    return {"links": items}
+
+
+@app.get("/api/share/{slug}")
+def share_get(slug: str, name: str = public.DEFAULT_NAME, user: str = Depends(api_user)):
+    _share_app(slug, user)
+    return _share_state(slug, user, _share_name(name))
+
+
+@app.post("/api/share/{slug}")
+async def share_set(slug: str, request: Request, user: str = Depends(api_user)):
+    """{"name", "title"?, "action": "create" | "rotate" | "off" | "clear"}: make, replace or remove the link of one
+    share name, or delete the guest documents of that name. Documents in the public zone are never touched."""
+    _require_json(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, 'Send {"name", "action"}')
+    _share_app(slug, user)
+    require_unlocked(request, user, slug)  # a link would open the public zone of a locked app without the code
+    name, action = _share_name(body.get("name")), body.get("action")
+    if action not in ("create", "rotate", "off", "clear"):
+        raise HTTPException(400, 'action must be "create", "rotate", "off" or "clear"')
+    with db() as con:
+        if action in ("create", "rotate"):
+            title = body.get("title")
+            if not isinstance(title, str):
+                old = public.get_link(con, slug, user, name)
+                title = old.title if old else ""
+            public.make_link(con, slug, user, name, title.strip()[:100])
+            if action == "rotate":
+                public.rotate(con, slug, user, name)
+        elif action == "off":
+            public.remove_link(con, slug, user, name)
+        else:
+            where, params = _guest_docs_where(slug, user, name)
+            con.execute(f"DELETE FROM docs WHERE {where}", params)
+    return _share_state(slug, user, name)
+
+
+# ---------------------------------------------------------------- routes: guest API (app/public.py)
+# The only routes that answer people who are not logged in. Paths are relative to the link's owner and share name:
+# public[/...] and guests[/...] map to data/users/<owner>/public/<name>[/...] and .../guests/<name>[/...]. The
+# session cookie is never read here: a logged-in visitor is a guest like any other, the owner included.
+#   GET    /api/public/{token}/c?path=public          -> {"docs": [{"id", "data"}]}
+#   GET    /api/public/{token}/d?path=guests/abc      -> {"data": ...}   (guest documents get _mine, never _guest)
+#   PUT    /api/public/{token}/d?path=guests/abc      create only, header X-Hub-Guest: <secret>
+#   DELETE /api/public/{token}/d?path=guests/abc      only with the secret that made it
+#   GET    /api/public/{token}/s?path=products/k1     one document of a shared collection in public_read
+MAX_GUEST_DOC_BYTES = 4096        # a guest document as sent
+MAX_GUEST_DOCS = 500              # per link, sub-collections included
+MAX_GUEST_DEPTH = 32              # lists and objects inside each other
+GUEST_HEADER = "x-hub-guest"
+
+
+def _guest_refusal(status: int, detail: str | None = None) -> HTTPException:
+    return HTTPException(status, detail, headers=PUBLIC_HEADERS)
+
+
+def guest_link(token: str, response: Response) -> tuple[public.Link, dict]:
+    """The live link of the token and its app's meta, with the public headers on the answer; 404 for a dead link."""
+    response.headers.update(PUBLIC_HEADERS)
+    found = resolve_link(token)
+    if not found:
+        raise _guest_refusal(404)
+    return found
+
+
+def _guest_path(link: public.Link, path: str, want_doc: bool) -> tuple[str, str, str]:
+    """(zone, collection as stored, doc id or "") of a guest path. 400 for a malformed one (an empty, "." or ".."
+    segment, the wrong number of segments), 404 for one outside the two zones."""
+    segs = path.split("/")
+    if (not all(SEG_RE.match(s) and s not in (".", "..") for s in segs)
+            or (len(segs) % 2 == 0) != want_doc):
+        raise _guest_refusal(400, i18n.t("store.bad_path", path=path[:200]))
+    if segs[0] not in ("public", "guests"):
+        raise _guest_refusal(404)
+    rest = segs[1:-1] if want_doc else segs[1:]
+    collection = public.zone_collection(link.owner, segs[0], link.name, "/".join(rest))
+    return segs[0], collection, segs[-1] if want_doc else ""
+
+
+def _guest_secret(request: Request, *, required: bool = True) -> str | None:
+    """The hash of the guest's secret; 400 when a write lacks a valid one, None when a read does."""
+    secret = request.headers.get(GUEST_HEADER)
+    if secret is None or not public.GUEST_SECRET_RE.fullmatch(secret):
+        if required:
+            raise _guest_refusal(400, i18n.t("guest.no_secret"))
+        return None
+    return public.guest_hash(secret)
+
+
+def _guest_write(request: Request, link: public.Link) -> None:
+    """429 over a guest write rate, else count this write."""
+    ip = request.client.host if request.client else "?"
+    if not public.guest_try(ip, link.token, time.time()):
+        raise _guest_refusal(429, i18n.t("guest.too_fast"))
+
+
+async def _guest_body(request: Request) -> dict:
+    """The JSON object a guest sends, read no further than MAX_GUEST_DOC_BYTES."""
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_GUEST_DOC_BYTES:
+            raise _guest_refusal(413, i18n.t("guest.too_big", kb=MAX_GUEST_DOC_BYTES // 1024))
+    try:  # what check_json refuses, or deep nesting, once stored would break every later read of the zone
+        data = json.loads(body)
+        check_json(data)
+    except (ValueError, RecursionError):
+        raise _guest_refusal(400, i18n.t("store.bad_json")) from None
+    if not isinstance(data, dict):
+        raise _guest_refusal(400, i18n.t("store.not_object"))
+    if _depth(data) > MAX_GUEST_DEPTH:
+        raise _guest_refusal(400, i18n.t("store.bad_json"))
+    return data
+
+
+def _depth(value) -> int:
+    """How deep lists and objects nest in a parsed JSON value (without recursion)."""
+    deepest, todo = 0, [(value, 1)]
+    while todo:
+        v, d = todo.pop()
+        if isinstance(v, (dict, list)):
+            deepest = max(deepest, d)
+            todo.extend((c, d + 1) for c in (v.values() if isinstance(v, dict) else v))
+    return deepest
+
+
+@app.get("/api/public/{token}/c")
+def guest_list(path: str, request: Request, found: tuple = Depends(guest_link)):
+    link, _ = found
+    zone, collection, _ = _guest_path(link, path, want_doc=False)
+    mine = _guest_secret(request, required=False)
+    with db() as con:
+        rows = con.execute(
+            "SELECT doc_id, data FROM docs WHERE slug=? AND owner=? AND collection=? ORDER BY doc_id",
+            (link.slug, link.owner, collection),
+        ).fetchall()
+    return {"docs": [{"id": r["doc_id"], "data": public.guest_view(json.loads(r["data"]), zone, mine)} for r in rows]}
+
+
+@app.get("/api/public/{token}/d")
+def guest_get(path: str, request: Request, found: tuple = Depends(guest_link)):
+    link, _ = found
+    zone, collection, doc_id = _guest_path(link, path, want_doc=True)
+    mine = _guest_secret(request, required=False)
+    with db() as con:
+        row = con.execute(
+            "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
+            (link.slug, link.owner, collection, doc_id),
+        ).fetchone()
+    return {"data": public.guest_view(json.loads(row["data"]), zone, mine) if row else None}
+
+
+@app.put("/api/public/{token}/d")
+async def guest_create(path: str, request: Request, found: tuple = Depends(guest_link)):
+    """Create one guest document; never replace or merge. The hub sets _guest and _added_at."""
+    link, _ = found
+    zone, collection, doc_id = _guest_path(link, path, want_doc=True)
+    if zone != "guests":
+        raise _guest_refusal(403, i18n.t("guest.read_only"))
+    secret = _guest_secret(request)
+    _guest_write(request, link)
+    data = await _guest_body(request)
+    data = public.guest_input(data, secret, int(time.time()))
+    where, params = _guest_docs_where(link.slug, link.owner, link.name)
+    with db() as con:
+        if con.execute(f"SELECT COUNT(*) FROM docs WHERE {where}", params).fetchone()[0] >= MAX_GUEST_DOCS:
+            raise _guest_refusal(429, i18n.t("guest.full"))
+        try:
+            _put_doc(con, link.slug, link.owner, collection, doc_id, data, create_only=True)
+        except ReadOnly:
+            raise _guest_refusal(403, i18n.t("guest.taken")) from None
+        except HubError:  # too big as stored; cannot happen below MAX_GUEST_DOC_BYTES, but answer like it
+            raise _guest_refusal(413, i18n.t("guest.too_big", kb=MAX_GUEST_DOC_BYTES // 1024)) from None
+    return {"ok": True}
+
+
+@app.delete("/api/public/{token}/d")
+def guest_delete(path: str, request: Request, found: tuple = Depends(guest_link)):
+    """Delete a guest document made with the same secret."""
+    link, _ = found
+    zone, collection, doc_id = _guest_path(link, path, want_doc=True)
+    if zone != "guests":
+        raise _guest_refusal(403, i18n.t("guest.read_only"))
+    secret = _guest_secret(request)
+    _guest_write(request, link)
+    key = (link.slug, link.owner, collection, doc_id)
+    with db() as con:
+        row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?", key).fetchone()
+        if not row:
+            raise _guest_refusal(404, i18n.t("store.doc_missing"))
+        if not public.guest_owns(json.loads(row["data"]), secret):
+            raise _guest_refusal(403, i18n.t("guest.not_yours"))
+        con.execute("DELETE FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?", key)
+    return {"ok": True}
+
+
+@app.get("/api/public/{token}/s")
+def guest_shared(path: str, found: tuple = Depends(guest_link)):
+    """One document of a shared top-level collection in public_read, by id (no listing), without the stamp."""
+    _, meta = found
+    segs = path.split("/")
+    if (len(segs) != 2 or segs[0] not in public.public_read(meta)
+            or not SEG_RE.match(segs[1]) or segs[1] in (".", "..")):
+        raise _guest_refusal(404)
+    with db() as con:
+        row = con.execute(
+            "SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
+            (found[0].slug, shared.SHARED, segs[0], segs[1]),
+        ).fetchone()
+    return {"data": public.shared_view(json.loads(row["data"])) if row else None}
 
 
 # ---------------------------------------------------------------- shared data on and off (app/shared.py)
@@ -2286,6 +2837,8 @@ def set_data_mode(slug: str, on: bool, *, copy_from: str | None = None) -> int:
     unless the app has shared documents already. Nothing is ever deleted: off brings the personal data back."""
     meta_path = _data_meta_path(slug)
     meta = _read_meta(meta_path)
+    if not on and (public.is_public(meta) or public.has_agent(meta) or public.guests_hidden(meta)):
+        raise SettingsConflict(i18n.t("err.public_shared_in_use"))
     copied = 0
     if on and copy_from:
         with db() as con:
@@ -2337,6 +2890,8 @@ async def data_mode_set(request: Request, user: str = Depends(require_admin)):
     require_unlocked(request, user, body["slug"])
     try:
         copied = set_data_mode(body["slug"], body["shared"], copy_from=user if body.get("copy") is True else None)
+    except SettingsConflict as e:
+        raise HTTPException(400, str(e)) from e
     except HubError:
         raise HTTPException(404) from None
     return {"ok": True, "shared": body["shared"], "copied": copied}
@@ -2364,6 +2919,7 @@ def remove_person(email: str) -> list[str]:
     email = access.norm(email)
     with db() as con:
         access.uninvite(con, email)
+        public.delete_owner(con, email)
     removed = []
     for slug in _all_slugs():
         meta_path = _meta_path(slug)
@@ -2549,6 +3105,7 @@ async def api_edit(
             home.rename(con, slug, new_slug)
             applock.rename(con, slug, new_slug)
             shared.rename(con, slug, new_slug)
+            public.rename(con, slug, new_slug)
         log.info("Renamed artifact %s -> %s", slug, new_slug)
     return JSONResponse({"ok": True, "slug": new_slug})
 
@@ -2559,9 +3116,13 @@ def serve_icon(slug: str, user: str = Depends(require_user)):
     icon = _icon_file(slug) if meta_path else None
     if not icon or not can_see(_read_meta(meta_path), user):
         raise HTTPException(404)
+    return _icon_response(icon)
+
+
+def _icon_response(icon: Path, headers: dict | None = None) -> FileResponse:
     # an SVG opened directly must not be able to run scripts on this origin
     return FileResponse(icon, media_type=ICON_TYPES[icon.suffix],
-                        headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
+                        headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'", **(headers or {})})
 
 
 @app.get("/favicon.ico", include_in_schema=False)

@@ -18,7 +18,8 @@ straight in.
 | `.versions/name/` | Earlier versions, see below. |
 
 `meta.json` can hold `title`, `description`, `emoji` (the icon when there is no uploaded image), `banner` (`false`
-turns the banner off), `data` (`"shared"` for [shared data](#shared-data)) and the access level: `"admin_only": true` for admins only, or `"access": "people"` with
+turns the banner off), `data` (`"shared"` for [shared data](#shared-data)), the settings for
+[public sharing](#public-sharing) (`public`, `public_read`, `guests_hidden`, `agent`) and the access level: `"admin_only": true` for admins only, or `"access": "people"` with
 `"people": ["a@example.com"]`. Without either, everyone who can log in sees the app. The admin page writes this
 file for you, and it is kept when the app is replaced.
 
@@ -41,10 +42,14 @@ Artifacts made on claude.ai save data through `window.claude.use(...)`, which on
 | `db` | Stored in SQLite on the server, per app and per logged-in user, or [shared](#shared-data). `collection`/`doc`, `get`/`set`/`update`/`delete`, `add`, `where`/`orderBy`/`limit`, and `onSnapshot`, which picks up changes from other tabs and devices every 5 seconds. |
 | `downloads` | `save({filename, data})` becomes a normal browser download. |
 | `user` | The logged-in e-mail address, also as `id()`. `isOwner()` and `canEdit()` are true for admins; `can("data.write")` says whether the user may change shared data, and `can("data.add:<collection>")` whether they may [add to a collection](#collections-everyone-can-add-to). |
+| `share` | Only in an app with [public sharing](#public-sharing), for its owner and on its public page; `null` elsewhere. `share.db` reaches the `public/` and `guests/` zones for one share name. |
 | Anything else (`sample`, `room`, `mcp`, …) | `null`. These need claude.ai. |
 
 The data follows an app when it is renamed, and stays when the app is deleted, so it comes back if the app is
-uploaded again. `GET /api/store/<name>` returns everything you can read in one app as JSON.
+uploaded again. The exceptions are the app's [secret links](#the-link), which are deleted with it, and its guest
+replies if `public` or `guests_hidden` is on when it is deleted. In an app with neither, `guests/...` is ordinary
+data and stays.
+`GET /api/store/<name>` returns everything you can read in one app as JSON.
 
 ## Shared data
 
@@ -96,6 +101,238 @@ await db.collection("queue").add({ question: "What is new in Oslo?" });
 
 If a create with a fixed id is retried, say after a dropped connection, and the retry is rejected, the first attempt
 may already be saved: read the document back before telling the user it failed.
+
+## Public sharing
+
+Everything on the hub needs a login. Public sharing lets a user make a secret link to one app, for people who have
+no account. Anyone with the link opens the app, reads what the user has made public and can leave replies of their own,
+for example to claim an item on a wish list or to sign up for something. Replies can be hidden from the user, so
+the app can keep a gift a surprise. Read the [security model](../README.md#security-model) first: whoever has the
+link is not checked in any other way.
+
+The settings are on the admin page, under *Public sharing* in the app's settings, in the app's `meta.json`, or from
+[Claude](CONNECTOR.md#public-sharing). All of them need [shared data](#shared-data):
+
+| Setting | |
+|---|---|
+| `"public": true` | Public sharing is on: users can make links to the app, and the app gets `window.claude.use("share")` and a share button in the banner. |
+| `"public_read": ["products"]` | Top-level shared collections that a guest may also read, one document at a time by id (no listing, no query). Up to 10 names, the same rules as for `append`. |
+| `"guests_hidden": true` | The user cannot read the replies their guests leave. Without it the user reads them, as for a sign-up list. |
+| `"agent": true` | The [agent zone](#the-agent-zone) is on. |
+
+Shared data cannot be turned off while `public`, `guests_hidden` or `agent` is on. A collection cannot be in both `append` and
+`public_read`. `guests_hidden` can be turned on at any time; turning it off while there are guest replies deletes them,
+see [below](#guest-replies).
+
+### Zones
+
+The zones are collections with fixed names directly under the user's own branch, `data/users/<e-mail>/`. They are
+special only in an app that has the matching setting on; in any other app `public`, `guests` and `agent` are
+ordinary collection names. The guests zone keeps its rules while `public` or `guests_hidden` is on, so turning public
+sharing off does not reveal hidden replies. Everything else in the branch stays private.
+
+| Zone | Path under the branch | The user | A guest with the user's link | An admin through Claude |
+|---|---|---|---|---|
+| Public | `public/<name>/...` | reads and writes | reads, for the link's `<name>` only | nothing |
+| Guests | `guests/<name>/...` | see [guest replies](#guest-replies) | reads, creates, deletes their own, for the link's `<name>` only | nothing |
+| Agent | `agent/...` | reads and writes | nothing | reads and writes |
+| Private | anything else | reads and writes | nothing | nothing |
+
+`<name>` is the share name, which the app chooses: for a list, say, the list's id. It has 1 to 64 characters of
+letters, digits, `_` and `-` (`^[A-Za-z0-9_-]{1,64}$`). An app with only one thing to share uses `main`, the default.
+The documents lie directly in the collection `public/<name>`, and collections can sit below those documents. A
+document placed in `public` or `guests` without a share name is not in a zone and stays private, as does the document
+`public` in the root collection.
+
+Each share name has one link per user and app, so one user can share several lists, each with a link of its own. A guest
+can only reach the share name of the link they were given, also by guessing the name of another.
+
+### The link
+
+The link is `https://<your domain>/p/<token>/` (folder apps also serve their other files below it). The token is 128
+random bits and is kept in clear, so the user can copy the link again. The user makes, replaces and turns off links in the
+share sheet, opened by the share button on the right of the banner, or under *Shared links* on the settings page.
+An app cannot make links itself. Replacing a link makes the old one stop working at once. Turning one off deletes the
+link and leaves the documents in the zones.
+
+- The link works while the app has `public` on, the user can still see the app and the user is still a person on
+  the hub. Otherwise, like for an unknown token, it answers 404. If public sharing is turned off, links stop working
+  but are kept, and work again when it is turned on.
+- Every answer carries `X-Robots-Tag: noindex, nofollow`, `Referrer-Policy: no-referrer` and `Cache-Control: no-store`,
+  so the link is not indexed and does not leak to the sites a guest goes on to.
+- The link goes around the user's [code lock](#code-lock): the user chose to make this part public. The share sheet says so for a locked
+  app. Making, replacing or turning off a link, and clearing replies, is refused with 423 while the app is locked for the user and
+  not opened on that device; reading the state of the link is not.
+- A visitor who is logged in as the link's owner is sent on to the app. Anyone else, logged in or not, is a guest on
+  this page.
+- Visits by link are not counted. A public page does not load the service worker or pull to refresh, and has no
+  back arrow, link to the front page or share button in the banner.
+- The link follows the app when it is renamed. Deleting the app deletes all its links and, if `public` or
+  `guests_hidden` is on, every guest reply in it; the public and agent zones stay, like the rest of its data. *Delete
+  my data* removes the user's links, their zones and the guest replies on their lists. Removing a person from the hub
+  removes only their links.
+
+### On the page
+
+The hub adds the same `hub.js` to the public page, with no e-mail address in it. On it `window.claude.use("db")` and
+`window.claude.use("user")` are `null`, so the app has to look at `share.mode` and show a guest view.
+
+```js
+const share = await window.claude.use("share");   // null in an app without public sharing
+share.mode            // "owner" or "guest"
+share.name            // the share name: a guest's link name; the owner's last share.scope(), else "main"
+share.db              // db for the current share name, only public/... and guests/...
+share.scope(name, title)  // owner: what the share button shares now; returns a db for that name
+share.remove(name)    // owner: turn the link for a name off, for example when a list is deleted
+share.shared          // share.shared.doc("products/k1").get(): a public_read collection, by id
+```
+
+`share.db` is the usual `db` (`doc`, `collection`, `get`, `set`, `update`, `delete`, `add`, `where`, `orderBy`, `limit`,
+`onSnapshot`), rooted in the user's branch and one share name, and it reaches only `public/...` and `guests/...`; any
+other path rejects with `invalid_argument`. The owner's `share.db.doc("public/abc")` is stored as
+`data/users/<e-mail>/public/<name>/abc`, and the guest reads the same path `public/abc`, so neither needs the
+e-mail or the share name. A guest creates with `set` or `add` and deletes with `delete`; `update` rejects with
+`invalid_argument` on a public page, without a request. `scope(name, title)` throws at once for a name that does not fit the rule above, and `remove(name)` returns a rejected promise; `title` is
+only shown in the share sheet and on the settings page. A guest cannot call `scope` or `remove`.
+
+The share sheet follows the device's light or dark setting. It shows the link, how many replies there are (never what they say),
+and for the user:
+*Copy*, *New link*, *Turn off* and *Clear guests' replies*, the last three after a confirmation. Clearing deletes the
+user's guest zone for that share name and is the way out if someone with the link has taken everything or filled the
+quota; it never touches `public/`.
+
+### Guest replies
+
+A guest can create a document in `guests/...` and delete one they created, nothing else: never overwrite, merge into
+or delete another's. The first time, `hub.js` makes a random secret in the guest's `localStorage` and sends it with each
+request. The hub stores only its hash in the field `_guest`, and deleting needs the same secret. A guest on another device or in
+another browser is another guest.
+
+- A create with a fixed id is allowed, and the second guest to use the same id is refused. That is how an app makes
+  "only one person can take this".
+- `_guest` is never returned to anyone. A guest reads `_mine: true` or `false` on each document in the zone instead.
+  The hub also sets `_added_at`. What a guest sends in `_guest`, `_mine`, `_added_by` and `_added_at` is dropped.
+- A guest reads every document in `guests/...` of their link, other guests' too. Do not ask guests for anything that
+  other guests may not see.
+- The user never creates or changes documents in their own guests zone: the write rejects with `invalid_argument`. They may
+  delete one by its path, and that answers the same whether or not the document existed, so it also works when the
+  zone is hidden.
+- With `guests_hidden` the user reads nothing in their guests zone: not in the app, in `GET /api/store/<slug>`, in Claude
+  or in a card recipe. This stops accidents, such as Claude reading out a surprise; it does not stop a user who
+  wants to see. The share sheet still counts the replies.
+- `guests_hidden` cannot be turned off through Claude while there are replies. On the admin page, turning it off deletes every guest
+  reply in the app after a confirmation. So no single click or message to Claude reveals what was hidden. Turning it on is always allowed.
+- `public_read` collections are read with `share.shared.doc("<collection>/<id>").get()`, by owner and guest alike. Any
+  other path, a collection below such a document included, rejects with `invalid_argument` before any request, for the
+  owner too, so a page tried out as the owner behaves the same for a guest. The
+  guest gets the document without the hub's fields (`_added_by`, `_added_at`). The app puts the ids in the user's public
+  zone, so a guest only finds what the user points at. In any zone a guest reads documents without `_added_by`.
+
+Limits:
+
+| | |
+|---|---|
+| A guest document | 4096 bytes as sent (`413` above that). JSON that is not an object, with `NaN` or `Infinity`, nested deeper than 32 levels, or with a lone surrogate in a string is refused with `400`. |
+| Guest documents per link | 500, collections below them included (`429`). |
+| Writes per hour | 30 per IP address and 200 per link (`429`). A create or delete counts once its link, path and guest secret have been checked: a missing or dead link, a malformed path, a path outside the two zones, a write to `public/...` or a missing or malformed secret (not 16 to 128 printable ASCII characters without spaces) does not count. After that it counts even if it is refused: a body too large or not valid, a link that is full or a taken id, and deleting a reply that is missing or someone else's. A write refused by the limit itself does not count. Counted in memory, so a restart resets them. |
+
+The per-address limit counts the client address as the reverse proxy reports it in `X-Forwarded-For`: the image runs
+`uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*`, as the login limit relies on too. A proxy
+that does not set the header makes all guests share one allowance of 30 writes an hour. A hub reachable without its
+proxy lets a guest set the header and dodge the per-address limit. The per-link limit and the 500-document cap hold either way.
+
+The guest API is `/api/public/<token>/...`, used by `hub.js`, and it answers `404` for a missing or dead link on every route. A write
+to `public/...` gives `403`, a path outside the two zones `404`, a second creator of the same id `403`, deleting someone
+else's reply `403`, and a malformed path or a missing or malformed guest secret `400`. In `hub.js` a `429` rejects with the code
+`resource_exhausted` on a public page; other refusals (`400`, `403`, `404`, `413`) reject with `invalid_argument`.
+
+### The agent zone
+
+With `"agent": true`, an admin reads and writes `data/users/<anyone's e-mail>/agent/...` through Claude and
+`GET`/`PUT /api/store/<slug>/d` and `/c`, in addition to the user's own access. It lets a scheduled agent, which always
+runs as an admin, do a job for every user of the app. `list_app_data` without a collection then also lists other users'
+agent zones, so the agent finds every user who put something there. The rest of someone's branch stays invisible, to admins too.
+
+The app has to tell the user what ends up in the agent zone: an admin reads all of it.
+
+### Example: a shared list
+
+One page for the owner and for guests. The owner adds items to `public/<id>`. A guest sees the items, takes one by
+creating `guests/<id>` with the item's id, and can undo it. With *Hide guests' replies* on, the owner does not
+see who took what.
+
+```html
+<h1>Cabin trip</h1>
+<ul id="list"></ul>
+<form id="add" hidden><input id="text" required> <button>Add</button></form>
+<p id="note"></p>
+<script>
+(async () => {
+  const share = await window.claude.use("share");
+  if (!share) return;                         // an app without public sharing
+  const owner = share.mode === "owner";
+  if (owner) share.scope("cabin", "Cabin trip");   // what the Share button in the banner shares
+  const db = share.db;                        // the same paths for the owner and for a guest
+  const note = (text) => { document.getElementById("note").textContent = text; };
+  let items = [], claims = new Map();
+
+  function draw() {
+    const list = document.getElementById("list");
+    list.replaceChildren(...items.map((item) => {
+      const li = document.createElement("li");
+      const claim = claims.get(item.id);
+      li.append(item.data().text + (claim ? " (taken)" : " "));
+      if (!owner && !claim) {
+        const take = document.createElement("button");
+        take.textContent = "I'll take this";
+        take.addEventListener("click", () => takeItem(item.id));
+        li.append(take);
+      }
+      if (!owner && claim && claim.data()._mine) {   // a guest sees _mine on their own documents
+        const undo = document.createElement("button");
+        undo.textContent = "Undo";
+        undo.addEventListener("click", () => db.doc("guests/" + item.id).delete().catch((e) => note(e.message)));
+        li.append(undo);
+      }
+      return li;
+    }));
+  }
+
+  async function takeItem(id) {
+    try {
+      await db.doc("guests/" + id).set({ at: Date.now() });   // the id is the item's: only one guest gets it
+    } catch (e) {
+      note(e.code === "resource_exhausted" ? "Too many tries, wait a while." : "Someone else just took it.");
+    }
+  }
+
+  db.collection("public").onSnapshot((snap) => { items = snap.docs; draw(); });
+  db.collection("guests").onSnapshot((snap) => { claims = new Map(snap.docs.map((d) => [d.id, d])); draw(); });
+
+  if (owner) {
+    const form = document.getElementById("add");
+    form.hidden = false;
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = document.getElementById("text");
+      await db.collection("public").add({ text: input.value });
+      input.value = "";
+    });
+  }
+})();
+</script>
+```
+
+The calls it makes, for the owner then for a guest on `/p/<token>/` (the example was run against `hub.js` in a
+test harness that records them):
+
+| | Owner | Guest |
+|---|---|---|
+| Items | `GET /api/store/<slug>/c?path=data/users/<e-mail>/public/cabin` | `GET /api/public/<token>/c?path=public` |
+| Replies | `GET /api/store/<slug>/c?path=data/users/<e-mail>/guests/cabin` | `GET /api/public/<token>/c?path=guests` |
+| Add an item | `PUT /api/store/<slug>/d?path=data/users/<e-mail>/public/cabin/<id>` | refused, so the form is not shown |
+| Take an item | | `PUT /api/public/<token>/d?path=guests/<id>` with `X-Hub-Guest` |
+| Undo | | `DELETE /api/public/<token>/d?path=guests/<id>` |
 
 ## Storage: the key/value API
 
@@ -180,12 +417,14 @@ async function hubCard({ db, today }) {
 </script>
 ```
 
-`hubCard` gets `{ db, today, now, timeZone }` and returns a string, or `null` for no line (it may be `async`).
+`hubCard` gets `{ db, today, now, timeZone, user }` and returns a string, or `null` for no line (it may be `async`).
 
 - `db` is read-only: `db.doc(path).get()`, `db.collection(path).get()`, and `.where(field, op, value)`,
   `.orderBy(field, dir)` and `.limit(n)` on a collection (a collection read sees at most the 500 documents with the
   highest ids). It reads what the viewer sees in the app: personal data, or in an app with shared data the shared
   documents and the viewer's own branch.
+- `user` is the viewer's e-mail address in lower case, so a recipe in an app with shared data can find the viewer's own
+  branch, `data/users/<e-mail>/`. A guests zone that is hidden from its owner reads as empty here too.
 - `today` is the viewer's date as `YYYY-MM-DD`, `now` the time in milliseconds and `timeZone` the viewer's IANA zone
   (the hub learns it from the browser; until then it is the server's).
 - No DOM and no network, only plain functions. The recipe has 0.25 seconds for everything it does and 32 MB of memory;

@@ -46,7 +46,7 @@ CSS_HOST = (
 )
 
 _STYLE = """<style>
-a{display:flex;align-items:center;gap:8px;min-width:0;min-height:22px;padding:10px 16px;color:inherit;
+a,.row{display:flex;align-items:center;gap:8px;min-width:0;min-height:22px;padding:10px 16px;color:inherit;
   text-decoration:none;white-space:nowrap;-webkit-tap-highlight-color:transparent}
 a:focus-visible{outline:2px solid #cfe0ff;outline-offset:-4px;border-radius:8px}
 .back{flex:none;font-size:20px;line-height:1;color:#cfe0ff;margin-top:-2px}
@@ -99,15 +99,63 @@ def inject(html: str, head: str, banner: str | None) -> str:
     return html[:at] + banner + _PLACE + html[at:]
 
 
-def render(app: dict, site: str) -> str:
-    """The banner for one app (an entry from list_artifacts), linking to the front page of `site`."""
+# Only for banners with a share button: the link takes the room the button leaves. The sheet is a <dialog> (top
+# layer, so no stacking context of the app covers it) at the bottom of the screen; static/share.js fills .body.
+_SHARE_STYLE = """<style>
+.bar{display:flex;align-items:center}
+.bar a{flex:1}
+.share{flex:none;display:grid;place-items:center;width:44px;height:44px;margin-right:4px;padding:0;border:0;
+  background:none;color:#cfe0ff;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.share:focus-visible{outline:2px solid #cfe0ff;outline-offset:-4px;border-radius:8px}
+.share svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.sheet{--bg:#fff;--fg:#1d1c1a;--muted:#6e6a62;--line:#e4e1da;--accent:#2f5fd1;--accent-fg:#fff;--danger:#b4321f;
+  position:fixed;inset:auto 0 0 0;box-sizing:border-box;width:min(480px,100%);max-height:88vh;margin:0 auto;padding:0 18px
+  calc(18px + env(safe-area-inset-bottom));overflow:auto;border:0;border-radius:18px 18px 0 0;background:var(--bg);color:var(--fg);
+  font:400 15px/1.45 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;text-align:left;white-space:normal}
+.sheet::backdrop{background:rgb(0 0 0 / .45)}
+@media (prefers-color-scheme:dark){.sheet{--bg:#1f1f1f;--fg:#ece9e2;--muted:#9d998f;--line:#2d2d2d;--accent:#7aa2ff;
+  --accent-fg:#0c1430;--danger:#f0735f}}
+.sheet header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0 4px}
+.sheet h2{margin:0;font-size:18px;font-weight:700}
+.sheet .x{flex:none;width:44px;height:44px;margin-right:-12px;border:0;background:none;color:var(--muted);font:inherit;font-size:26px;cursor:pointer}
+.sheet p{margin:8px 0;overflow-wrap:anywhere}
+.sheet .muted{color:var(--muted);font-size:13.5px}
+.sheet .err{color:var(--danger);font-size:13.5px}
+.sheet input{display:block;box-sizing:border-box;width:100%;min-height:44px;margin:10px 0;padding:8px 12px;border:1px solid var(--line);
+  border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:16px}
+.sheet .acts{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.sheet .acts button,.sheet .ask button{box-sizing:border-box;min-height:44px;padding:8px 16px;border:1px solid var(--line);border-radius:8px;
+  background:none;color:var(--fg);font:inherit;font-weight:600;cursor:pointer}
+.sheet .acts .pri,.sheet .ask .pri{border:0;background:var(--accent);color:var(--accent-fg)}
+.sheet .acts .dng,.sheet .ask .dng{border:0;background:var(--danger);color:#fff}
+.sheet button:disabled{opacity:.5;cursor:default}
+.sheet button:focus-visible,.sheet input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sheet .ask{margin:8px 0;padding:12px;border:1px solid var(--line);border-radius:12px}
+</style>"""
+_SHARE_ICON = (
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>'
+)
+
+
+def render(app: dict, site: str, *, guest: bool = False, share: bool = False) -> str:
+    """The banner for one app (an entry from list_artifacts), linking to the front page of `site`. `guest` is the
+    banner of a public page: logo, icon and name, with no link and no back arrow. `share` adds the share button
+    at the right (owner pages of public apps)."""
+    name = f'{_icon(app)}<span class="name">{escape(app.get("title") or "")}</span>'
+    logo = '<img class="hub" src="/static/logo.svg" alt="" width="18" height="18"><span class="sep"></span>'
+    if guest:
+        return (f'<hub-banner><template shadowrootmode="open">{_STYLE}'
+                f'<div class="row">{logo}{name}</div></template></hub-banner>')
     label = escape(i18n.t("banner.back", site=site))
-    return (
-        f'<hub-banner><template shadowrootmode="open">{_STYLE}'
+    link = (
         f'<a href="/" aria-label="{label}" title="{label}">'
-        '<span class="back" aria-hidden="true">‹</span>'
-        '<img class="hub" src="/static/logo.svg" alt="" width="18" height="18">'
-        '<span class="sep"></span>'
-        f'{_icon(app)}<span class="name">{escape(app.get("title") or "")}</span>'
-        "</a></template></hub-banner>"
+        f'<span class="back" aria-hidden="true">‹</span>{logo}{name}</a>'
     )
+    if share:
+        share_label = escape(i18n.t("share.button"))
+        link = (f'{_SHARE_STYLE}<div class="bar">{link}<button class="share" type="button" '
+                f'aria-label="{share_label}" title="{share_label}">{_SHARE_ICON}</button></div>'
+                f'<dialog class="sheet" aria-labelledby="share-heading"><header><h2 id="share-heading">{share_label}</h2>'
+                f'<button class="x" type="button" aria-label="{escape(i18n.t("js.share.close"))}">×</button></header>'
+                f'<div class="body"></div></dialog>')
+    return f'<hub-banner><template shadowrootmode="open">{_STYLE}{link}</template></hub-banner>'

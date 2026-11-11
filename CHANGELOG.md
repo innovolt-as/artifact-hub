@@ -1,5 +1,52 @@
 # Changelog
 
+## v1.9.0 (unreleased)
+
+### Before you upgrade
+
+- Nothing to do with the Caddy that ships with the hub. With another reverse proxy, make sure it sets `X-Forwarded-For`
+  and that the hub's port cannot be reached around it: the limit on guest writes per IP address goes by that header.
+
+### New
+
+- Public sharing. An app can be switched on for it (*Public sharing* in its settings on the admin page, or
+  `public_sharing` from Claude; it needs shared data). A user then makes a secret link to it, one per *share name* such
+  as one per list, in the share sheet behind the new button in the banner, or under *Shared links* on the settings page.
+  Anyone with the link opens the app without logging in, reads what the user put in `public/<name>/...` and
+  leaves replies in `guests/<name>/...`, which they can delete again. A reply with a fixed id can be made by only one guest, so an app can let one person
+  take an item. Guests are limited to 4096 bytes per reply, 500 replies per link and, per hour, 30 writes per IP
+  address and 200 per link. The user can turn a link off, replace it, or clear the guests' replies. See
+  [APPS.md](docs/APPS.md#public-sharing).
+- `window.claude.use("share")`, the same for the owner and a guest on a public page, so one page can serve both.
+- *Hide guests' replies from the owner* for apps that keep a surprise, and *Guests can read* for shared collections
+  a guest may read one document at a time by id.
+- An *agent zone*: with it on, an admin and a scheduled agent can read and write `data/users/<e-mail>/agent/...` for every
+  user of the app, and `list_app_data` lists those paths. The rest of a user's branch stays private.
+- The Claude connector knows about public sharing: `public_sharing`, `public_read`, `guests_hidden` and `agent_zone` in
+  `create_app` and `update_app_info`, shown by `list_apps` and `get_app`, and a paragraph in its instructions. See
+  [CONNECTOR.md](docs/CONNECTOR.md#public-sharing).
+- A card recipe gets `user`, the viewer's e-mail address in lower case, to find their own branch in a shared app.
+
+### Changed
+
+- The settings of an app on the admin page are in four groups: *Who can open*, *Data*, *Public sharing* and *Display*.
+- *Delete my data* also removes the user's secret links, their public and guest zones and the guest replies on their lists.
+  Removing a person from the hub removes their links.
+- Deleting an app also deletes its secret links, and its guest replies if *Public sharing* or *Hide guests' replies* is
+  on. The rest of its data stays, as before.
+
+### Fixed
+
+- An upload that is refused (not `.html` or `.zip`, a zip without `index.html` or with paths outside it, or a file that
+  is not a zip) leaves the app as it was. Before, it had already removed the app's page and settings; this bug is older
+  than this version. With public sharing it could also show the owner the guest replies hidden from them after the next
+  upload.
+- Deleting an app removes its links and guest replies before its files, in one step, so a delete that fails leaves the
+  app whole and can be tried again.
+- Writes by logged-in users (an app's `db` and `set_app_data` in Claude) refuse `NaN`, `Infinity` and lone surrogates in
+  strings with *Invalid JSON*, as guest writes do. Such a value used to be stored and break later reads of the document,
+  and a lone surrogate gave a bare error 500.
+
 ## v1.8.0 (2026-11-04)
 
 ### New

@@ -1,4 +1,5 @@
-// The Apps tab: the list, the search, and the settings sheet per app with its views for edit, access and shared data.
+// The Apps tab: the list, the search, and the settings sheet per app with its views for edit, access, shared data and
+// public sharing.
 (() => {
   const { T, $, fmt, postJson, failText, reach } = window.Admin;
   const sheet = $('appSheet');
@@ -74,11 +75,29 @@
     $('asWarn').hidden = d.warned !== '1';
     $('asAccessLabel').textContent = d.label;
     $('asSwitches').hidden = link;
-    $('asData').checked = d.shared === '1';
-    $('asAppend').hidden = d.shared !== '1';  // add-only collections only exist in shared data
+    for (const id of ['asBannerRow', 'asOfflineRow', 'asOfflineHint']) $(id).hidden = link;  // a link card has no page of its own
+    const shared = d.shared === '1', pub = d.public === '1';
+    $('asData').checked = shared;
+    // Everything below needs shared data: add-only collections, the agent zone and public sharing
+    $('asAppend').hidden = !shared;
     $('asAppendLabel').textContent = d.append ? d.append.split(',').join(', ') : T.appendNone;
+    $('asAgentRow').hidden = !shared;
+    $('asAgentHint').hidden = !shared;
+    $('asAgent').checked = d.agent === '1';
+    $('asPublicGroup').hidden = !shared;
+    $('asPublic').checked = pub;
+    for (const id of ['asPublicRead', 'asGuestsHiddenRow', 'asLinks']) $(id).hidden = !pub;  // only while the switch is on
+    $('asPublicReadLabel').textContent = d.publicRead ? d.publicRead.split(',').join(', ') : T.appendNone;
+    $('asGuestsHidden').checked = d.guestsHidden === '1';
+    if (shared && pub) showLinks(d.slug);
     $('asBanner').checked = d.banner === '1';
     $('asOffline').checked = d.offline === '1';
+  }
+  // The number of active links is not in the list: ask for it when the sheet shows a public app
+  async function showLinks(slug) {
+    $('asLinksCount').textContent = '';
+    const r = await reach(fetch('/api/public-settings?slug=' + encodeURIComponent(slug)));
+    if (r.ok && slug === current) $('asLinksCount').textContent = (await r.json()).links;
   }
   // visit counts every change of view, so a save or a preview that lands late can tell if the person is still there
   let visit = 0, shownAt = 0;
@@ -89,6 +108,9 @@
     sheet.style.minHeight = view === 'main' ? '' : `min(${sheet.offsetHeight}px, 86vh)`;
     // However a view is left (‹, Cancel, a save, the sheet closing), the switch says what the app has now
     $('asData').checked = rowOf(current)?.dataset.shared === '1';
+    $('asPublic').checked = rowOf(current)?.dataset.public === '1';
+    $('asAgent').checked = rowOf(current)?.dataset.agent === '1';
+    $('asGuestsHidden').checked = rowOf(current)?.dataset.guestsHidden === '1';
     for (const v of sheet.querySelectorAll('.view')) {
       v.hidden = v.dataset.view !== view;
       if (v.hidden) continue;
@@ -130,7 +152,7 @@
 
   // One save at a time: a tap on a switch while one runs does nothing
   let busy = false, saving = false;
-  for (const box of [$('asData'), $('asBanner'), $('asOffline')]) box.addEventListener('click', e => { if (busy || saving) e.preventDefault(); });
+  for (const box of [$('asData'), $('asBanner'), $('asOffline'), $('asAgent'), $('asPublic'), $('asGuestsHidden')]) box.addEventListener('click', e => { if (busy || saving) e.preventDefault(); });
   // work() saves and returns the response, or null when a view takes over from here
   async function flip(work) {
     const slug = current;
@@ -148,6 +170,9 @@
   }
   $('asBanner').addEventListener('change', () => flip(() => postSlug('/api/toggle-banner', current)));
   $('asOffline').addEventListener('change', () => flip(() => postSlug('/api/toggle-offline', current)));
+
+  // The sheet shows what the row says, so a switch that is not saved (a refused confirmation, an error) goes back
+  const unflip = () => { const li = rowOf(current); if (li) render(li); };
 
   // A save from a view goes back to the main view, which by then shows the new value. A failure stays in the view with
   // its error, for another try, unless the person has left the view: then fail() finds a place for it.
@@ -329,4 +354,51 @@
   const share = copy => save('shError', () => setData(true, copy));
   $('shCopy').onclick = () => share(true);
   $('shEmpty').onclick = () => share(false);
+
+  // --- public sharing and the agent zone (app/public.py). The server checks the rules; a 400 flips the switch back
+  const setPublic = body => reach(postJson('/api/public-settings', { slug: current, ...body }));
+  const publicState = async () => {
+    const r = await reach(fetch('/api/public-settings?slug=' + encodeURIComponent(current)));
+    return r.ok ? r.json() : r;
+  };
+  // A switch that first asks the server what its change would touch, then asks the person. ask() gets the new state and
+  // the server's numbers and returns the question, or null for none.
+  function guarded(box, key, ask) {
+    box.addEventListener('change', () => flip(async () => {
+      const on = box.checked;
+      const p = await publicState();
+      if (p.ok === false) return p;
+      const question = ask(on, p);
+      if (question && !confirm(question)) { unflip(); return null; }
+      return setPublic({ [key]: on });
+    }));
+  }
+  // Turning a zone on makes documents that already sit under its name visible: say how many. Turning sharing off stops
+  // the links, so that asks too when there are any
+  guarded($('asPublic'), 'public', (on, p) =>
+    on ? (p.clash > 0 && fmt(T.confirmClashPublic, { n: p.clash }))
+      : (p.links > 0 && fmt(p.links === 1 ? T.confirmLinksOffOne : T.confirmLinksOffOther, { n: p.links })));
+  guarded($('asAgent'), 'agent', (on, p) => on && p.clash > 0 && fmt(T.confirmClashAgent, { n: p.clash }));
+  // Showing the replies to their owners again deletes them, so the server only agrees with wipe_guests
+  $('asGuestsHidden').addEventListener('change', () => flip(async () => {
+    const hide = $('asGuestsHidden').checked;
+    if (hide) return setPublic({ guests_hidden: true });
+    const p = await publicState();
+    if (p.ok === false) return p;
+    if (p.guest_docs > 0 && !confirm(fmt(T.confirmWipeGuests, { n: p.guest_docs }))) { unflip(); return null; }
+    return setPublic({ guests_hidden: false, wipe_guests: p.guest_docs > 0 });
+  }));
+
+  // "Guests can read": names like the add-only collections
+  const prForm = $('publicReadForm');
+  $('asPublicRead').onclick = () => {
+    $('prNames').value = rowOf(current).dataset.publicRead.split(',').filter(Boolean).join(', ');
+    $('prError').textContent = '';
+    show('public_read');
+  };
+  prForm.addEventListener('submit', e => {
+    e.preventDefault();
+    const names = new FormData(prForm).get('names').split(',').map(n => n.trim()).filter(Boolean);
+    save('prError', () => setPublic({ public_read: names }));
+  });
 })();

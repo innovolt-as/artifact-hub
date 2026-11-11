@@ -9,17 +9,26 @@
  *                data-append are open for everyone to add documents to, not to change or delete
  *   downloads -> save({filename, data}) as a plain browser download
  *   user      -> who is viewing (the logged-in e-mail)
+ *   share     -> only in an app with public sharing (data-public="1"), and on its public page /p/<token>/
+ *                (data-guest="1", no login, no e-mail): the same API for the owner and for a guest. Its db reaches
+ *                the public/ and guests/ zones of the owner's branch for one share name; a guest gets them through
+ *                /api/public/<token> with a secret of their own, never an e-mail or a name in a path. On a public
+ *                page db and user resolve null.
  * Other capabilities (sample, room, mcp, ...) resolve null, which artifacts must handle anyway.
  */
 (function () {
   if (window.claude && window.claude.__hub) return;
   const me = document.currentScript;
   const SLUG = me.dataset.slug;
-  const EMAIL = me.dataset.user;
+  const GUEST = me.dataset.guest === "1";  // the public page /p/<token>/: no login, no e-mail
+  const EMAIL = me.dataset.user || "";
   const ADMIN = me.dataset.admin === "1";
   const SHARED = me.dataset.shared === "1";
   const APPEND = (me.dataset.append || "").split(",").filter(Boolean);  // add-only collections of a shared app
   const API = `/api/store/${encodeURIComponent(SLUG)}`;
+  const TOKEN = me.dataset.token || "";
+  const SHARING = GUEST || me.dataset.public === "1";
+  const PUBLIC_READ = (me.dataset.publicRead || "").split(",").filter(Boolean);  // what share.shared may read
   const POLL_MS = 5000;
   // Texts come from the hub's language files as data-strings on this script tag; without them the key shows.
   let S = {};
@@ -30,19 +39,20 @@
   // ------------------------------------------------------------------ helpers
   const dbError = (code, message) => Object.assign(new Error(message), { code, message });
 
-  async function api(method, url, body) {
+  // extra: more request headers (a guest's secret). A guest is never sent to the login page; too many requests (429) is theirs to see.
+  async function api(method, url, body, extra) {
     let r;
     try {
       r = await fetch(url, {
         method,
-        headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+        headers: { ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...extra },
         body: body !== undefined ? JSON.stringify(body) : undefined,
         credentials: "same-origin",
       });
     } catch (e) {
       throw dbError("unavailable", tr("network"));
     }
-    if (r.redirected && new URL(r.url).pathname === "/login") {
+    if (!GUEST && r.redirected && new URL(r.url).pathname === "/login") {
       location.href = "/login?next=" + encodeURIComponent(location.pathname);
       throw dbError("unavailable", tr("not_logged_in"));
     }
@@ -50,7 +60,8 @@
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       // claude.ai has no permission code; a refused write (403) cannot succeed on retry either
-      const code = { 400: "invalid_argument", 403: "invalid_argument", 404: "invalid_argument", 413: "invalid_argument" }[r.status] || "unavailable";
+      const code = { 400: "invalid_argument", 403: "invalid_argument", 404: "invalid_argument", 413: "invalid_argument",
+        ...(GUEST ? { 429: "resource_exhausted" } : {}) }[r.status] || "unavailable";
       throw dbError(code, j.detail || tr("error_status", { status: r.status }));
     }
     return r.json();
@@ -161,7 +172,7 @@
     return reg.active;
   }
   try {
-    const sw = navigator.serviceWorker;
+    const sw = GUEST ? null : navigator.serviceWorker;
     if (sw) {
       const parsed = document.readyState === "loading"
         ? new Promise((resolve) => document.addEventListener("DOMContentLoaded", resolve, { once: true })) : null;
@@ -175,6 +186,12 @@
     }
   } catch (e) { /* no service workers here */ }
 
+  // ------------------------------------------------------------------ where a reference reads and writes
+  // A backend says where the data lives: base is the API root, map turns the path the app uses into the path sent
+  // (it throws for a path the backend does not reach, so the promise rejects before any request), headers adds to a request.
+  // createOnly (a guest) rejects update() before any request: the guest API never merges.
+  const STORE = { base: API, map: (p) => p, headers: () => ({}) };
+
   // ------------------------------------------------------------------ queries
   const OPS = {
     "==": (a, b) => a === b, "!=": (a, b) => a !== b,
@@ -183,9 +200,9 @@
     "array-contains": (a, b) => Array.isArray(a) && a.includes(b),
   };
 
-  function makeQuery(path, filters, order, max) {
+  function makeQuery(path, filters, order, max, be = STORE) {
     async function run() {
-      const { docs } = await api("GET", `${API}/c?path=${encodeURIComponent(path)}`);
+      const { docs } = await api("GET", `${be.base}/c?path=${encodeURIComponent(be.map(path))}`, undefined, be.headers());
       let list = docs.filter((d) => filters.every(([f, op, v]) => f in d.data && OPS[op](d.data[f], v)));
       if (order) {
         const [f, dir] = order, k = dir === "desc" ? -1 : 1;
@@ -213,10 +230,10 @@
     return {
       where: (f, op, v) => {
         if (!OPS[op]) throw new TypeError(tr("unknown_op", { op }));
-        return makeQuery(path, [...filters, [f, op, v]], order, max);
+        return makeQuery(path, [...filters, [f, op, v]], order, max, be);
       },
-      orderBy: (f, dir = "asc") => makeQuery(path, filters, [f, dir], max),
-      limit: (n) => makeQuery(path, filters, order, n),
+      orderBy: (f, dir = "asc") => makeQuery(path, filters, [f, dir], max, be),
+      limit: (n) => makeQuery(path, filters, order, n, be),
       get: async () => querySnap(await run()),
       onSnapshot(next, error) {
         let prev = null, last = null;
@@ -233,18 +250,21 @@
   }
 
   // ------------------------------------------------------------------ references
-  function docRef(path) {
+  function docRef(path, be = STORE) {
     path = checkPath(path, true);
     const id = path.split("/").pop();
-    const url = `${API}/d?path=${encodeURIComponent(path)}`;
-    const get = async () => docSnap(id, (await api("GET", url)).data ?? undefined);
-    const write = async (method, u, body) => { await api(method, u, body); refreshAll(); };
+    const url = () => `${be.base}/d?path=${encodeURIComponent(be.map(path))}`;
+    const get = async () => docSnap(id, (await api("GET", url(), undefined, be.headers())).data ?? undefined);
+    const write = async (method, suffix, body) => { await api(method, url() + suffix, body, be.headers()); refreshAll(); };
     return {
       id, path,
       get,
-      set: (data) => write("PUT", url, data),
-      update: (data) => write("PUT", url + "&merge=1", data),
-      delete: () => write("DELETE", url),
+      set: (data) => write("PUT", "", data),
+      update: async (data) => {
+        if (be.createOnly) throw dbError("invalid_argument", tr("guest_no_update"));
+        return write("PUT", "&merge=1", data);
+      },
+      delete: () => write("DELETE", ""),
       acquire: async () => ({ acquired: true, expiresAt: new Date(Date.now() + 30000).toISOString() }), // one user per store
       onSnapshot(next, error) {
         let last;
@@ -255,20 +275,21 @@
           next(snap);
         }, error);
       },
-      collection: (sub) => collectionRef(path + "/" + sub),
+      collection: (sub) => collectionRef(path + "/" + sub, be),
     };
   }
 
-  function collectionRef(path) {
+  function collectionRef(path, be = STORE) {
     path = checkPath(path, false);
-    return Object.assign(makeQuery(path, [], null, 0), {
+    return Object.assign(makeQuery(path, [], null, 0, be), {
       path,
-      doc: (id) => docRef(path + "/" + (id || newId())),
-      async add(data) { const ref = docRef(path + "/" + newId()); await ref.set(data); return ref; },
+      doc: (id) => docRef(path + "/" + (id || newId()), be),
+      async add(data) { const ref = docRef(path + "/" + newId(), be); await ref.set(data); return ref; },
     });
   }
 
-  const db = Object.freeze({ doc: docRef, collection: collectionRef });
+  const dbOf = (be) => Object.freeze({ doc: (p) => docRef(p, be), collection: (p) => collectionRef(p, be) });
+  const db = dbOf(STORE);
 
   // ------------------------------------------------------------------ downloads
   const downloads = Object.freeze({
@@ -304,10 +325,78 @@
     search: async () => [profile],
   });
 
+  // ------------------------------------------------------------------ share (public sharing)
+  // The guest secret proves which guest documents are theirs: random, kept in localStorage, in memory when that fails.
+  // A stored value that is not one this script made (32 lower-case hex characters) is replaced.
+  let secret = null;
+  function guestSecret() {
+    if (secret) return secret;
+    try { secret = localStorage.getItem("hub_guest"); } catch (e) { /* no storage */ }
+    if (!/^[0-9a-f]{32}$/.test(secret || "")) {
+      secret = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      try { localStorage.setItem("hub_guest", secret); } catch (e) { /* kept in memory */ }
+    }
+    return secret;
+  }
+  const SHARE_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+  const ZONES = ["public", "guests"];
+  const zoneOf = (p) => {
+    const [zone, ...rest] = segs(p);
+    if (!ZONES.includes(zone)) throw dbError("invalid_argument", tr("bad_share_path", { path: p }));
+    return [zone, rest];
+  };
+
+  // current is what the banner's share button acts on: the name and title the app set last (a guest only has its link's name).
+  const current = { name: GUEST ? me.dataset.shareName : "main", title: "" };
+  function shareCap() {
+    // Owner: public/<rest> is stored in the owner's branch under the share name; guest: the public API takes the path as it is.
+    const backend = (name) => GUEST
+      ? { base: `/api/public/${encodeURIComponent(TOKEN)}`, map: (p) => (zoneOf(p), p), headers: () => ({ "X-Hub-Guest": guestSecret() }),
+        createOnly: true }
+      : { base: API, headers: () => ({}), map: (p) => {
+        const [zone, rest] = zoneOf(p);
+        return ["data", "users", EMAIL, zone, name(), ...rest].join("/");
+      } };
+    const ownerOnly = () => dbError("invalid_argument", tr("share_owner_only"));
+    // Only a document straight in a public_read collection, for the owner as for a guest, so both see the same refusals.
+    const shared = Object.freeze({
+      doc(path) {
+        path = checkPath(path, true);
+        const [col, id] = path.split("/");
+        const open = path.split("/").length === 2 && PUBLIC_READ.includes(col);
+        const url = GUEST ? `/api/public/${encodeURIComponent(TOKEN)}/s?path=` : `${API}/d?path=`;
+        return Object.freeze({ get: async () => {
+          if (!open) throw dbError("invalid_argument", tr("not_public_read", { path }));
+          return docSnap(id, (await api("GET", url + encodeURIComponent(path), undefined, GUEST ? { "X-Hub-Guest": guestSecret() } : undefined)).data ?? undefined);
+        } });
+      },
+    });
+    return Object.freeze({
+      mode: GUEST ? "guest" : "owner",
+      get name() { return current.name; },
+      db: dbOf(backend(() => current.name)),
+      shared,
+      scope(name, title) {
+        if (GUEST) throw ownerOnly();
+        if (typeof name !== "string" || !SHARE_NAME.test(name)) throw dbError("invalid_argument", tr("bad_share_name", { name }));
+        current.name = name;
+        current.title = String(title ?? "");
+        return dbOf(backend(() => name));
+      },
+      remove: async (name) => {
+        if (GUEST) throw ownerOnly();
+        if (typeof name !== "string" || !SHARE_NAME.test(name)) throw dbError("invalid_argument", tr("bad_share_name", { name }));
+        await api("POST", `/api/share/${encodeURIComponent(SLUG)}`, { name, action: "off" });
+      },
+    });
+  }
+
   // ------------------------------------------------------------------ window.claude
-  const caps = { db, downloads, user };
+  const sharing = SHARING ? shareCap() : null;
+  const caps = GUEST ? { downloads, share: sharing } : { db, downloads, user, share: sharing };
   window.claude = Object.freeze({
     __hub: true,
+    ...(sharing ? { __share: current } : {}),
     use: (name) => new Promise((resolve) => setTimeout(() => resolve(caps[name] || null), 0)),
   });
 })();

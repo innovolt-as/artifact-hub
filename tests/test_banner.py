@@ -226,3 +226,32 @@ def test_app_page_gets_fixed_banner(admin_client, upload):
 def test_anchors_land_under_the_fixed_banner():
     # zero specificity and not !important, so an app's own scroll-padding-top wins; 0 without the banner
     assert ":where(html){scroll-padding-top:var(--hub-banner-h,0px)}" in banner.CSS_HOST.replace(" ", "")
+
+
+# ---------------------------------------------------------------- public sharing
+def test_guest_banner_is_not_a_link():
+    out = banner.render(APP, "S", guest=True)
+    assert "Matboka" in out and "/static/logo.svg" in out
+    assert "<a" not in out and "href=" not in out and "‹" not in out and "share" not in out
+
+
+def test_share_button_only_when_asked():
+    out = banner.render(APP, "S", share=True)
+    assert '<button class="share" type="button" aria-label="Del"' in out
+    assert 'href="/"' in out and out.index("Matboka") < out.index('class="share"')
+    assert "share" not in banner.render(APP, "S")
+
+
+def test_share_sheet_is_inside_the_shadow_root_and_only_with_the_button():
+    out = banner.render(APP, "S", share=True)
+    sheet = out.split('<dialog class="sheet"')[1].split("</dialog>")[0]
+    assert 'aria-labelledby="share-heading"' in sheet and 'class="body"' in sheet
+    assert out.index("<dialog") < out.index("</template>") and out.endswith("</template></hub-banner>")
+    assert "<dialog" not in banner.render(APP, "S") and "<dialog" not in banner.render(APP, "S", guest=True)
+    assert ">Del<" in sheet and 'aria-label="Lukk"' in sheet
+
+
+def test_share_sheet_touch_targets_and_input_size():
+    css = banner.render(APP, "S", share=True).replace(" ", "").replace("\n", "")
+    assert "min-height:44px" in css and "font-size:16px" in css and "env(safe-area-inset-bottom)" in css
+    assert "prefers-color-scheme:dark" in css

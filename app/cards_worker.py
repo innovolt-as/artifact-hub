@@ -1,7 +1,7 @@
 """Runs card recipes in V8 for app/cards.py, in a process of its own so the server can kill it.
 
 One JSON line in and one out per job, over stdin/stdout:
-  in:  {"source", "docs", "cols", "today", "now", "tz", "time_limit", "memory_limit"}
+  in:  {"source", "docs", "cols", "today", "now", "tz", "user", "time_limit", "memory_limit"}
   out: {"text": str|null} | {"need": [["doc"|"col", path], ...]} | {"error": code, "message"?: str}
 Every job gets a fresh V8 context, so nothing carries over from one recipe run to the next. The process writes
 {"ready": true} once V8 is loaded, before the first job. A recipe stuck after an `await` cannot be stopped from
@@ -19,7 +19,7 @@ from pathlib import Path
 from py_mini_racer import JSEvalException, JSOOMException, JSPromise, JSPromiseError, JSTimeoutException, MiniRacer
 
 SHIM = Path(__file__).with_name("cards_shim.js").read_text(encoding="utf-8")
-INPUT = ("docs", "cols", "today", "now", "tz")
+INPUT = ("docs", "cols", "today", "now", "tz", "user")
 CUT = 1000  # characters of a line or an error message passed on; a card shows 140
 
 

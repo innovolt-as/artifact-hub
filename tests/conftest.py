@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import applock, main, passwd  # noqa: E402
+from app import applock, main, passwd, public  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -43,9 +43,10 @@ def _clean():
     with main.db() as con:
         for table in ("magic_tokens", "logins", "docs", "app_data",
                       "oauth_clients", "oauth_requests", "oauth_codes", "oauth_tokens", "visits", "prefs", "invites", "passwords",
-                      "claude_writes", "app_codes", "app_locks"):
+                      "claude_writes", "app_codes", "app_locks", "public_links"):
             con.execute(f"DELETE FROM {table}")
     main._ip_sends.clear()
+    public._guest_writes.clear()
     yield
 
 

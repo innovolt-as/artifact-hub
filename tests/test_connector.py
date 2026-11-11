@@ -5,6 +5,7 @@ from datetime import datetime
 
 import pytest
 
+from app import i18n
 from tests.conftest import make_client
 
 PAGE = "<!doctype html><html><body><h1>Hei</h1></body></html>"
@@ -321,3 +322,221 @@ def test_copy_my_data_says_when_shared_data_exists(mcp, token, hub):
     res = call(mcp, token, "update_app_info", slug="radar", shared_data=True, copy_my_data=True)
     assert not res.get("isError"), res
     assert "fra før" in text(res) and "Kopierte" not in text(res)
+
+
+# ---------------------------------------------------------------- public sharing and the agent zone
+ME = "admin@test.no"
+OTHER = "user@test.no"
+
+
+def _shared_app(hub, mcp, token, slug="radar", **info):
+    _page(hub, slug)
+    res = call(mcp, token, "update_app_info", slug=slug, shared_data=True, **info)
+    assert not res.get("isError"), res
+
+
+def _guest_reply(hub, slug="radar", doc_id="r1"):
+    """A reply a guest left in the connected user's guests/main zone (stored as the guest API stores it)."""
+    from app import public
+    with hub.db() as con:
+        con.execute("INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES (?,?,?,?,?,0)",
+                    (slug, ME, public.zone_collection(ME, "guests", "main"), doc_id,
+                     json.dumps({"t": "secret wish", "_guest": "h"})))
+
+
+def _app(mcp, token, slug="radar"):
+    return next(a for a in json.loads(text(call(mcp, token, "list_apps"))) if a["slug"] == slug)
+
+
+def test_update_app_info_sets_public_settings(mcp, token, hub):
+    _page(hub, "radar")
+    res = call(mcp, token, "update_app_info", slug="radar", shared_data=True, public_sharing=True,
+               public_read=["products"], guests_hidden=True, agent_zone=True)
+    assert not res.get("isError"), res
+    meta = hub._read_meta(hub.ARTIFACTS_DIR / "radar.meta.json")
+    assert (meta["public"], meta["public_read"], meta["guests_hidden"], meta["agent"]) == (
+        True, ["products"], True, True)
+    res = call(mcp, token, "update_app_info", slug="radar", public_sharing=False, public_read=[], agent_zone=False)
+    assert not res.get("isError"), res
+    meta = hub._read_meta(hub.ARTIFACTS_DIR / "radar.meta.json")
+    assert "public" not in meta and "public_read" not in meta and "agent" not in meta
+
+
+def test_public_settings_need_shared_data(mcp, token, hub):
+    _page(hub, "radar")
+    res = call(mcp, token, "update_app_info", slug="radar", public_sharing=True)
+    assert res["isError"]
+    assert "public" not in hub._read_meta(hub.ARTIFACTS_DIR / "radar.meta.json")
+
+
+def test_create_app_with_public_settings(mcp, token, hub):
+    res = call(mcp, token, "create_app", slug="radar", html=PAGE, title="Radar", shared_data=True,
+               public_sharing=True, public_read=["products"], guests_hidden=True, agent_zone=True)
+    assert not res.get("isError"), res
+    app = _app(mcp, token)
+    assert (app["public"], app["public_read"], app["guests_hidden"], app["agent"]) == (
+        True, ["products"], True, True)
+
+
+def test_list_apps_shows_public_settings(mcp, token, hub):
+    _page(hub, "plain")
+    plain = _app(mcp, token, "plain")
+    assert (plain["public"], plain["public_read"], plain["guests_hidden"], plain["agent"]) == (
+        False, [], False, False)
+    _shared_app(hub, mcp, token, public_sharing=True, public_read=["products"], agent_zone=True)
+    app = _app(mcp, token)
+    assert (app["public"], app["public_read"], app["guests_hidden"], app["agent"]) == (True, ["products"], False, True)
+    got = json.loads(text(call(mcp, token, "get_app", slug="radar")))
+    assert (got["public"], got["public_read"], got["guests_hidden"], got["agent"]) == (
+        True, ["products"], False, True)
+
+
+def test_connector_cannot_unhide_guest_replies(mcp, token, hub):
+    _shared_app(hub, mcp, token, public_sharing=True, guests_hidden=True)
+    _guest_reply(hub)
+    res = call(mcp, token, "update_app_info", slug="radar", guests_hidden=False)
+    assert res["isError"]
+    assert _app(mcp, token)["guests_hidden"] is True
+
+
+def test_connector_never_returns_hidden_guest_zone(mcp, token, hub):
+    _shared_app(hub, mcp, token, public_sharing=True, guests_hidden=True)
+    _guest_reply(hub)
+    zone = f"data/users/{ME}/guests/main"
+    overview = text(call(mcp, token, "list_app_data", slug="radar"))
+    assert "guests" not in overview and "r1" not in overview
+    listing = text(call(mcp, token, "list_app_data", slug="radar", collection=zone))
+    assert json.loads(listing) == {} and "secret wish" not in listing
+    got = json.loads(text(call(mcp, token, "get_app_data", slug="radar", path=f"{zone}/r1")))
+    assert got["exists"] is False and got["data"] is None
+    # visible once the replies are not hidden, and never with the _guest stamp
+    call(mcp, token, "update_app_info", slug="radar", guests_hidden=False)  # refused while replies exist
+    assert "secret wish" not in text(call(mcp, token, "list_app_data", slug="radar", collection=zone))
+
+
+def test_visible_guest_zone_hides_only_the_stamp(mcp, token, hub):
+    _shared_app(hub, mcp, token, public_sharing=True)
+    _guest_reply(hub)
+    zone = f"data/users/{ME}/guests/main"
+    got = json.loads(text(call(mcp, token, "get_app_data", slug="radar", path=f"{zone}/r1")))
+    assert got["data"] == {"t": "secret wish"}
+
+
+def test_connector_reads_and_writes_other_users_agent_zone(mcp, token, hub):
+    _shared_app(hub, mcp, token, agent_zone=True)
+    path = f"data/users/{OTHER}/agent/briefs/today"
+    res = call(mcp, token, "set_app_data", slug="radar", path=path, data={"n": 1})
+    assert not res.get("isError"), res
+    assert json.loads(text(call(mcp, token, "get_app_data", slug="radar", path=path)))["data"] == {"n": 1}
+    res = call(mcp, token, "delete_app_data", slug="radar", path=path)
+    assert text(res) == i18n.t("mcp.deleted", path=path)
+    # outside the agent zone another user's branch stays closed
+    res = call(mcp, token, "set_app_data", slug="radar", path=f"data/users/{OTHER}/private/x", data={})
+    assert res["isError"]
+
+
+def test_agent_zone_closed_without_the_setting(mcp, token, hub):
+    _shared_app(hub, mcp, token)
+    res = call(mcp, token, "set_app_data", slug="radar", path=f"data/users/{OTHER}/agent/x/y", data={})
+    assert res["isError"]
+
+
+def test_overview_lists_agent_zones_of_all_users(mcp, token, hub):
+    _shared_app(hub, mcp, token, agent_zone=True)
+    for who in (OTHER, "third@test.no"):
+        call(mcp, token, "set_app_data", slug="radar", path=f"data/users/{who}/agent/briefs/a", data={"n": 1})
+    overview = json.loads(text(call(mcp, token, "list_app_data", slug="radar")))
+    assert overview[f"data/users/{OTHER}/agent/briefs"] == ["a"]
+    assert overview["data/users/third@test.no/agent/briefs"] == ["a"]
+
+
+def test_delete_in_own_guest_zone_does_not_claim_a_deletion(mcp, token, hub):
+    _shared_app(hub, mcp, token, public_sharing=True, guests_hidden=True)
+    _guest_reply(hub)
+    res = call(mcp, token, "delete_app_data", slug="radar", path=f"data/users/{ME}/guests/main/r1")
+    path = f"data/users/{ME}/guests/main/r1"
+    assert not res.get("isError") and text(res) == i18n.t("mcp.guest_zone_deleted", path=path)
+    assert text(res) != i18n.t("mcp.deleted", path=path)
+
+
+def test_create_app_partly_refused_says_the_app_exists(mcp, token, hub):
+    res = call(mcp, token, "create_app", slug="radar", html=PAGE, title="Radar", shared_data=True,
+               public_sharing=True, public_read=["bad name"])
+    assert res["isError"]
+    assert (hub.ARTIFACTS_DIR / "radar.html").exists()
+    assert text(res).startswith(i18n.t("mcp.created_but", url="https://hub.test/a/radar/", reason="")[:30])
+    assert "bad name" in text(res)
+    # the reason comes last, so the reply reads the same whether or not it ends in a period
+    reason = i18n.t("err.public_read_bad", name="bad name")
+    assert text(res) == i18n.t("mcp.created_but", url="https://hub.test/a/radar/", reason=reason)
+    for lang in ("nb", "en"):
+        assert i18n._load(lang)["mcp.created_but"].endswith(": {reason}"), lang
+
+
+def test_update_app_info_partly_refused_lists_what_went_through(mcp, token, hub):
+    _shared_app(hub, mcp, token, public_sharing=True, guests_hidden=True)
+    _guest_reply(hub)
+    res = call(mcp, token, "update_app_info", slug="radar", title="New title", guests_hidden=False)
+    assert res["isError"]
+    assert i18n.t("mcp.info_updated", slug="radar") in text(res)
+    assert _app(mcp, token)["title"] == "New title" and _app(mcp, token)["guests_hidden"] is True
+
+
+def test_update_app_info_refused_first_step_says_no_progress(mcp, token, hub):
+    res = call(mcp, token, "update_app_info", slug="missing", title="x")
+    assert res["isError"] and i18n.t("mcp.info_updated", slug="missing") not in text(res)
+
+
+def test_delete_guest_zone_path_is_normalized(mcp, token, hub):
+    _shared_app(hub, mcp, token, public_sharing=True, guests_hidden=True)
+    _guest_reply(hub)
+    for path in (f"/data/users/{ME}/guests/main/r1", f"data//users/{ME}/guests/main//r1"):
+        res = call(mcp, token, "delete_app_data", slug="radar", path=path)
+        assert text(res) == i18n.t("mcp.guest_zone_deleted", path=path), path
+
+
+def test_instructions_mention_public_sharing():
+    from app import connector
+    t = connector.INSTRUCTIONS
+    for needle in ("public_sharing", "data/users/<e-mail>/public/<name>/", "data/users/<e-mail>/guests/<name>/",
+                   "data/users/<e-mail>/agent/", 'window.claude.use("share")', "share.scope(name, title)", "by id", "share sheet",
+                   "{ db, today, now, timeZone, user }"):
+        assert needle in t, needle
+    assert "sensitive" in t and "hidden" in t
+    assert "hubCard({{" not in t and "{ db, today, now, timeZone }" not in t
+
+
+# ---------------------------------------------------------------- final review
+@pytest.mark.parametrize("settings", [{}, {"agent_zone": True}])
+def test_delete_in_guests_path_is_plain_where_no_guest_zone_applies(mcp, token, hub, settings):
+    _shared_app(hub, mcp, token, **settings)
+    _guest_reply(hub)
+    path = f"data/users/{ME}/guests/main/r1"
+    assert text(call(mcp, token, "delete_app_data", slug="radar", path=path)) == i18n.t("mcp.deleted", path=path)
+    assert text(call(mcp, token, "delete_app_data", slug="radar", path=path)) == i18n.t("mcp.not_deleted", path=path)
+    _page(hub, "mat")  # personal data
+    path = f"data/users/{ME}/guests/main/x"
+    assert text(call(mcp, token, "delete_app_data", slug="mat", path=path)) == i18n.t("mcp.not_deleted", path=path)
+
+
+@pytest.mark.parametrize("settings", [{"public_sharing": True}, {"guests_hidden": True}])
+def test_delete_in_guest_zone_is_handled_wherever_the_rules_apply(mcp, token, hub, settings):
+    _shared_app(hub, mcp, token, **settings)
+    path = f"data/users/{ME}/guests/main/r1"
+    assert text(call(mcp, token, "delete_app_data", slug="radar", path=path)) == i18n.t("mcp.guest_zone_deleted", path=path)
+    path = f"data/users/{ME}/guests"  # the document guests itself is not in the zone
+    assert text(call(mcp, token, "delete_app_data", slug="radar", path=path)) == i18n.t("mcp.not_deleted", path=path)
+
+
+def test_set_app_data_refuses_values_json_cannot_send_back(mcp, token, hub):
+    _page(hub, "mat")
+    for value in ("NaN", "Infinity", "-Infinity"):  # a lone surrogate is refused before the tool, as a parse error
+        body = ('{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "set_app_data", "arguments": '
+                '{"slug": "mat", "path": "days/d1", "data": {"t": ' + value + '}}}}')
+        r = mcp.post("/mcp", content=body, headers={"Accept": "application/json, text/event-stream",
+                                                    "Authorization": f"Bearer {token}",
+                                                    "content-type": "application/json"})
+        assert r.status_code == 200, r.text
+        res = r.json()["result"]
+        assert res["isError"] and text(res) == i18n.t("store.bad_json"), value
+    assert hub.doc_get("mat", ME, "days/d1") is None

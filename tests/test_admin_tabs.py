@@ -123,7 +123,7 @@ def test_sheet_markup(admin_client):
     for id_ in ("appSheet", "asEdit", "asAccess", "asData", "asBanner", "asOffline", "asDelete", "asError", "asWarn", "appSearch"):
         assert f'id="{id_}"' in html
     assert html.index('id="asBanner"') < html.index('id="asDelete"')
-    assert html.count('role="switch"') == 3
+    assert html.count('role="switch"') == 6  # data, agent zone, public sharing, guests' replies, banner, offline
 
 
 def test_picker_rules_stay_out_of_other_sheets(client):

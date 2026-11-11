@@ -57,7 +57,7 @@ def test_people_app_everywhere(hub, make_page, admin_client, user_client, friend
     assert hub.list_artifacts("user@test.no") == []
     with pytest.raises(hub.HubError):
         hub.doc_scope("p", "user@test.no", "x")
-    assert hub.doc_scope("p", FRIEND, "x") == (FRIEND, "x", None)
+    assert hub.doc_scope("p", FRIEND, "x") == (FRIEND, "x", None, False)
 
 
 def test_admin_only_hidden_from_people_on_its_list(hub, make_page, friend_client):
