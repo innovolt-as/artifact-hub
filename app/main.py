@@ -922,6 +922,39 @@ def service_worker():
                         headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 
 
+@app.get("/p/{token}")
+def public_redirect(token: str):
+    return RedirectResponse(f"/p/{token}/", status_code=301)
+
+
+@app.get("/p/{token}/_icon")
+def public_icon(token: str):
+    found = resolve_link(token)
+    icon = _icon_file(found[0].slug) if found else None
+    if not icon:
+        raise HTTPException(404)
+    return _icon_response(icon, PUBLIC_HEADERS)
+
+
+@app.get("/p/{token}/{path:path}")
+def serve_public(token: str, path: str, request: Request):
+    """An app's page for anyone with the secret link. No login, no visit logged, and the owner's code lock is not
+    asked: the owner chose to make this public. The owner herself is sent on to the app."""
+    found = resolve_link(token)
+    if not found:
+        raise HTTPException(404)
+    link = found[0]
+    if (current_user(request) or "").lower() == link.owner.lower():
+        return RedirectResponse(f"/a/{link.slug}/", status_code=302)
+    root = artifact_root(link.slug)
+    if not root:
+        raise HTTPException(404)
+    target = _app_file(root[0], path)
+    if target.suffix.lower() in (".html", ".htm"):
+        return _html_with_shim(target, link.slug, None, with_banner=_opened(request), guest=link)
+    return FileResponse(target, headers={"Cache-Control": "no-store", **PUBLIC_HEADERS})
+
+
 @app.get("/a/{slug}")
 def artifact_redirect(slug: str):
     return RedirectResponse(f"/a/{slug}/", status_code=301)
@@ -952,10 +985,20 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
     # only a page the browser opens gets the banner, not HTML an app fetches or shows in an iframe
     with_banner = precache or _opened(request)
     offline = meta.get("offline") is True and not protected
+    target = _app_file(root, path)
+    if target.suffix.lower() in (".html", ".htm"):
+        return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected, offline=offline, copy=precache)
+    # a locked app's files must not outlive the unlock in the browser's cache
+    return FileResponse(target, headers={"Cache-Control": "no-store"} if protected else None)
+
+
+def _app_file(root: Path, path: str) -> Path:
+    """The file of an app that `path` names: the page of a single-page app, a file inside a folder app. 404 for
+    anything else (another page, a path out of the folder, the app's meta.json)."""
     if root.is_file():
         if path not in ("", "index.html"):
             raise HTTPException(404)
-        return _html_with_shim(root, slug, user, with_banner=with_banner, locked=protected, offline=offline, copy=precache)
+        return root
     target = (root / (path or "index.html")).resolve()
     if root.resolve() not in target.parents and target != root.resolve():
         raise HTTPException(404)
@@ -963,10 +1006,7 @@ def serve_artifact(slug: str, path: str, request: Request, user: str = Depends(r
         target = target / "index.html"
     if not target.is_file() or target.name == "meta.json":
         raise HTTPException(404)
-    if target.suffix.lower() in (".html", ".htm"):
-        return _html_with_shim(target, slug, user, with_banner=with_banner, locked=protected, offline=offline, copy=precache)
-    # a locked app's files must not outlive the unlock in the browser's cache
-    return FileResponse(target, headers={"Cache-Control": "no-store"} if protected else None)
+    return target
 
 
 def _opened(request: Request) -> bool:
@@ -977,6 +1017,9 @@ def _opened(request: Request) -> bool:
         dest = request.headers.get(DEST_HEADER, dest)
     return dest == "document"
 
+
+# What every answer on a public link carries: no search engine, no referrer to the sites guests click on, no cache
+PUBLIC_HEADERS = {"X-Robots-Tag": "noindex, nofollow", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"}
 
 # Apps are used on phones and must never scroll sideways. iOS zooms in on inputs under 16px and
 # stays zoomed (which reads as sideways scroll), and a stray wide element widens the whole page.
@@ -1010,24 +1053,39 @@ def open_link(slug: str, user: str = Depends(require_user)):
     return RedirectResponse(link["url"], status_code=302)
 
 
-def _html_with_shim(path: Path, slug: str, user: str, *, with_banner: bool, locked: bool = False, offline: bool = False,
-                    copy: bool = False) -> HTMLResponse:
+def _html_with_shim(path: Path, slug: str, user: str | None, *, with_banner: bool, locked: bool = False,
+                    offline: bool = False, copy: bool = False, guest: public.Link | None = None) -> HTMLResponse:
     """Serve an artifact page with static/hub.js injected first in <head>, so window.claude.use() exists,
     and the hub banner right after <body> unless the app has it turned off. `locked` marks an app the viewer has
     locked, so hub.js keeps its unlock alive. `offline` marks an app the service worker keeps a copy of, and `copy`
-    the page it fetches to keep (the copy opens without the server)."""
+    the page it fetches to keep (the copy opens without the server). `guest` is the link of a public page: no user,
+    no pull.js, no lock or offline, and a banner with no way out (the owner's e-mail never gets in)."""
     html = path.read_text("utf-8", errors="replace")
     strings = escape(json.dumps(i18n.js("js.hub.")), quote=True)
     found = artifact_root(slug)
     data_shared = bool(found) and shared.is_shared(found[1])
     append = _append_names(found[1]) if found else []
+    if guest:
+        tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + (
+            '<script src="/static/hub.js" data-slug="{}" data-guest="1" data-token="{}" data-share-name="{}" '
+            'data-public-read="{}" data-strings="{}"></script>'
+        ).format(escape(slug), escape(guest.token), escape(guest.name),
+                 escape(",".join(public.public_read(found[1] if found else {}))), strings)
+        app = next((a for a in list_artifacts(guest.owner) if a["slug"] == slug), None) if with_banner else None
+        if app and app["icon_url"]:
+            app["icon_url"] = f"/p/{guest.token}/_icon?v={app['icon_url'].rsplit('=', 1)[-1]}"
+        html = banner.inject(html, tag, banner.render(app, SITE_NAME, guest=True) if app and app["banner"] else None)
+        return HTMLResponse(html, headers={"Cache-Control": "no-store", **PUBLIC_HEADERS})
     tag = NO_SIDEWAYS_CSS + banner.CSS_HOST + '<script src="/static/hub.js" data-slug="{}" data-user="{}" data-admin="{}" data-shared="{}" data-strings="{}"{}></script>'.format(
         escape(slug), escape(user), "1" if is_admin(user) else "0", "1" if data_shared else "0", strings,
         (' data-lock="1"' if locked else "") + (' data-offline="1"' if offline else "") + (' data-copy="1"' if copy else "")
         + (' data-append="{}"'.format(escape(",".join(append))) if append else "")
+        + (' data-public="1" data-public-read="{}"'.format(escape(",".join(public.public_read(found[1]))))
+           if found and public.is_public(found[1]) else "")
     ) + PULL_JS
     app = next((a for a in list_artifacts(user) if a["slug"] == slug), None) if with_banner else None
-    html = banner.inject(html, tag, banner.render(app, SITE_NAME) if app and app["banner"] else None)
+    share_button = bool(app and app["public"])
+    html = banner.inject(html, tag, banner.render(app, SITE_NAME, share=share_button) if app and app["banner"] else None)
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
@@ -2833,9 +2891,13 @@ def serve_icon(slug: str, user: str = Depends(require_user)):
     icon = _icon_file(slug) if meta_path else None
     if not icon or not can_see(_read_meta(meta_path), user):
         raise HTTPException(404)
+    return _icon_response(icon)
+
+
+def _icon_response(icon: Path, headers: dict | None = None) -> FileResponse:
     # an SVG opened directly must not be able to run scripts on this origin
     return FileResponse(icon, media_type=ICON_TYPES[icon.suffix],
-                        headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
+                        headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'", **(headers or {})})
 
 
 @app.get("/favicon.ico", include_in_schema=False)

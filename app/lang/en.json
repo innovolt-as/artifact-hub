@@ -357,6 +357,7 @@
   "settings.theme_dark": "Dark",
   "settings.theme_light": "Light",
   "settings.title": "Settings",
+  "share.button": "Share",
   "stats.active_users": "Active users",
   "stats.app_title.one": "{n} open by {people}",
   "stats.app_title.other": "{n} opens by {people}",

@@ -46,7 +46,7 @@ CSS_HOST = (
 )
 
 _STYLE = """<style>
-a{display:flex;align-items:center;gap:8px;min-width:0;min-height:22px;padding:10px 16px;color:inherit;
+a,.row{display:flex;align-items:center;gap:8px;min-width:0;min-height:22px;padding:10px 16px;color:inherit;
   text-decoration:none;white-space:nowrap;-webkit-tap-highlight-color:transparent}
 a:focus-visible{outline:2px solid #cfe0ff;outline-offset:-4px;border-radius:8px}
 .back{flex:none;font-size:20px;line-height:1;color:#cfe0ff;margin-top:-2px}
@@ -99,15 +99,36 @@ def inject(html: str, head: str, banner: str | None) -> str:
     return html[:at] + banner + _PLACE + html[at:]
 
 
-def render(app: dict, site: str) -> str:
-    """The banner for one app (an entry from list_artifacts), linking to the front page of `site`."""
+# Only for banners with a share button: the link takes the room the button leaves
+_SHARE_STYLE = """<style>
+.bar{display:flex;align-items:center}
+.bar a{flex:1}
+.share{flex:none;display:grid;place-items:center;width:44px;height:44px;margin-right:4px;padding:0;border:0;
+  background:none;color:#cfe0ff;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.share:focus-visible{outline:2px solid #cfe0ff;outline-offset:-4px;border-radius:8px}
+.share svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+</style>"""
+_SHARE_ICON = (
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>'
+)
+
+
+def render(app: dict, site: str, *, guest: bool = False, share: bool = False) -> str:
+    """The banner for one app (an entry from list_artifacts), linking to the front page of `site`. `guest` is the
+    banner of a public page: logo, icon and name, with no link and no back arrow. `share` adds the share button
+    at the right (owner pages of public apps)."""
+    name = f'{_icon(app)}<span class="name">{escape(app.get("title") or "")}</span>'
+    logo = '<img class="hub" src="/static/logo.svg" alt="" width="18" height="18"><span class="sep"></span>'
+    if guest:
+        return (f'<hub-banner><template shadowrootmode="open">{_STYLE}'
+                f'<div class="row">{logo}{name}</div></template></hub-banner>')
     label = escape(i18n.t("banner.back", site=site))
-    return (
-        f'<hub-banner><template shadowrootmode="open">{_STYLE}'
+    link = (
         f'<a href="/" aria-label="{label}" title="{label}">'
-        '<span class="back" aria-hidden="true">‹</span>'
-        '<img class="hub" src="/static/logo.svg" alt="" width="18" height="18">'
-        '<span class="sep"></span>'
-        f'{_icon(app)}<span class="name">{escape(app.get("title") or "")}</span>'
-        "</a></template></hub-banner>"
+        f'<span class="back" aria-hidden="true">‹</span>{logo}{name}</a>'
     )
+    if share:
+        share_label = escape(i18n.t("share.button"))
+        link = (f'{_SHARE_STYLE}<div class="bar">{link}<button class="share" type="button" '
+                f'aria-label="{share_label}" title="{share_label}">{_SHARE_ICON}</button></div>')
+    return f'<hub-banner><template shadowrootmode="open">{_STYLE}{link}</template></hub-banner>'
