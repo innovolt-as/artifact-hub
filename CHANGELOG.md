@@ -43,6 +43,9 @@
   upload.
 - Deleting an app removes its links and guest replies before its files, in one step, so a delete that fails leaves the
   app whole and can be tried again.
+- Writes by logged-in users (an app's `db` and `set_app_data` in Claude) refuse `NaN`, `Infinity` and lone surrogates in
+  strings with *Invalid JSON*, as guest writes do. Such a value used to be stored and break later reads of the document,
+  and a lone surrogate gave a bare error 500.
 
 ## v1.8.0 (2026-11-04)
 

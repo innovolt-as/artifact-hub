@@ -244,3 +244,64 @@ def test_hidden_replies_stay_hidden_after_public_goes_off(hub, user_client, clie
     got = gget(client, tok, "guests/abc", secret=SECRET).json()["data"]
     assert got["t"] == "secret wish" and got["_mine"] is True
     assert gget(client, tok, "guests/abc/notes/n1", secret=SECRET).json()["data"]["t"] == "more"
+
+
+# ---------------------------------------------------------------- second fix wave: values JSON cannot send back
+BAD_VALUES = ('{"t": NaN}', '{"t": Infinity}', '{"t": -Infinity}', '{"t": 1e999}', '{"t": "\\ud800"}',
+              '{"\\udfff": 1}', '{"t": ["ok", {"u": "a\\ud83d"}]}')
+
+
+def raw_put(c, slug, path, raw, **params):
+    return c.put(f"/api/store/{slug}/d", params={"path": path, **params}, content=raw,
+                 headers={"content-type": "application/json"})
+
+
+@pytest.mark.parametrize("shared", [False, True], ids=["personal", "shared"])
+def test_store_refuses_values_it_could_not_send_back(hub, make_page, user_client, client, shared):
+    from app import i18n
+    from tests.test_share_links import share, token_of
+
+    if shared:
+        make_zoned(hub, make_page, public=True)
+    else:
+        make_page("radar")
+    path = f"data/users/{U}/public/main/d" if shared else "notes/d"
+    assert put(user_client, "radar", path, {"t": 1}).status_code == 200
+    for raw in BAD_VALUES:
+        for merge in ("false", "true"):
+            r = raw_put(user_client, "radar", path, raw, merge=merge)
+            assert r.status_code == 400 and r.json()["detail"] == i18n.t("store.bad_json"), raw
+    assert get(user_client, "radar", path) == {"t": 1}
+    assert raw_put(user_client, "radar", path, '{"t": "\\ud83d\\ude00", "n": 1.5e300}').status_code == 200
+    if shared:  # what guests read of the zone still works
+        from tests.test_guest_api import gget
+        tok = token_of(share(user_client, name="main"))
+        assert gget(client, tok, "public/d").json()["data"]["t"] == "\U0001F600"
+
+
+def test_doc_set_refuses_values_it_could_not_send_back(hub, make_page):
+    from app import i18n
+
+    make_zoned(hub, make_page, public=True)
+    path = f"data/users/{U}/public/main/d"
+    hub.doc_set("radar", U, path, {"t": 1})
+    for value in (float("nan"), float("inf"), float("-inf"), "\ud800", ["ok", {"u": "a\ud83d"}]):
+        for merge in (False, True):
+            with pytest.raises(hub.HubError) as e:
+                hub.doc_set("radar", U, path, {"t": value}, merge=merge)
+            assert str(e.value) == i18n.t("store.bad_json")
+    with pytest.raises(hub.HubError):
+        hub.doc_set("radar", U, path, {"\udfff": 1})
+    assert hub.doc_get("radar", U, path) == {"t": 1}
+
+
+def test_deep_documents_still_store_for_logged_in_users(hub, make_page, user_client):
+    make_page("radar")
+    deep = '{"t": ' + "[" * 40 + "]" * 40 + "}"
+    assert raw_put(user_client, "radar", "notes/deep", deep).status_code == 200
+    assert raw_put(user_client, "radar", "notes/deep", deep, merge="true").status_code == 200
+    value: list = []
+    for _ in range(39):
+        value = [value]
+    hub.doc_set("radar", U, "notes/deep2", {"t": value})
+    assert json.dumps(get(user_client, "radar", "notes/deep2")) == deep

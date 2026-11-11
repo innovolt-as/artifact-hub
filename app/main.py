@@ -28,7 +28,7 @@ import threading
 import time
 import zipfile
 from html import escape
-from math import ceil, isfinite
+from math import ceil
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote, unquote
@@ -1236,7 +1236,8 @@ async def store_set(slug: str, path: str, request: Request, merge: bool = False,
         raise HTTPException(413, i18n.t("store.too_big"))
     try:
         data = json.loads(body)
-    except json.JSONDecodeError:
+        check_json(data)
+    except ValueError:
         raise HTTPException(400, i18n.t("store.bad_json")) from None
     if not isinstance(data, dict):
         raise HTTPException(400, i18n.t("store.not_object"))
@@ -1373,6 +1374,12 @@ def _put_doc(con: sqlite3.Connection, slug: str, owner: str, collection: str, do
     )
 
 
+def check_json(value) -> None:
+    """ValueError for a parsed JSON value that cannot be sent back as JSON: NaN or infinity (json.loads takes them)
+    or a lone surrogate in a string. Stored, it would break every later read of the document."""
+    json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")  # UnicodeEncodeError for a surrogate
+
+
 def read_doc(raw: str, guest_zone: bool) -> dict:
     """A stored document as a logged-in reader gets it: in a guest zone (Scope.guest_zone) without the _guest hash.
     Every read of documents for a logged-in user goes through here."""
@@ -1455,6 +1462,10 @@ def doc_set(slug: str, user: str, path: str, data: dict, *, merge: bool = False)
         raise ReadOnly(i18n.t("data.guests_only"))
     if not isinstance(data, dict):
         raise HubError(i18n.t("data.not_object"))
+    try:
+        check_json(data)
+    except ValueError:
+        raise HubError(i18n.t("store.bad_json")) from None
     with db() as con:
         row = con.execute("SELECT data FROM docs WHERE slug=? AND owner=? AND collection=? AND doc_id=?",
                           (slug, owner, col, doc_id)).fetchone()
@@ -2683,9 +2694,9 @@ async def _guest_body(request: Request) -> dict:
         body += chunk
         if len(body) > MAX_GUEST_DOC_BYTES:
             raise _guest_refusal(413, i18n.t("guest.too_big", kb=MAX_GUEST_DOC_BYTES // 1024))
-    try:  # NaN, infinity, deep nesting or a lone surrogate, once stored, would break every later read of the zone
-        data = json.loads(body, parse_constant=_no_constant, parse_float=_finite)
-        json.dumps(data, ensure_ascii=False).encode("utf-8")  # UnicodeEncodeError for a lone surrogate
+    try:  # what check_json refuses, or deep nesting, once stored would break every later read of the zone
+        data = json.loads(body)
+        check_json(data)
     except (ValueError, RecursionError):
         raise _guest_refusal(400, i18n.t("store.bad_json")) from None
     if not isinstance(data, dict):
@@ -2704,17 +2715,6 @@ def _depth(value) -> int:
             deepest = max(deepest, d)
             todo.extend((c, d + 1) for c in (v.values() if isinstance(v, dict) else v))
     return deepest
-
-
-def _no_constant(name: str):
-    raise ValueError(name)
-
-
-def _finite(text: str) -> float:
-    value = float(text)
-    if not isfinite(value):
-        raise ValueError(text)
-    return value
 
 
 @app.get("/api/public/{token}/c")

@@ -521,3 +521,17 @@ def test_delete_in_guest_zone_is_handled_wherever_the_rules_apply(mcp, token, hu
     assert text(call(mcp, token, "delete_app_data", slug="radar", path=path)) == i18n.t("mcp.guest_zone_deleted", path=path)
     path = f"data/users/{ME}/guests"  # the document guests itself is not in the zone
     assert text(call(mcp, token, "delete_app_data", slug="radar", path=path)) == i18n.t("mcp.not_deleted", path=path)
+
+
+def test_set_app_data_refuses_values_json_cannot_send_back(mcp, token, hub):
+    _page(hub, "mat")
+    for value in ("NaN", "Infinity", "-Infinity"):  # a lone surrogate is refused before the tool, as a parse error
+        body = ('{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "set_app_data", "arguments": '
+                '{"slug": "mat", "path": "days/d1", "data": {"t": ' + value + '}}}}')
+        r = mcp.post("/mcp", content=body, headers={"Accept": "application/json, text/event-stream",
+                                                    "Authorization": f"Bearer {token}",
+                                                    "content-type": "application/json"})
+        assert r.status_code == 200, r.text
+        res = r.json()["result"]
+        assert res["isError"] and text(res) == i18n.t("store.bad_json"), value
+    assert hub.doc_get("mat", ME, "days/d1") is None
