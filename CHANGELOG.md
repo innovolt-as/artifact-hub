@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Before you upgrade
+
+- `BASE_URL` must be the address people use. A request that changes something is now refused when the browser says
+  it comes from another site, and the hub knows its own address from `BASE_URL` and the `Host` header. With the Caddy
+  that ships with the hub there is nothing to do.
+- Someone who may no longer log in (removed on the admin page, or taken out of `ALLOWED_EMAILS` or `ALLOWED_DOMAINS`)
+  is logged out at once instead of when their login runs out. Everyone else stays logged in.
+- The hub's own pages can no longer be shown in a frame on another site (apps and public links are as before).
+- An uploaded app can be at most 256 MB (`MAX_UPLOAD_MB`), any other request body 32 MB.
+
+### Security
+
+- With a real domain in `ALLOWED_DOMAINS`, an address field filled with two addresses, the last one in that domain,
+  got a login link sent to both. The domain rule now takes one plain address only. Hubs that use `ALLOWED_EMAILS`,
+  invitations or password login were not affected.
+- A session ends when its person is removed, and a changed or reset password logs the person out on every other
+  device. A login link sent before the person was removed no longer works.
+- Requests that change something must come from the hub's own pages (`Sec-Fetch-Site`, else `Origin`). Before, the
+  admin forms relied on the cookie being `SameSite=Lax`, which does not stop a site on a sibling subdomain. Requests
+  with a bearer token and the connector's endpoints are not affected.
+- An upload from someone who may not upload is refused before the file is read, and request bodies have a size limit.
+- Storage limits: one user's documents in one app may take 25 MB and 20,000 documents (100 MB for an app's shared
+  documents), and the key/value API only stores new values for an app the user can see.
+- Password login: 3 wrong tries for an address from one IP address block further tries from there for 15 minutes.
+  The limit of 10 for an address from anywhere stays, so someone else's wrong guesses lock nobody out sooner than
+  before.
+- Answers carry `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and, on https, `Strict-Transport-Security`.
+- The process that runs card recipes gives up root before it runs any.
+
+### Changed
+
+- The front page opens without waiting for the apps' card lines: it shows the lines from last time and fetches fresh
+  ones right after, redrawing only the cards that changed.
+
 ## v1.9.1 (2026-11-12)
 
 ### Changed

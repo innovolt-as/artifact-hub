@@ -1,6 +1,8 @@
 """The whole connector flow over HTTP through the real SDK routes, so an `mcp` upgrade that breaks the chain fails here."""
 from urllib.parse import parse_qs, urlparse
 
+import pytest
+
 from tests.conftest import CLAUDE_CALLBACK, PKCE_CHALLENGE, PKCE_VERIFIER, make_client
 
 RESOURCE = "https://hub.test/mcp"
@@ -67,3 +69,25 @@ def test_full_flow_register_to_tools_and_refresh():
         again = c.post("/mcp", headers={**MCP_HEADERS, "Authorization": f"Bearer {rf.json()['access_token']}"},
                        json=_rpc("tools/list", id=4))
         assert again.status_code == 200
+
+
+@pytest.mark.parametrize("address", [
+    "attacker@evil.test,x@firma.no", "attacker@evil.test;x@firma.no", "attacker@evil.test, x@firma.no",
+    "<attacker@evil.test>x@firma.no", "evil,x@firma.no", '"a"@firma.no', "x@firma.no\nbcc: a@evil.test", "@firma.no",
+])
+def test_domain_rule_takes_one_address_only(hub, client, monkeypatch, address):
+    # a list of addresses that ends in an allowed domain must not get a login link: the mail would go to all of them
+    monkeypatch.setattr(hub, "ALLOWED_DOMAINS", {"firma.no"})
+    sent = []
+    monkeypatch.setattr(hub, "send_magic_link", lambda email, link: sent.append(email))
+    assert not hub.allowed_by_config(address)
+    assert client.post("/login", data={"email": address}).status_code == 200
+    assert sent == []
+
+
+def test_domain_rule_still_lets_a_plain_address_in(hub, client, monkeypatch):
+    monkeypatch.setattr(hub, "ALLOWED_DOMAINS", {"firma.no"})
+    sent = []
+    monkeypatch.setattr(hub, "send_magic_link", lambda email, link: sent.append(email))
+    client.post("/login", data={"email": "Kari.Nordmann+hub@firma.no"})
+    assert sent == ["kari.nordmann+hub@firma.no"]

@@ -12,6 +12,7 @@ Standalone on purpose: it imports nothing from the app and is started with `pyth
 """
 import contextlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -21,6 +22,7 @@ from py_mini_racer import JSEvalException, JSOOMException, JSPromise, JSPromiseE
 SHIM = Path(__file__).with_name("cards_shim.js").read_text(encoding="utf-8")
 INPUT = ("docs", "cols", "today", "now", "tz", "user")
 CUT = 1000  # characters of a line or an error message passed on; a card shows 140
+NOBODY = 65534  # the uid and gid of "nobody" on Linux
 
 
 def _first_line(e: Exception) -> str:
@@ -62,9 +64,20 @@ def _run(job: dict) -> dict:
         return {"error": "failed", "message": _first_line(e)}
 
 
+def _drop_root() -> None:
+    """In the image the hub runs as root (it owns /data). Recipes need no file and no right at all, so the worker
+    gives root up before it runs any: V8 and the shim are loaded, and stdin and stdout are already open."""
+    if hasattr(os, "getuid") and os.getuid() == 0:
+        with contextlib.suppress(OSError):  # a container that may not change user: as before
+            os.setgroups([])
+            os.setgid(NOBODY)
+            os.setuid(NOBODY)
+
+
 def main() -> None:
     with contextlib.suppress(OSError):  # Linux: under memory pressure the kernel kills this worker, not the server
         Path("/proc/self/oom_score_adj").write_text("1000")
+    _drop_root()
     with MiniRacer() as ctx:  # load V8 now, outside any recipe's time
         ctx.eval(SHIM)
     print(json.dumps({"ready": True}), flush=True)

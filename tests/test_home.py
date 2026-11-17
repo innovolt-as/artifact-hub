@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests.conftest import lock
+
 DAY = 86400
 NOW = 1_800_000_000
 
@@ -587,7 +589,7 @@ def test_failed_recipe_falls_back_only_to_todays_line(hub, user_client):
     assert "fra i dag" in user_client.get("/").text
     with hub.db() as con:
         con.execute("UPDATE docs SET updated_at=? WHERE slug='mat'", (int(time.time()) - 2 * DAY,))
-    assert "fra i dag" not in user_client.get("/").text
+    assert "fra i dag" not in user_client.get("/", headers={"X-Hub-Fresh": "1"}).text
 
 
 def test_fallback_is_todays_in_the_viewers_zone(hub):  # in Oslo (CET) midnight is 23:00 UTC
@@ -709,3 +711,54 @@ def test_drag_js_hooks(client):
     js = client.get("/static/drag.js").text
     for hook in ("#fav", "/api/prefs/pins", "hub:menu", "hub:idle", "hubDrag", "pointerdown", "passive: false", "keepalive"):
         assert hook in js
+
+
+# ---------------------------------------------------------------- the page opens with the lines kept from last time
+FRESH = {"X-Hub-Fresh": "1"}
+
+
+def _recipe_runs(hub, monkeypatch):
+    runs = []
+    real = hub.card_result
+    monkeypatch.setattr(hub, "card_result", lambda *a, **k: runs.append(a[1]) or real(*a, **k))
+    return runs
+
+
+def test_opening_the_page_does_not_wait_for_the_recipes(hub, user_client, monkeypatch):
+    _recipe_page(hub, "mat")
+    _set_tz(hub)
+    _put_doc(hub, "mat", USER, "days", _oslo_today(hub), {"k": 900})
+    runs = _recipe_runs(hub, monkeypatch)
+    first = user_client.get("/").text  # nothing kept yet: worked out as before
+    assert "900 kcal" in first and runs == ["mat"] and '"kept_lines": false' in first
+    with hub.db() as con:
+        con.execute("UPDATE docs SET data=? WHERE slug='mat' AND collection='days'", (json.dumps({"k": 1200}),))
+    opened = user_client.get("/").text
+    assert "900 kcal" in opened and runs == ["mat"] and '"kept_lines": true' in opened
+    fresh = user_client.get("/", headers=FRESH).text  # what home.js fetches right after
+    assert "1200 kcal" in fresh and "900 kcal" not in fresh and runs == ["mat", "mat"]
+    assert "1200 kcal" in user_client.get("/").text and runs == ["mat", "mat"]
+
+
+def test_a_kept_line_is_not_shown_for_a_locked_or_removed_app(hub, user_client):
+    _recipe_page(hub, "mat", "<script data-hub-card>function hubCard() { return 'HEMMELIG'; }</script>")
+    assert "HEMMELIG" in user_client.get("/").text
+    lock(USER, "mat")
+    assert "HEMMELIG" not in user_client.get("/").text
+    assert "HEMMELIG" not in user_client.get("/", headers=FRESH).text
+    with hub.db() as con:
+        assert hub.home.get_card_lines(con, USER) == {}  # and no longer kept
+
+
+def test_delete_my_data_forgets_the_kept_lines(hub, user_client):
+    _recipe_page(hub, "mat", "<script data-hub-card>function hubCard() { return 'linje'; }</script>")
+    user_client.get("/")
+    with hub.db() as con:
+        assert hub.home.get_card_lines(con, USER) == {"mat": "linje"}
+        hub.home.forget_card_lines(con, USER)
+        assert hub.home.get_card_lines(con, USER) is None
+
+
+def test_home_js_asks_for_fresh_lines(hub):
+    js = (hub.BASE_DIR / "static" / "home.js").read_text()
+    assert '"X-Hub-Fresh": "1"' in js and "S.kept_lines" in js

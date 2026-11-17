@@ -42,6 +42,7 @@ def create_tables(con: sqlite3.Connection) -> None:
              value TEXT NOT NULL,
              PRIMARY KEY (email, key))"""
     )
+    con.execute("CREATE TABLE IF NOT EXISTS card_lines(email TEXT PRIMARY KEY, lines TEXT NOT NULL)")
 
 
 # ---------------------------------------------------------------- visits
@@ -448,6 +449,32 @@ def summaries(con: sqlite3.Connection, email: str, slugs: list[str], shared: set
         if text:
             out[r["slug"]] = Summary(text, int(r["at"]))
     return out
+
+
+# ---------------------------------------------------------------- the lines as last worked out
+# Table card_lines: per user, {slug: text} as JSON, what the front page showed them the last time the lines were worked
+# out (main.card_lines). The page opens with these and is refreshed in place right after. Not in prefs: this is no
+# choice of the user's, and opening the page must leave prefs as they are.
+def get_card_lines(con: sqlite3.Connection, email: str) -> dict[str, str] | None:
+    """The kept lines; None when none have been kept yet (or the stored value is not what keep_card_lines stores)."""
+    row = con.execute("SELECT lines FROM card_lines WHERE email=?", (email.lower(),)).fetchone()
+    try:
+        stored = json.loads(row["lines"]) if row else None
+    except ValueError:
+        return None
+    if not isinstance(stored, dict):
+        return None
+    return {slug: text for slug, text in stored.items() if isinstance(text, str)}
+
+
+def keep_card_lines(con: sqlite3.Connection, email: str, lines: dict[str, str]) -> None:
+    if get_card_lines(con, email) != lines:  # most refreshes change nothing: no write
+        con.execute("INSERT INTO card_lines(email, lines) VALUES(?,?) ON CONFLICT(email) DO UPDATE SET lines=excluded.lines",
+                    (email.lower(), json.dumps(lines)))
+
+
+def forget_card_lines(con: sqlite3.Connection, email: str) -> None:
+    con.execute("DELETE FROM card_lines WHERE email=?", (email.lower(),))
 
 
 # ---------------------------------------------------------------- sections

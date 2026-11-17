@@ -84,10 +84,25 @@ def test_rate_limit_per_email(pw_mode, hub, client, monkeypatch):
 
 def test_success_clears_counter(pw_mode, hub, client):
     set_pw("user@test.no", "passord123")
-    for _ in range(hub.MAX_PW_FAILS_PER_EMAIL - 1):
+    for _ in range(hub.MAX_PW_FAILS_PER_EMAIL_IP - 1):
         _login(client, "user@test.no", "feil")
     assert _login(client, "user@test.no", "passord123").status_code == 302
-    assert "e:user@test.no" not in hub._pw_fails
+    assert not [k for k in hub._pw_fails if "user@test.no" in k]
+
+
+def test_three_tries_from_one_place(pw_mode, hub, client):
+    set_pw("user@test.no", "passord123")
+    for _ in range(3):
+        _login(client, "user@test.no", "feil")
+    assert _login(client, "user@test.no", "passord123").status_code == 200  # locked out here
+
+
+def test_wrong_guesses_elsewhere_do_not_lock_you_out(pw_mode, hub, client):
+    set_pw("user@test.no", "passord123")
+    for _ in range(3):
+        hub.pw_fail("user@test.no", "203.0.113.9")
+    assert hub.pw_rate_limited("user@test.no", "203.0.113.9")
+    assert _login(client, "user@test.no", "passord123").status_code == 302
 
 
 def test_default_mode_untouched(hub, client):
@@ -100,6 +115,7 @@ def test_default_mode_untouched(hub, client):
 class _Req:
     def __init__(self, cookies):
         self.cookies = cookies
+        self.scope = {}
 
 
 def test_pending_helper_and_current_user(pw_mode, hub, client):
@@ -146,7 +162,8 @@ def test_reset_lifts_email_lockout(pw_mode, hub, client):
         _login(client, "user@test.no", "feil")
     assert _login(client, "user@test.no", "passord123").status_code == 200  # locked out
     # updated_at has second resolution: age the failures so the reset is clearly after them
-    hub._pw_fails["e:user@test.no"] = [t - 5 for t in hub._pw_fails["e:user@test.no"]]
+    for key in [k for k in hub._pw_fails if "user@test.no" in k]:
+        hub._pw_fails[key] = [t - 5 for t in hub._pw_fails[key]]
     set_pw("user@test.no", "passord123")  # CLI/admin reset bumps updated_at
     assert _login(client, "user@test.no", "passord123").status_code == 302
 
