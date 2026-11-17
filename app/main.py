@@ -40,7 +40,7 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from jinja2 import pass_context
 
-from app import access, applock, banner, cards, home, i18n, loginmail, mail, passwd, public, shared, versions
+from app import access, applock, banner, cards, guard, home, i18n, loginmail, mail, passwd, public, shared, versions
 from app.public import NAME_RE as PUBLIC_NAME_RE
 
 log = logging.getLogger("hub")
@@ -67,6 +67,7 @@ SITE_NAME = os.environ.get("SITE_NAME", "Artifact Hub")
 # Optional branding: files with these names in BRANDING_DIR replace the defaults in app/static/
 BRANDING_DIR = Path(os.environ.get("BRANDING_DIR") or DB_PATH.parent / "branding")
 PRECACHE_HEADER = "x-hub-precache"  # the service worker sends it when it fetches a copy of an app
+FRESH_HEADER = "x-hub-fresh"  # home.js sends it when it fetches the front page to refresh it in place (index)
 DEST_HEADER = "x-hub-dest"  # and this, naming the destination, on a navigation it passes on (Sec-Fetch-Dest says empty)
 BRANDING_FILES = ("logo.svg", "favicon-32.png", "apple-touch-icon.png")
 
@@ -96,17 +97,21 @@ MAX_LINKS_PER_EMAIL = 3           # unexpired links per address (i.e. per MAGIC_
 MAX_LINKS_PER_IP = 10             # per hour
 _ip_sends: dict[str, list[float]] = {}
 PENDING_TTL = 30 * 60             # seconds a "must change password" cookie lives
-MAX_PW_FAILS_PER_EMAIL = 10       # failed password logins per address per 15 minutes
+MAX_PW_FAILS_PER_EMAIL = 10       # failed password logins per address per 15 minutes, from anywhere
+MAX_PW_FAILS_PER_EMAIL_IP = 3     # and per address from one IP: three tries where you sit, while someone else's
+                                  # three wrong guesses do not lock you out
 MAX_PW_FAILS_PER_IP = 30          # failed password logins per IP per hour
 PW_FAIL_WINDOW_EMAIL = 15 * 60
 PW_FAIL_WINDOW_IP = 3600
 _pw_lock = threading.Lock()  # sync routes run in a thread pool; guards _pw_fails
-_pw_fails: dict[str, list[float]] = {}   # keys "e:<email>" and "ip:<ip>"
+_pw_fails: dict[str, list[float]] = {}   # keys "e:<email>", "ei:<email> <ip>" and "ip:<ip>"
 
 ICONS_DIR = ARTIFACTS_DIR / ".icons"  # <slug>.<ext>, uploaded via the admin page
 ICON_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml"}
 MAX_ICON_BYTES = 2 * 1024 * 1024
+MAX_BODY_BYTES = 32 * 1024 * 1024  # any request body (the largest allowed one is a full /api/data batch)
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB") or 256) * 1024 * 1024  # an app uploaded as a file or a zip
 META_KEYS = ("title", "description", "emoji", "admin_only", "access", "people", "banner", "data", "offline", "append",
              "public", "public_read", "guests_hidden", "agent")  # what survives a re-upload
 
@@ -254,6 +259,8 @@ with db() as con:
     public.create_tables(con)
     # Password hashes for LOGIN_MODE=password (app/passwd.py)
     passwd.ensure_table(con)
+    # Sessions cut short: a session cookie carries the number its e-mail had when it was set (end_sessions)
+    con.execute("CREATE TABLE IF NOT EXISTS session_cuts(email TEXT PRIMARY KEY, n INTEGER NOT NULL)")
     # App code lock: codes, locked apps and the attempt limit (app/applock.py)
     applock.create_tables(con)
     if password_mode() and not any(passwd.get(con, e) for e in ADMIN_EMAILS):
@@ -267,10 +274,11 @@ def allowed_by_config(email: str) -> bool:
     email = email.lower()
     if email in ADMIN_EMAILS or email in ALLOWED_EMAILS:
         return True
-    if OPEN_SIGNUP:
-        return bool(EMAIL_RE.match(email))
-    domain = email.rsplit("@", 1)[-1] if "@" in email else ""
-    return domain in ALLOWED_DOMAINS
+    # one address only: "someone@else.example,x@allowed.example" ends in an allowed domain, and a mail server would
+    # send the login link to both
+    if not EMAIL_RE.match(email) or any(c in email for c in ',;:<>()[]"\\'):
+        return False
+    return OPEN_SIGNUP or email.rsplit("@", 1)[-1] in ALLOWED_DOMAINS
 
 
 def email_allowed(email: str) -> bool:
@@ -289,16 +297,42 @@ def can_see(meta: dict, user: str | None) -> bool:
     return access.can_see(meta, user, is_admin(user))
 
 
+def _session_cut(con: sqlite3.Connection, email: str) -> int:
+    row = con.execute("SELECT n FROM session_cuts WHERE email=?", (access.norm(email),)).fetchone()
+    return row["n"] if row else 0
+
+
+def end_sessions(con: sqlite3.Connection, email: str) -> None:
+    """Log `email` out everywhere: every session cookie set before now stops working."""
+    con.execute("INSERT INTO session_cuts(email, n) VALUES(?, 1) ON CONFLICT(email) DO UPDATE SET n=n+1",
+                (access.norm(email),))
+
+
 def current_user(request: Request) -> str | None:
-    raw = request.cookies.get(COOKIE)
+    """The e-mail of the session cookie, if it is still good: signed, not too old, of someone who may still log in
+    (a removed person is out at once, not when the cookie runs out) and not cut short by end_sessions. Worked out
+    once per request."""
+    state = request.scope.setdefault("state", {})
+    if "hub_user" not in state:
+        state["hub_user"] = _cookie_user(request.cookies.get(COOKIE))
+    return state["hub_user"]
+
+
+def _cookie_user(raw: str | None) -> str | None:
     if not raw:
         return None
     try:
         data = signer.loads(raw, max_age=SESSION_TTL)
         if "pw_change" in data:  # pending cookie: not logged in yet
             return None
-        return data["email"]
-    except (BadSignature, KeyError):
+        email = data["email"]
+        with db() as con:
+            if not (allowed_by_config(email) or access.is_invited(con, email)):
+                return None
+            if data.get("n", 0) != _session_cut(con, email):  # a cookie from before the numbers has none: 0
+                return None
+        return email
+    except (BadSignature, KeyError, TypeError, AttributeError):
         return None
 
 
@@ -328,7 +362,9 @@ def _set_cookie(resp, payload: dict, max_age: int) -> None:
 
 
 def set_session(resp, email: str) -> None:
-    _set_cookie(resp, {"email": email}, SESSION_TTL)
+    with db() as con:
+        n = _session_cut(con, email)
+    _set_cookie(resp, {"email": email, **({"n": n} if n else {})}, SESSION_TTL)
 
 
 def set_pending(resp, email: str, pw_at: int) -> None:
@@ -390,7 +426,7 @@ def check_code(user: str, code: str) -> applock.Check:
 
 
 def _pw_window(key: str) -> int:
-    return PW_FAIL_WINDOW_EMAIL if key.startswith("e:") else PW_FAIL_WINDOW_IP
+    return PW_FAIL_WINDOW_IP if key.startswith("ip:") else PW_FAIL_WINDOW_EMAIL
 
 
 def _pw_prune(now: float) -> None:
@@ -411,7 +447,8 @@ def pw_rate_limited(email: str, ip: str, since: int = 0) -> bool:
         _pw_prune(now)
         # updated_at has whole-second resolution; a failure in the same second as a reset still counts
         n_email = sum(1 for t in _pw_fails.get(f"e:{email}", []) if t >= since)
-        return (n_email >= MAX_PW_FAILS_PER_EMAIL
+        n_here = sum(1 for t in _pw_fails.get(f"ei:{email} {ip}", []) if t >= since)
+        return (n_email >= MAX_PW_FAILS_PER_EMAIL or n_here >= MAX_PW_FAILS_PER_EMAIL_IP
                 or len(_pw_fails.get(f"ip:{ip}", [])) >= MAX_PW_FAILS_PER_IP)
 
 
@@ -422,17 +459,21 @@ def pw_fail(email: str, ip: str) -> None:
         if len(_pw_fails) > 10000:  # still too big after pruning: drop the oldest keys
             for k in sorted(_pw_fails, key=lambda k: _pw_fails[k][-1])[:5000]:
                 del _pw_fails[k]
-        for key in (f"e:{email}", f"ip:{ip}"):
+        for key in (f"e:{email}", f"ei:{email} {ip}", f"ip:{ip}"):
             _pw_fails.setdefault(key, []).append(now)
 
 
 def pw_clear(email: str) -> None:
     with _pw_lock:
-        _pw_fails.pop(f"e:{email}", None)
+        for key in [k for k in _pw_fails if k == f"e:{email}" or k.startswith(f"ei:{email} ")]:
+            del _pw_fails[key]
 
 
 def ip_rate_limited(ip: str) -> bool:
     now = time.time()
+    if len(_ip_sends) > 10000:  # addresses that asked long ago
+        for k in [k for k, v in _ip_sends.items() if now - v[-1] >= 3600]:
+            del _ip_sends[k]
     recent = [t for t in _ip_sends.get(ip, []) if now - t < 3600]
     if len(recent) >= MAX_LINKS_PER_IP:
         _ip_sends[ip] = recent
@@ -628,7 +669,7 @@ def login_password(request: Request, email: str, password: str, next: str):
         row = passwd.get(con, email)  # before the rate limit: a reset (new updated_at) lifts the e-mail lockout
     if len(password) > 1024 or pw_rate_limited(email, ip, row["updated_at"] if row else 0):
         if len(password) <= 1024:
-            log.warning("Rate limited password login for %s from %s", email, ip)
+            log.warning("Rate limited password login for %r from %s", email[:200], ip)
         else:
             pw_fail(email, ip)
         return fail()
@@ -637,7 +678,7 @@ def login_password(request: Request, email: str, password: str, next: str):
     ok = ok and row is not None and email_allowed(email)
     if not ok:
         pw_fail(email, ip)
-        log.info("Failed password login for %r from %s", email, ip)
+        log.info("Failed password login for %r from %s", email[:200], ip)
         return fail()
     pw_clear(email)
     if row["must_change"]:
@@ -667,7 +708,7 @@ def login_submit(request: Request, email: str = Form(...), next: str = Form("/")
                 (email, int(time.time())),
             ).fetchone()[0]
         if pending >= MAX_LINKS_PER_EMAIL or ip_rate_limited(ip):
-            log.warning("Rate limited magic link for %s from %s", email, ip)
+            log.warning("Rate limited magic link for %r from %s", email, ip)
             return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email, "minutes": MAGIC_TTL // 60})
         token = secrets.token_urlsafe(32)
         with db() as con:
@@ -683,7 +724,7 @@ def login_submit(request: Request, email: str = Form(...), next: str = Form("/")
         except Exception as e:  # noqa: BLE001
             log.exception("Could not send magic link: %s", e)
     else:
-        log.info("Login attempt from non-allowed email %s", email)
+        log.info("Login attempt from non-allowed email %r", email[:200])
     return templates.TemplateResponse(request, "login.html", {"site": SITE_NAME, "sent": True, "email": email, "minutes": MAGIC_TTL // 60})
 
 
@@ -695,7 +736,7 @@ def auth(token: str, next: str = "/"):
     now = int(time.time())
     with db() as con:
         row = con.execute("SELECT email, expires_at, used FROM magic_tokens WHERE token_hash=?", (h,)).fetchone()
-        if not row or row["used"] or row["expires_at"] < now:
+        if not row or row["used"] or row["expires_at"] < now or not email_allowed(row["email"]):
             raise HTTPException(status_code=400, detail=i18n.t("auth.invalid"))
         con.execute("UPDATE magic_tokens SET used=1 WHERE token_hash=?", (h,))
         con.execute("DELETE FROM magic_tokens WHERE expires_at < ?", (now,))
@@ -791,6 +832,7 @@ def password_submit(request: Request, new1: str = Form(""), new2: str = Form("")
         return _password_form(request, bool(pending), next, error)
     with db() as con:
         passwd.set_password(con, email, new1, must_change=False)
+        end_sessions(con, email)  # every other device is logged out; this one gets a new cookie below
         if pending:
             con.execute("INSERT INTO logins(email, at) VALUES(?,?)", (email, int(time.time())))
     pw_clear(email)
@@ -814,8 +856,18 @@ def index(request: Request, user: str = Depends(require_user)):
         locked = applock.locked_slugs(con, user)
     for a in apps:
         a["code_locked"] = a["slug"] in locked
-    with db() as con:  # a new connection: the recipes read through doc_get/doc_list, which open their own
-        summaries = card_lines(con, user, mine, prefs["tz"])
+    # Opening the page must not wait for every app's recipe: it shows the lines worked out last time, and home.js
+    # then fetches the page again (FRESH_HEADER), which works them out and draws the cards that changed.
+    with db() as con:
+        kept = None if request.headers.get(FRESH_HEADER) == "1" else home.get_card_lines(con, user)
+    if kept is None:
+        with db() as con:  # a new connection: the recipes read through doc_get/doc_list, which open their own
+            summaries = card_lines(con, user, mine, prefs["tz"])
+        with db() as con:
+            home.keep_card_lines(con, user, summaries)
+    else:  # a line kept from before the app was locked or taken off the page is not shown
+        on_page = {a["slug"] for a in mine} - locked
+        summaries = {slug: text for slug, text in kept.items() if slug in on_page}
     favs, groups, rest = home.build_sections(mine, stats, prefs["pins"], user_groups)
     available = home.picker(apps, prefs["apps"], prefs["seen"], user_groups)
     now = time.localtime()  # fallback only; the page rewrites the date and greeting with the viewer's clock
@@ -824,7 +876,7 @@ def index(request: Request, user: str = Depends(require_user)):
         "index.html",
         {"site": SITE_NAME, "user": user, "admin": is_admin(user), "notice": notice, "fav_open": section_open["fav"], "rest_open": section_open["rest"], "favs": favs, "groups": groups, "has_groups": bool(user_groups), "rest": rest,
          "available": available, "any_apps": bool(apps), "has_new": any(a["unseen"] for a in apps), "summaries": summaries, "today": i18n.t("date.today", day=i18n.t_list("date.days")[now.tm_wday], date=now.tm_mday, month=i18n.t_list("date.months")[now.tm_mon - 1]),
-         "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale"), "tz": prefs["tz"] or "",
+         "js_strings": {**i18n.js("js.home."), "locale": i18n.t("locale"), "tz": prefs["tz"] or "", "kept_lines": kept is not None,
                        "offline_apps": [a["slug"] for a in apps if a["offline"] and a["kind"] != "link" and a["slug"] not in locked]}},
     )
 
@@ -1164,6 +1216,9 @@ def lock_submit(slug: str, request: Request, code: str = Form(""), next: str = F
 # ---------------------------------------------------------------- routes: document store (hub.js)
 SEG_RE = re.compile(r"^[^/]{1,200}$")
 MAX_DOC_BYTES = 256 * 1024
+MAX_STORE_BYTES = 25 * 1024 * 1024           # one user's documents in one app, as MAX_BYTES_PER_APP of the data API
+MAX_SHARED_STORE_BYTES = 100 * 1024 * 1024   # the shared documents of an app with shared data
+MAX_STORE_DOCS = 20000                       # documents per user (or shared) in one app
 
 
 def _store_scope(slug: str, user: str, collection: str, *, write: bool = False) -> Scope:
@@ -1358,6 +1413,13 @@ def _put_doc(con: sqlite3.Connection, slug: str, owner: str, collection: str, do
     raw = json.dumps(data, ensure_ascii=False)
     if len(raw.encode("utf-8")) > MAX_DOC_BYTES:
         raise HubError(i18n.t("data.too_big"))
+    # what this owner keeps in the app besides this document (a blob's length is read without its content)
+    n, size = con.execute(
+        """SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(data AS BLOB))), 0) FROM docs
+           WHERE slug=? AND owner=? AND NOT (collection=? AND doc_id=?)""", (slug, owner, collection, doc_id)).fetchone()
+    room = MAX_SHARED_STORE_BYTES if owner == shared.SHARED else MAX_STORE_BYTES
+    if n >= MAX_STORE_DOCS or size + len(raw.encode("utf-8")) > room:
+        raise HubError(i18n.t("store.full"))
     if create_only:
         n = con.execute(
             """INSERT INTO docs(slug, owner, collection, doc_id, data, updated_at) VALUES(?,?,?,?,?,?)
@@ -1541,6 +1603,14 @@ def _check_app_key(app_name: str, key: str | None = None) -> None:
         raise HTTPException(400, i18n.t("store.bad_app"))
     if key is not None and not DATA_KEY_RE.match(key):
         raise HTTPException(400, i18n.t("store.bad_key"))
+
+
+def _require_app(app_name: str, user: str) -> None:
+    """Only an app the user can see takes new values: a name nobody has would be storage without end, 25 MB at a
+    time. What is stored under an app that is gone can still be read and deleted."""
+    found = artifact_root(app_name)
+    if not (found and can_see(found[1], user)):
+        raise HTTPException(404, i18n.t("store.not_found"))
 
 
 def _require_json(request: Request) -> None:
@@ -1854,6 +1924,7 @@ async def delete_my_data(request: Request, user: str = Depends(api_user)):
         docs = con.execute("DELETE FROM docs WHERE owner=?", (email,)).rowcount
         keys = con.execute("DELETE FROM app_data WHERE lower(email)=?", (email,)).rowcount
         con.execute("DELETE FROM claude_writes WHERE email=?", (email,))
+        home.forget_card_lines(con, email)  # worked out from the data that is now gone
         public.delete_owner(con, email)
         # who added a shared document is personal data too; the document itself is shared content and stays
         con.execute("UPDATE docs SET data=json_remove(data, '$._added_by') WHERE owner=? AND json_extract(data, '$._added_by')=?",
@@ -1886,6 +1957,8 @@ async def data_batch(app_name: str, request: Request, user: str = Depends(data_u
     for k in list(to_set) + to_del:
         _check_app_key(app_name, k)
     encoded = {k: _encode_value(v) for k, v in to_set.items()}
+    if encoded:
+        _require_app(app_name, user)
     now = int(time.time())
     with db() as con:  # one transaction: all or nothing
         _check_quota(con, user, app_name, encoded, set(to_del))
@@ -1916,6 +1989,7 @@ async def data_put(app_name: str, key: str, request: Request, user: str = Depend
     if not isinstance(body, dict) or "value" not in body:
         raise HTTPException(400, 'Send {"value": ...}')
     raw = _encode_value(body["value"])
+    _require_app(app_name, user)
     now = int(time.time())
     with db() as con:
         _check_quota(con, user, app_name, {key: raw})
@@ -2982,6 +3056,8 @@ def remove_person(email: str) -> list[str]:
     with db() as con:
         access.uninvite(con, email)
         public.delete_owner(con, email)
+        end_sessions(con, email)  # also when the server config still lets the address in
+        con.execute("DELETE FROM magic_tokens WHERE email=?", (email,))
     removed = []
     for slug in _all_slugs():
         meta_path = _meta_path(slug)
@@ -3042,6 +3118,7 @@ async def people_password(request: Request, user: str = Depends(require_admin)):
         raise HTTPException(404, i18n.t("err.not_invited"))
     with db() as con:
         passwd.set_password(con, email, pw, must_change=True)
+        end_sessions(con, email)  # whoever was logged in with the old password is out
     return {"ok": True, "email": email}
 
 
@@ -3205,6 +3282,22 @@ app.include_router(oauth.router)
 
 # ---------------------------------------------------------------- Claude connector (MCP)
 from app import connector  # noqa: E402
+
+
+def _refuse_upload(scope) -> tuple[int, list] | None:
+    """For guard.Guard: answer an upload from someone who may not upload before its body is read (FastAPI reads the
+    whole form, file included, before the route runs). The same answer the route would give."""
+    if scope["path"] != "/api/upload":
+        return None
+    try:
+        _upload_authorized(Request(scope))
+    except HTTPException as e:
+        return e.status_code, [(k.lower().encode(), v.encode()) for k, v in (e.headers or {}).items()]
+    return None
+
+
+app.add_middleware(guard.Guard, base_url=BASE_URL, max_body=MAX_BODY_BYTES, max_upload=MAX_UPLOAD_BYTES,
+                   uploads=("/api/upload",), early=_refuse_upload)
 
 connector_app = connector.Connector()
 app.router.lifespan_context = connector_app.lifespan  # runs the MCP session manager

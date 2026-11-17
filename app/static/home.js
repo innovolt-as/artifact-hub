@@ -229,7 +229,9 @@
     const timer = ctl && setTimeout(() => ctl.abort(), 10000);
     let doc;
     try {
-      const r = await fetch("/", { credentials: "same-origin", cache: "no-store", signal: ctl?.signal });
+      // X-Hub-Fresh: the card lines are worked out now, not the ones kept from last time (index in app/main.py)
+      const r = await fetch("/", { credentials: "same-origin", cache: "no-store", signal: ctl?.signal,
+        headers: { "X-Hub-Fresh": "1" } });
       if (r.status >= 500) goOffline(); // the server is down: as offline, like the service worker
       if (r.status !== 200) return false;
       doc = new DOMParser().parseFromString(await r.text(), "text/html");
@@ -273,6 +275,9 @@
   }
   document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
   addEventListener("pageshow", (e) => { if (e.persisted || offline()) check(); });
+  // The page opened with the card lines kept from last time, so it did not wait for them: fetch the fresh ones now and
+  // draw the cards that changed, without the blink of a change made elsewhere
+  if (S.kept_lines && !offline()) refresh({ quiet: true });
 
   // ------------------------------------------------------------ the stored front page (layout C)
   // The service worker answers with its copy of this page and sets data-hub-offline on <html>; an open page that loses

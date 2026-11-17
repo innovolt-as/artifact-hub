@@ -106,10 +106,11 @@ Set `LOGIN_MODE=password` to log in with e-mail and password instead. No SMTP is
 2. Invite people on the admin page with a temporary password and pass it on yourself. They choose their own
    password the first time they log in.
 
-Passwords need at least 10 characters. After 10 wrong passwords for an address within 15 minutes, or 30 from one IP
-address within an hour, further attempts are refused. Setting a new password for someone lifts their block, and
-`docker compose restart hub` clears all of them. Changing a password does not log out other devices. In password
-mode `ALLOWED_DOMAINS=*` has no effect: only people with a password can log in.
+Passwords need at least 10 characters. After 3 wrong passwords for an address from one IP address within 15 minutes,
+10 for the address from anywhere, or 30 from one IP address within an hour, further attempts are refused. Setting a
+new password for someone lifts their block, and `docker compose restart hub` clears all of them. Changing a password,
+or setting a new one for someone, logs that person out on every other device. In password mode `ALLOWED_DOMAINS=*`
+has no effect: only people with a password can log in.
 
 ## Publishing apps
 

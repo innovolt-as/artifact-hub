@@ -43,7 +43,7 @@ def _clean():
     with main.db() as con:
         for table in ("magic_tokens", "logins", "docs", "app_data",
                       "oauth_clients", "oauth_requests", "oauth_codes", "oauth_tokens", "visits", "prefs", "invites", "passwords",
-                      "claude_writes", "app_codes", "app_locks", "public_links"):
+                      "claude_writes", "app_codes", "app_locks", "public_links", "session_cuts", "card_lines"):
             con.execute(f"DELETE FROM {table}")
     main._ip_sends.clear()
     public._guest_writes.clear()
@@ -59,6 +59,9 @@ def make_client(email: str | None = None) -> TestClient:
     """A TestClient (https, so the secure cookie is sent), logged in as `email` if given."""
     c = TestClient(main.app, base_url="https://hub.test", follow_redirects=False)
     if email:
+        if not main.allowed_by_config(email):  # a session only counts for someone who may log in
+            with main.db() as con:
+                main.access.invite(con, email)
         c.cookies.set(main.COOKIE, main.signer.dumps({"email": email}))
     return c
 
